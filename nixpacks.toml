@@ -33,6 +33,9 @@ chown -R www-data:www-data /app/storage
 chown -R www-data:www-data /app/bootstrap/cache
 chmod 666 /app/storage/logs/laravel.log
 
+# Mark app as installed (for rachidlaasri/laravel-installer)
+touch /app/storage/installed
+
 # Transform nginx config
 node /assets/scripts/prestart.mjs /assets/nginx.template.conf /etc/nginx.conf
 
