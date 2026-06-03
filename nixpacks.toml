@@ -23,6 +23,11 @@ aptPkgs = [
   "unixodbc-dev",
 ]
 
+[phases.install]
+cmds = [
+  "composer install --no-dev --optimize-autoloader --no-scripts"
+]
+
 [phases.build]
 cmds = [
   "cp .env.example .env || true",
@@ -38,7 +43,6 @@ cmds = [
 
   "echo 'VIEW_COMPILED_PATH=/app/storage/framework/views' >> .env",
 
-  "composer install --no-dev --optimize-autoloader --no-scripts",
 
   "php artisan package:discover --ansi || true",
 
