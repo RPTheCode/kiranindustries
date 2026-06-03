@@ -19,6 +19,8 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->encryptCookies(except: ['appearance']);
 
+        $middleware->trustProxies(at: '*');
+
         $middleware->web(append: [
             CheckInstallation::class,
             HandleAppearance::class,

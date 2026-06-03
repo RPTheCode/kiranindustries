@@ -8,6 +8,7 @@ use App\Observers\UserObserver;
 use App\Observers\PlanObserver;
 use App\Providers\AssetServiceProvider;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Facades\URL;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -27,6 +28,11 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Force HTTPS in non-local environments (staging/production behind reverse proxy)
+        if (!$this->app->environment('local')) {
+            URL::forceScheme('https');
+        }
+
         // Register the UserObserver
         User::observe(UserObserver::class);
         
