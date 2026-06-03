@@ -25,22 +25,20 @@ aptPkgs = [
 
 [phases.build]
 cmds = [
-  "mkdir -p /etc/supervisor/conf.d/",
-  "cp /assets/worker-*.conf /etc/supervisor/conf.d/",
-  "cp /assets/supervisord.conf /etc/supervisord.conf",
-  "chmod +x /assets/start.sh",
-  "chmod +x /assets/configure-essl-odbc.sh",
-  "mkdir -p /assets/scripts",
-  # Microsoft ODBC Driver 18 for SQL Server (ESSL biometric DB)
-  "curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg",
-  "curl -fsSL https://packages.microsoft.com/config/debian/12/prod.list -o /etc/apt/sources.list.d/mssql-release.list",
-  "apt-get update -qq",
-  "ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::='--force-confdef' msodbcsql18",
-    "composer install --no-dev --optimize-autoloader",
-  "npm ci",
-  "npm run build",
-  "mkdir -p storage/framework/{sessions,views,cache} storage/logs bootstrap/cache",
+  "cp .env.example .env || true",
+
+  "mkdir -p storage/framework/sessions",
+  "mkdir -p storage/framework/views",
+  "mkdir -p storage/framework/cache",
+  "mkdir -p storage/logs",
+  "mkdir -p bootstrap/cache",
+
   "chmod -R ug+rwx storage bootstrap/cache",
+
+  "composer install --no-dev --optimize-autoloader",
+
+  "npm ci",
+  "npm run build"
 ]
 
 [start]
