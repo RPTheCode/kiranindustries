@@ -1,0 +1,24 @@
+/* Inertia / NProgress top loading bar — fast, minimal, brand-colored */
+#nprogress {
+    pointer-events: none;
+    z-index: 99999;
+}
+
+#nprogress .bar {
+    background: linear-gradient(
+        90deg,
+        #1e2978 0%,
+        color-mix(in srgb, #1e2978 70%, #3b82f6) 100%
+    ) !important;
+    height: 2px !important;
+    box-shadow: 0 0 8px color-mix(in srgb, #1e2978 35%, transparent);
+}
+
+/* Remove slow-moving glare at the end */
+#nprogress .peg {
+    display: none !important;
+}
+
+#nprogress .spinner {
+    display: none !important;
+}

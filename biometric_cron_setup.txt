@@ -1,0 +1,24 @@
+--- BIOMETRIC SYNC AUTOMATION SETUP ---
+
+1. COMMAND TO RUN MANUALLY:
+   php artisan biometric:sync-all
+
+2. LOG FILE LOCATION:
+   c:\xampp\htdocs\kiran\storage\logs\biometric_sync.log
+
+3. LARAVEL SCHEDULE CODE (Already added to app/Console/Kernel.php):
+   $schedule->command('biometric:sync-all')
+            ->everyThirtyMinutes()
+            ->appendOutputTo(storage_path('logs/biometric_sync.log'));
+
+4. WINDOWS TASK SCHEDULER SETUP (CRON JOB):
+   To automate this on Windows (XAMPP), create a task in "Task Scheduler":
+   
+   - Action: Start a Program
+   - Program/script: php
+   - Arguments: artisan schedule:run
+   - Start in: c:\xampp\htdocs\kiran
+   - Trigger: Daily -> Repeat every 1 minute (or 30 minutes) indefinitely.
+
+5. ALTERNATIVE: CRONTAB (Linux/Ubuntu):
+   * * * * * cd c:\xampp\htdocs\kiran && php artisan schedule:run >> /dev/null 2>&1
