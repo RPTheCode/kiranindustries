@@ -65,7 +65,7 @@ chown -R www-data:www-data /app/storage /app/bootstrap/cache
 chmod -R 775 /app/storage /app/bootstrap/cache
 
 # ESSL ODBC: register [essl] DSN + ODBC Driver 18 (uses ESSL_DB_* from environment)
-/assets/configure-essl-odbc.sh
+bash /assets/configure-essl-odbc.sh
 
 # Nginx config from template (PORT from platform)
 node /assets/scripts/prestart.mjs /assets/nginx.template.conf /etc/nginx.conf
