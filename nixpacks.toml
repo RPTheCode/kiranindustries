@@ -47,7 +47,9 @@ cmds = [
   "php artisan package:discover --ansi || true",
 
   "npm ci",
-  "npm run build"
+  "npm run build",
+
+  "bash -lc 'set -e; OS_ID=$(grep -E \"^ID=\" /etc/os-release | cut -d= -f2 | tr -d \"\\\"\" ); OS_CODENAME=$(grep -E \"^VERSION_CODENAME=\" /etc/os-release | cut -d= -f2 | tr -d \"\\\"\" ); if [ \"$OS_ID\" = \"debian\" ]; then DISTRO=debian; elif [ \"$OS_ID\" = \"ubuntu\" ]; then DISTRO=ubuntu; else DISTRO=ubuntu; fi; if [ -z \"$OS_CODENAME\" ]; then OS_CODENAME=jammy; fi; curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /usr/share/keyrings/microsoft.gpg; echo \"deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/${DISTRO}/${OS_CODENAME}/prod ${OS_CODENAME} main\" > /etc/apt/sources.list.d/microsoft-prod.list; apt-get update; ACCEPT_EULA=Y apt-get install -y msodbcsql18'
 ]
 
 [start]
