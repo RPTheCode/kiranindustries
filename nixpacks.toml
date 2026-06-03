@@ -12,6 +12,7 @@ nixPkgs = [
   "python311Packages.supervisor",
   "unixODBC",
   "php83Extensions.pdo_odbc",
+  "php83Packages.composer"
 ]
 aptPkgs = [
   "curl",
@@ -35,6 +36,7 @@ cmds = [
   "curl -fsSL https://packages.microsoft.com/config/debian/12/prod.list -o /etc/apt/sources.list.d/mssql-release.list",
   "apt-get update -qq",
   "ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::='--force-confdef' msodbcsql18",
+    "composer install --no-dev --optimize-autoloader",
   "npm ci",
   "npm run build",
   "mkdir -p storage/framework/{sessions,views,cache} storage/logs bootstrap/cache",
