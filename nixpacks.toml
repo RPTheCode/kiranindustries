@@ -9,7 +9,7 @@ cmds = [
     "curl -fsSL https://packages.microsoft.com/config/ubuntu/24.04/prod.list -o /etc/apt/sources.list.d/mssql-release.list",
     "apt-get update -qq",
     "ACCEPT_EULA=Y apt-get install -y msodbcsql18",
-    "pecl install sqlsrv pdo_sqlsrv",
+    "pecl install sqlsrv-5.12.0 pdo_sqlsrv-5.12.0",
     "PHP_INI=$(php --ini | grep 'Loaded Configuration' | awk '{print $NF}') && echo 'extension=sqlsrv.so' >> $PHP_INI && echo 'extension=pdo_sqlsrv.so' >> $PHP_INI"
 ]
 
