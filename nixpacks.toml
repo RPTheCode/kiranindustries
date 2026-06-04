@@ -6,7 +6,8 @@ nixPkgs = [
     "phpPackages.composer",
     "nodejs_22",
     "npm-9_x",
-    "python311Packages.supervisor"
+    "python311Packages.supervisor",
+    "patchelf"
 ]
 # Cleaned up compilation tools (autoconf, make, php-dev removed)
 aptPkgs = ["unixodbc", "unixodbc-dev", "unixodbc-common", "libodbcinst2", "curl", "gnupg2", "wget", "libgssapi-krb5-2", "libkrb5-3", "libssl-dev", "libcurl4"]
@@ -17,7 +18,9 @@ cmds = [
     "curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg",
     "curl -fsSL \"https://packages.microsoft.com/config/$(. /etc/os-release && echo $ID)/$(. /etc/os-release && echo $VERSION_ID)/prod.list\" -o /etc/apt/sources.list.d/mssql-release.list",
     "apt-get update -qq",
-    "ACCEPT_EULA=Y apt-get install -y msodbcsql17 msodbcsql18"
+    "ACCEPT_EULA=Y apt-get install -y msodbcsql17 msodbcsql18",
+    "patchelf --set-rpath /lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu /opt/microsoft/msodbcsql17/lib64/libmsodbcsql-17.*.so* || true",
+    "patchelf --set-rpath /lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu /opt/microsoft/msodbcsql18/lib64/libmsodbcsql-18.*.so* || true"
 ]
 
 [phases.build]
@@ -103,7 +106,7 @@ stderr_logfile=/var/log/worker-nginx.log
 "worker-phpfpm.conf" = '''
 [program:worker-phpfpm]
 process_name=%(program_name)s_%(process_num)02d
-command=bash -c 'export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu" && exec php-fpm -y /assets/php-fpm.conf -F'
+command=php-fpm -y /assets/php-fpm.conf -F
 autostart=true
 autorestart=true
 stdout_logfile=/var/log/worker-phpfpm.log
@@ -113,7 +116,7 @@ stderr_logfile=/var/log/worker-phpfpm.log
 "worker-laravel.conf" = '''
 [program:worker-laravel]
 process_name=%(program_name)s_%(process_num)02d
-command=bash -c 'export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu" && exec php /app/artisan queue:work --sleep=3 --tries=3 --max-time=3600'
+command=bash -c 'exec php /app/artisan queue:work --sleep=3 --tries=3 --max-time=3600'
 autostart=true
 autorestart=true
 stopasgroup=true
