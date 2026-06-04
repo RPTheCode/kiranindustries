@@ -19,8 +19,8 @@ cmds = [
     "curl -fsSL \"https://packages.microsoft.com/config/$(. /etc/os-release && echo $ID)/$(. /etc/os-release && echo $VERSION_ID)/prod.list\" -o /etc/apt/sources.list.d/mssql-release.list",
     "apt-get update -qq",
     "ACCEPT_EULA=Y apt-get install -y msodbcsql17 msodbcsql18",
-    "patchelf --set-rpath /lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu /opt/microsoft/msodbcsql17/lib64/libmsodbcsql-17.*.so* || true",
-    "patchelf --set-rpath /lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu /opt/microsoft/msodbcsql18/lib64/libmsodbcsql-18.*.so* || true"
+    "UNIXODBC_LIB=$(find /nix/store -name 'libodbcinst.so.2' | head -n 1 | xargs dirname); patchelf --set-rpath \"$UNIXODBC_LIB:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu\" /opt/microsoft/msodbcsql17/lib64/libmsodbcsql-17.*.so* || true",
+    "UNIXODBC_LIB=$(find /nix/store -name 'libodbcinst.so.2' | head -n 1 | xargs dirname); patchelf --set-rpath \"$UNIXODBC_LIB:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu\" /opt/microsoft/msodbcsql18/lib64/libmsodbcsql-18.*.so* || true"
 ]
 
 [phases.build]
