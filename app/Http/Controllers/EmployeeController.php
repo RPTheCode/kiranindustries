@@ -90,9 +90,10 @@ class EmployeeController extends Controller
             });
         }
 
-        // Handle status filter
-        if ($request->has('status') && !empty($request->status) && $request->status !== 'all') {
-            $query->where('status', $request->status);
+        // Handle status filter (default: active; pass status=all to show every status)
+        $statusFilter = $request->input('status', 'active');
+        if ($statusFilter !== 'all' && $statusFilter !== '') {
+            $query->where('status', $statusFilter);
         }
 
         // Handle employment type filter
@@ -109,7 +110,12 @@ class EmployeeController extends Controller
             });
         }
 
-        // Handle skill filter
+        if ($request->filled('shift_id') && $request->shift_id !== 'all') {
+            $query->whereHas('employee', function ($q) use ($request) {
+                $q->where('shift_id', $request->shift_id);
+            });
+        }
+
         // Handle skill filter
         if ($request->has('skill') && !empty($request->skill) && $request->skill !== 'all') {
             $skillId = $request->skill;
@@ -196,7 +202,10 @@ class EmployeeController extends Controller
             : [];
 
 
-        $filters = $request->all(['search', 'branch', 'department', 'designation', 'status', 'skill', 'employment_type', 'category', 'sort_field', 'sort_direction', 'per_page']);
+        $filters = $request->all(['search', 'branch', 'department', 'designation', 'status', 'shift_id', 'skill', 'employment_type', 'category', 'sort_field', 'sort_direction', 'per_page']);
+        if (! isset($filters['status']) || $filters['status'] === null || $filters['status'] === '') {
+            $filters['status'] = 'active';
+        }
         if (!isset($filters['branch'])) {
             $filters['branch'] = $branchId ? (string) $branchId : 'all';
         }

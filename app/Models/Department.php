@@ -15,8 +15,13 @@ class Department extends BaseModel
         'short_code',
         'branch_id',
         'description',
+        'sanction_strength',
         'status',
         'created_by'
+    ];
+
+    protected $casts = [
+        'sanction_strength' => 'integer',
     ];
 
     /**

@@ -38,7 +38,7 @@ export interface TableAction {
   requiredPermission?: string;
   condition?: (row: any) => boolean;
   isDisabled?: (row: any) => boolean;
-  disabledTitle?: string;
+  disabledTitle?: string | ((row: any) => string);
   className?: string;
 }
 

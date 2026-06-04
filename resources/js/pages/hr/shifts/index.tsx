@@ -1,8 +1,8 @@
 // pages/hr/shifts/index.tsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { PageTemplate } from '@/components/page-template';
 import { usePage, router } from '@inertiajs/react';
-import { Plus, FileText, Copy, Building } from 'lucide-react';
+import { Plus, FileText, Copy, Users } from 'lucide-react';
 import { hasPermission } from '@/utils/authorization';
 import { CrudTable } from '@/components/CrudTable';
 import { CrudFormModal } from '@/components/CrudFormModal';
@@ -115,19 +115,102 @@ const getDutyThresholdHours = (slot: any, dutyValue: number) => {
   return Math.round(calcShiftDurationMinutes(slot.start_time, slot.end_time) * factor * 10) / 10;
 };
 
-const formatDutyHours = (hours: number) => {
-  if (Number.isInteger(hours)) return `${hours}h`;
-  return `${hours.toFixed(1)}h`;
+const formatDutyHoursLabel = (hours: number) => {
+  const value = Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
+  return `${value} hrs`;
+};
+
+const renderAttendanceDutyCell = (
+  record: any,
+  labels: { title: string; halfDay: string; fullDay: string; slotLabel: string }
+) => {
+  const slots = record.slots || [];
+  if (!slots.length) return null;
+
+  const renderSlotBlock = (slot: any, showSlotName: boolean) => (
+    <div
+      className="inline-block rounded-md border border-slate-200 bg-slate-50/90 px-2 py-1 text-left"
+      title={labels.title}
+    >
+      {showSlotName && (
+        <p className="text-[9px] font-bold uppercase tracking-wide text-slate-500 mb-0.5 truncate max-w-[8.5rem]">
+          {slot.slot_name || labels.slotLabel}
+        </p>
+      )}
+      <div className="flex items-center justify-between gap-2 text-[11px] leading-tight">
+        <span className="font-medium text-orange-700 shrink-0">{labels.halfDay}</span>
+        <span className="font-bold tabular-nums text-slate-900">
+          {formatDutyHoursLabel(getDutyThresholdHours(slot, 0.5))}
+        </span>
+      </div>
+      <div className="mt-0.5 flex items-center justify-between gap-2 border-t border-slate-200/80 pt-0.5 text-[11px] leading-tight">
+        <span className="font-medium text-emerald-700 shrink-0">{labels.fullDay}</span>
+        <span className="font-bold tabular-nums text-slate-900">
+          {formatDutyHoursLabel(getDutyThresholdHours(slot, 1.0))}
+        </span>
+      </div>
+    </div>
+  );
+
+  if (!record.is_multi || slots.length === 1) {
+    return <div className="flex justify-center">{renderSlotBlock(slots[0], false)}</div>;
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-1">
+      {slots.map((slot: any, index: number) => (
+        <div key={slot.id ?? index}>{renderSlotBlock(slot, true)}</div>
+      ))}
+    </div>
+  );
+};
+
+const formatCompactSchedule = (record: any, formatTime: (time?: string) => string, formatDuration: (start?: string, end?: string) => string) => {
+  const slots = record.slots || [];
+  if (!slots.length) {
+    return null;
+  }
+
+  if (!record.is_multi || slots.length === 1) {
+    const slot = slots[0];
+    return (
+      <span className="text-[11px] font-mono text-slate-700 whitespace-nowrap">
+        {formatTime(slot.start_time)}–{formatTime(slot.end_time)}
+        <span className="text-slate-400 font-sans ml-1">({formatDuration(slot.start_time, slot.end_time)})</span>
+      </span>
+    );
+  }
+
+  return (
+    <div className="space-y-0.5 text-[11px] font-mono text-slate-700">
+      {slots.map((slot: any, index: number) => (
+        <div key={slot.id ?? index} className="whitespace-nowrap leading-tight">
+          <span className="font-bold text-slate-500">{slot.slot_name?.[0] || 'S'} </span>
+          {formatTime(slot.start_time)}–{formatTime(slot.end_time)}
+          <span className="text-slate-400 font-sans ml-1">({formatDuration(slot.start_time, slot.end_time)})</span>
+        </div>
+      ))}
+    </div>
+  );
 };
 
 export default function Shifts() {
   const { t } = useTranslation();
-  const { auth, shifts, branches = [], filters: pageFilters = {} } = usePage().props as any;
+  const { auth, shifts, branches = [], stats = {}, activeBranchId, filters: pageFilters = {} } = usePage().props as any;
   const permissions = auth?.permissions || [];
+  const sessionActiveBranchId = activeBranchId ?? auth?.active_branch_id ?? null;
+  const defaultStatus = 'active';
+
+  const branchFilterFromUrl = pageFilters.branch_id
+    ? String(pageFilters.branch_id)
+    : sessionActiveBranchId
+      ? String(sessionActiveBranchId)
+      : 'all';
 
   // State
   const [searchTerm, setSearchTerm] = useState(pageFilters.search || '');
-  const [selectedStatus, setSelectedStatus] = useState(pageFilters.status || 'all');
+  const [selectedBranch, setSelectedBranch] = useState(branchFilterFromUrl);
+  const [selectedStatus, setSelectedStatus] = useState(pageFilters.status ?? defaultStatus);
   const [selectedShiftType, setSelectedShiftType] = useState(pageFilters.shift_type || 'all');
   const [showFilters, setShowFilters] = useState(false);
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
@@ -140,45 +223,79 @@ export default function Shifts() {
   const [isBulkCopy, setIsBulkCopy] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
 
-  // Check if any filters are active
-  const hasActiveFilters = () => {
-    return searchTerm !== '' || selectedStatus !== 'all' || selectedShiftType !== 'all';
-  };
+  useEffect(() => {
+    setSelectedBranch(branchFilterFromUrl);
+    if (pageFilters.status) {
+      setSelectedStatus(pageFilters.status);
+    }
+    if (pageFilters.shift_type) {
+      setSelectedShiftType(pageFilters.shift_type);
+    }
+  }, [pageFilters.branch_id, pageFilters.status, pageFilters.shift_type]);
 
-  // Count active filters
-  const activeFilterCount = () => {
-    return (searchTerm ? 1 : 0) + (selectedStatus !== 'all' ? 1 : 0) + (selectedShiftType !== 'all' ? 1 : 0);
-  };
+  const listQueryParams = (extra: Record<string, unknown> = {}) => ({
+    page: 1,
+    search: searchTerm || undefined,
+    branch_id: selectedBranch,
+    status: selectedStatus,
+    shift_type: selectedShiftType !== 'all' ? selectedShiftType : undefined,
+    per_page: pageFilters.per_page,
+    sort_field: pageFilters.sort_field,
+    sort_direction: pageFilters.sort_direction,
+    ...extra,
+  });
+
+  const filteredBranchName =
+    selectedBranch !== 'all' ? branches.find((b: any) => String(b.id) === selectedBranch)?.name : null;
+
+  const activeBranchName = sessionActiveBranchId
+    ? branches.find((b: any) => String(b.id) === String(sessionActiveBranchId))?.name
+    : null;
+
+  const isViewingOtherBranch =
+    selectedBranch !== 'all' &&
+    sessionActiveBranchId &&
+    String(selectedBranch) !== String(sessionActiveBranchId);
+
+  const showBranchColumn =
+    !sessionActiveBranchId || selectedBranch === 'all' || String(selectedBranch) !== String(sessionActiveBranchId);
+
+  const hasActiveFilters = () =>
+    searchTerm !== '' ||
+    selectedStatus !== defaultStatus ||
+    selectedShiftType !== 'all' ||
+    selectedBranch !== (sessionActiveBranchId ? String(sessionActiveBranchId) : 'all');
+
+  const activeFilterCount = () =>
+    (searchTerm ? 1 : 0) +
+    (selectedStatus !== defaultStatus ? 1 : 0) +
+    (selectedShiftType !== 'all' ? 1 : 0) +
+    (selectedBranch !== (sessionActiveBranchId ? String(sessionActiveBranchId) : 'all') ? 1 : 0);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     applyFilters();
   };
 
-  const applyFilters = () => {
-    router.get(route('hr.shifts.index'), {
-      page: 1,
-      search: searchTerm || undefined,
-      status: selectedStatus !== 'all' ? selectedStatus : undefined,
-      shift_type: selectedShiftType !== 'all' ? selectedShiftType : undefined,
+  const handleSearchClear = () => {
+    setSearchTerm('');
+    router.get(route('hr.shifts.index'), listQueryParams({ search: undefined }), {
+      preserveState: true,
+      preserveScroll: true,
+    });
+  };
 
-      per_page: pageFilters.per_page
-    }, { preserveState: true, preserveScroll: true });
+  const applyFilters = () => {
+    router.get(route('hr.shifts.index'), listQueryParams(), { preserveState: true, preserveScroll: true });
   };
 
   const handleSort = (field: string) => {
     const direction = pageFilters.sort_field === field && pageFilters.sort_direction === 'asc' ? 'desc' : 'asc';
-
-    router.get(route('hr.shifts.index'), {
-      sort_field: field,
-      sort_direction: direction,
-
-      search: searchTerm || undefined,
-      status: selectedStatus !== 'all' ? selectedStatus : undefined,
-      shift_type: selectedShiftType !== 'all' ? selectedShiftType : undefined,
-
-      per_page: pageFilters.per_page
-    }, { preserveState: true, preserveScroll: true });
+    router.get(
+      route('hr.shifts.index'),
+      listQueryParams({ sort_field: field, sort_direction: direction }),
+      { preserveState: true, preserveScroll: true }
+    );
   };
 
   const handleAction = (action: string, item: any) => {
@@ -201,6 +318,13 @@ export default function Shifts() {
         setIsFormModalOpen(true);
         break;
       case 'delete':
+        if (!item.can_delete) {
+          toast.error(
+            item.delete_block_reason ||
+              t('This shift is assigned to employees and cannot be deleted.')
+          );
+          return;
+        }
         setIsDeleteModalOpen(true);
         break;
       case 'toggle-status':
@@ -361,14 +485,22 @@ export default function Shifts() {
 
   const handleResetFilters = () => {
     setSearchTerm('');
-    setSelectedStatus('all');
+    const resetBranch = sessionActiveBranchId ? String(sessionActiveBranchId) : 'all';
+    setSelectedBranch(resetBranch);
+    setSelectedStatus(defaultStatus);
     setSelectedShiftType('all');
     setShowFilters(false);
 
-    router.get(route('hr.shifts.index'), {
-      page: 1,
-      per_page: pageFilters.per_page
-    }, { preserveState: true, preserveScroll: true });
+    router.get(
+      route('hr.shifts.index'),
+      {
+        page: 1,
+        per_page: pageFilters.per_page,
+        status: defaultStatus,
+        branch_id: sessionActiveBranchId ? String(sessionActiveBranchId) : undefined,
+      },
+      { preserveState: true, preserveScroll: true }
+    );
   };
 
   // Define page actions
@@ -389,7 +521,7 @@ export default function Shifts() {
       label: `${t('Copy Selected')} (${selectedShifts.length})`,
       icon: <Copy className="h-4 w-4 mr-2" />,
       variant: 'secondary',
-      className: 'bg-purple-600 hover:bg-purple-700 text-white border-none',
+      className: 'theme-bg hover:opacity-90 text-white border-none',
       onClick: () => {
         setIsBulkCopy(true);
         setSelectedBranchIds([]);
@@ -414,74 +546,16 @@ export default function Shifts() {
     { title: t('Shifts') }
   ];
 
-  const renderPerSlot = (record: any, renderSlot: (slot: any) => React.ReactNode, options?: { compact?: boolean; hideSlotLabel?: boolean }) => {
-    const { compact = false, hideSlotLabel = false } = options || {};
-    const slots = record.slots || [];
-    if (!slots.length) {
-      return <span className="text-[10px] font-bold uppercase text-amber-600">{t('Setup required')}</span>;
-    }
+  const checkboxClass =
+    'rounded border-slate-300 h-4 w-4 cursor-pointer accent-[var(--theme-color)] focus:ring-[color-mix(in_srgb,var(--theme-color)_40%,transparent)]';
 
-    if (slots.length === 1 && !record.is_multi) {
-      return <div className="whitespace-nowrap">{renderSlot(slots[0])}</div>;
-    }
-
-    return (
-      <div className="space-y-1">
-        {slots.map((slot: any, index: number) => (
-          <div key={slot.id ?? index} className={cn('flex items-center leading-tight whitespace-nowrap', hideSlotLabel ? 'justify-center' : 'gap-1.5', compact ? 'text-[10px]' : 'text-xs')}>
-            {!hideSlotLabel && (
-              <span className="font-black uppercase text-slate-400 shrink-0 min-w-[1rem]">
-                {slot.slot_name || `#${index + 1}`}
-              </span>
-            )}
-            {renderSlot(slot)}
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  const renderGraceMinutes = (value: number) => (
-    <span
-      className="inline-flex h-6 min-w-[2.25rem] items-center justify-center rounded-full bg-blue-50 px-2 text-xs font-black text-blue-700 ring-1 ring-blue-200"
-      title={`${value ?? 0} ${t('minutes')}`}
-    >
-      {value ?? 0}
-    </span>
-  );
-
-  const renderGraceColumn = (record: any, field: 'grace_before_in' | 'grace_after_out') => {
-    const slots = record.slots || [];
-    if (!slots.length) {
-      return <span className="text-[10px] font-bold uppercase text-amber-600">{t('Setup required')}</span>;
-    }
-
-    const content = slots.length === 1 && !record.is_multi ? (
-      renderGraceMinutes(Number(slots[0][field] ?? 0))
-    ) : (
-      <div className="inline-grid grid-cols-[auto_auto] items-center gap-x-2 gap-y-1">
-        {slots.map((slot: any, index: number) => (
-          <div key={slot.id ?? index} className="contents">
-            <span className="text-[10px] font-black uppercase text-slate-400 text-right">
-              {slot.slot_name || `#${index + 1}`}
-            </span>
-            {renderGraceMinutes(Number(slot[field] ?? 0))}
-          </div>
-        ))}
-      </div>
-    );
-
-    return <div className="flex justify-center">{content}</div>;
-  };
-
-  // Define table columns
-  const columns = [
+  const tableColumns = [
     {
       key: 'select',
       label: (
-        <input 
-          type="checkbox" 
-          className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 h-4 w-4 cursor-pointer"
+        <input
+          type="checkbox"
+          className={checkboxClass}
           checked={shifts?.data?.length > 0 && selectedShifts.length === shifts.data.length}
           onChange={(e) => {
             if (e.target.checked) {
@@ -492,147 +566,172 @@ export default function Shifts() {
           }}
         />
       ),
-      render: (value: any, record: any) => (
-        <input 
-          type="checkbox" 
-          className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 h-4 w-4 cursor-pointer"
+      render: (_: any, record: any) => (
+        <input
+          type="checkbox"
+          className={checkboxClass}
           checked={selectedShifts.includes(record.id)}
           onChange={(e) => {
             if (e.target.checked) {
-              setSelectedShifts(prev => [...prev, record.id]);
+              setSelectedShifts((prev) => [...prev, record.id]);
             } else {
-              setSelectedShifts(prev => prev.filter(id => id !== record.id));
+              setSelectedShifts((prev) => prev.filter((id) => id !== record.id));
             }
           }}
         />
-      )
+      ),
     },
     {
-      key: 'short_code',
-      label: t('Code'),
-      sortable: true
-    },
-    {
-      key: 'name',
-      label: t('Full Name'),
-      sortable: true
+      key: 'shift',
+      label: t('Shift'),
+      sortable: true,
+      render: (_: any, record: any) => (
+        <div className="min-w-[7.5rem] max-w-[10rem]">
+          <div className="flex flex-wrap items-baseline gap-1">
+            <span className="font-mono text-[11px] font-bold text-slate-500">{record.short_code}</span>
+            <span className="text-sm font-semibold text-slate-900 dark:text-slate-100 leading-tight">{record.name}</span>
+          </div>
+          {record.is_night_shift && (
+            <span className="text-[9px] font-bold uppercase tracking-wide text-indigo-600">{t('Night')}</span>
+          )}
+        </div>
+      ),
     },
     {
       key: 'is_multi',
       label: t('Type'),
       render: (value: boolean) => (
-        <Badge variant="outline" className={cn(
-          "text-[10px] font-black uppercase px-2 py-0.5 rounded-md",
-          value ? "bg-purple-50 text-purple-700 border-purple-200" : "bg-blue-50 text-blue-700 border-blue-200"
-        )}>
+        <Badge
+          variant="outline"
+          className={cn(
+            'text-[10px] font-black uppercase px-1.5 py-0 rounded-md',
+            value ? 'bg-slate-100 text-slate-700 border-slate-200' : 'bg-blue-50 text-blue-700 border-blue-200'
+          )}
+        >
           {value ? t('Multi') : t('Fixed')}
         </Badge>
-      )
+      ),
     },
     {
       key: 'schedule',
       label: t('Schedule'),
-      className: 'whitespace-nowrap min-w-[9rem]',
-      render: (_: any, record: any) => renderPerSlot(record, (slot) => (
-        <span className="font-mono text-xs text-slate-700">
-          {formatSlotTime(slot.start_time)} → {formatSlotTime(slot.end_time)}
-        </span>
-      )),
+      className: 'whitespace-nowrap',
+      render: (_: any, record: any) =>
+        formatCompactSchedule(record, formatSlotTime, formatDurationLabel) || (
+          <span className="text-[10px] font-bold uppercase text-amber-600">{t('Setup required')}</span>
+        ),
     },
     {
-      key: 'duration',
-      label: t('Duration'),
-      className: 'whitespace-nowrap min-w-[4rem]',
-      render: (_: any, record: any) => renderPerSlot(record, (slot) => (
-        <Badge variant="outline" className="text-[10px] font-bold px-1.5 py-0 bg-slate-50 text-slate-700 border-slate-200">
-          {formatDurationLabel(slot.start_time, slot.end_time)}
-        </Badge>
-      )),
-    },
-    // {
-    //   key: 'grace_before_in',
-    //   label: t('Grace In'),
-    //   className: 'whitespace-nowrap min-w-[6rem] text-center align-middle',
-    //   render: (_: any, record: any) => renderGraceColumn(record, 'grace_before_in'),
-    // },
-    // {
-    //   key: 'grace_after_out',
-    //   label: t('Grace Out'),
-    //   className: 'whitespace-nowrap min-w-[6rem] text-center align-middle',
-    //   render: (_: any, record: any) => renderGraceColumn(record, 'grace_after_out'),
-    // },
-    {
-      key: 'half_day_hours',
-      label: t('Half Day'),
-      className: 'whitespace-nowrap min-w-[4.5rem] text-center',
-      render: (_: any, record: any) => renderPerSlot(record, (slot) => (
-        <Badge variant="outline" className="text-[10px] font-black px-1.5 py-0 bg-orange-50 text-orange-700 border-orange-200">
-          {formatDutyHours(getDutyThresholdHours(slot, 0.5))}
-        </Badge>
-      )),
+      key: 'attendance_duty_hours',
+      label: t('Min. attendance hours'),
+      className: 'align-top',
+      render: (_: any, record: any) =>
+        renderAttendanceDutyCell(record, {
+          title: t('Minimum working hours required for half day and full day attendance'),
+          halfDay: t('Half day'),
+          fullDay: t('Full day'),
+          slotLabel: t('Slot'),
+        }) || (
+          <span className="text-[10px] font-bold uppercase text-amber-600">{t('Setup required')}</span>
+        ),
     },
     {
-      key: 'full_day_hours',
-      label: t('Full Day'),
-      className: 'whitespace-nowrap min-w-[4.5rem] text-center',
-      render: (_: any, record: any) => renderPerSlot(record, (slot) => (
-        <Badge variant="outline" className="text-[10px] font-black px-1.5 py-0 bg-emerald-50 text-emerald-700 border-emerald-200">
-          {formatDutyHours(getDutyThresholdHours(slot, 1.0))}
-        </Badge>
-      )),
+      key: 'employees_count',
+      label: t('Employees'),
+      render: (_: number, record: any) => {
+        const count = record.employees_count ?? 0;
+        const branchId = record.branch_id ?? record.branch?.id;
+        if (!hasPermission(permissions, 'view-employees') || !branchId) {
+          return <span className="text-sm tabular-nums text-slate-600">{count}</span>;
+        }
+        return (
+          <button
+            type="button"
+            title={t('View employees on this shift')}
+            onClick={() =>
+              router.get(route('hr.employees.index'), {
+                branch: branchId,
+                shift_id: record.id,
+                status: 'active',
+              })
+            }
+            className="flex items-center gap-1 text-sm font-medium tabular-nums theme-color hover:opacity-80 hover:underline border-none bg-transparent p-0 cursor-pointer"
+          >
+            <Users className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--theme-color)' }} />
+            {count}
+          </button>
+        );
+      },
     },
-    {
-      key: 'branch',
-      label: t('Branch'),
-      render: (value: any, record: any) => (
-        <Badge variant="outline" className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-slate-50 text-slate-600 border-slate-200">
-          {record.branch?.name || t('All')}
-        </Badge>
-      )
-    },
+    ...(showBranchColumn
+      ? [
+          {
+            key: 'branch',
+            label: t('Branch'),
+            render: (_: any, record: any) => (
+              <Badge
+                variant="outline"
+                className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-slate-50 text-slate-600 border-slate-200"
+              >
+                {record.branch?.name || t('N/A')}
+              </Badge>
+            ),
+          },
+        ]
+      : []),
     {
       key: 'status',
       label: t('Status'),
-      render: (value: string, record: any) => {
+      render: (_: string, record: any) => {
         const isActive = record.status === 'active';
-        const canToggle = hasPermission(permissions, 'toggle-status-shifts') || hasPermission(permissions, 'edit-shifts');
-        
+        const canToggle =
+          hasPermission(permissions, 'toggle-status-shifts') || hasPermission(permissions, 'edit-shifts');
+
         return (
           <button
+            type="button"
             onClick={() => canToggle && handleAction('toggle-status', record)}
-            title={canToggle ? (isActive ? t('Click to Deactivate') : t('Click to Activate')) : t('No permission to change status')}
+            title={
+              canToggle
+                ? isActive
+                  ? t('Click to Deactivate')
+                  : t('Click to Activate')
+                : t('No permission to change status')
+            }
             disabled={!canToggle}
-            className={`flex items-center gap-1.5 select-none ${canToggle ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}
+            className={cn(
+              'flex items-center gap-1 select-none',
+              canToggle ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'
+            )}
           >
-            {/* Toggle Track */}
             <span
               className={cn(
-                "relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors duration-200 ease-in-out",
-                isActive ? "bg-emerald-500" : "bg-slate-300"
+                'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors',
+                isActive ? 'bg-emerald-500' : 'bg-slate-300'
               )}
             >
-              {/* Toggle Knob */}
               <span
                 className={cn(
-                  "inline-block h-2.5 w-2.5 rounded-full bg-white shadow transition-transform duration-200 ease-in-out",
-                  isActive ? "translate-x-3.5" : "translate-x-0.5"
+                  'inline-block h-2.5 w-2.5 rounded-full bg-white shadow transition-transform',
+                  isActive ? 'translate-x-3.5' : 'translate-x-0.5'
                 )}
               />
             </span>
-            {/* Label */}
             <span
               className={cn(
-                "text-[10px] font-semibold uppercase tracking-wide",
-                isActive ? "text-emerald-600" : "text-slate-400"
+                'text-[10px] font-semibold uppercase tracking-wide',
+                isActive ? 'text-emerald-600' : 'text-slate-400'
               )}
             >
               {isActive ? t('Active') : t('Inactive')}
             </span>
           </button>
         );
-      }
-    }
+      },
+    },
   ];
+
+  const columns = tableColumns;
 
   // Define table actions
   const actions = [
@@ -662,7 +761,11 @@ export default function Shifts() {
       icon: 'Trash2',
       action: 'delete',
       className: 'text-red-500',
-      requiredPermission: 'delete-shifts'
+      requiredPermission: 'delete-shifts',
+      isDisabled: (row: any) => !row.can_delete,
+      disabledTitle: (row: any) =>
+        row.delete_block_reason ||
+        t('This shift is assigned to employees in this branch and cannot be deleted.'),
     }
   ];
 
@@ -675,8 +778,18 @@ export default function Shifts() {
 
   const shiftTypeOptions = [
     { value: 'all', label: t('All Types') },
+    { value: 'fixed', label: t('Fixed') },
+    { value: 'multi', label: t('Multi') },
     { value: 'day', label: t('Day Shift') },
-    { value: 'night', label: t('Night Shift') }
+    { value: 'night', label: t('Night Shift') },
+  ];
+
+  const branchOptions = [
+    { value: 'all', label: t('All Branches') },
+    ...(branches || []).map((b: any) => ({
+      value: b.id.toString(),
+      label: b.name,
+    })),
   ];
 
   const workingDayOptions = [
@@ -697,53 +810,135 @@ export default function Shifts() {
       breadcrumbs={breadcrumbs}
       noPadding
     >
-      {/* Search and filters section */}
+      {filteredBranchName && isViewingOtherBranch && (
+        <div
+          className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm"
+          style={{
+            borderColor: 'color-mix(in srgb, var(--theme-color) 28%, transparent)',
+            backgroundColor: 'color-mix(in srgb, var(--theme-color) 8%, transparent)',
+            color: 'var(--theme-color)',
+          }}
+        >
+          <span>
+            {t('Showing shifts for')}: <strong>{filteredBranchName}</strong>
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const activeId = String(sessionActiveBranchId);
+              setSelectedBranch(activeId);
+              router.get(route('hr.shifts.index'), listQueryParams({ branch_id: activeId }), {
+                preserveState: true,
+                preserveScroll: true,
+              });
+            }}
+            className="text-xs font-semibold underline border-none bg-transparent cursor-pointer hover:opacity-80"
+            style={{ color: 'var(--theme-color)' }}
+          >
+            {t('Show active branch')}
+            {activeBranchName ? ` (${activeBranchName})` : ''}
+          </button>
+        </div>
+      )}
+
       <div className="bg-white dark:bg-gray-900 rounded-lg shadow mb-4 p-4">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500 mb-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+          {filteredBranchName && selectedBranch !== 'all' && (
+            <>
+              <span className="font-semibold text-slate-700 dark:text-slate-300">
+                {filteredBranchName}
+              </span>
+              <span className="text-slate-300">·</span>
+            </>
+          )}
+          <span>
+            {t('Shifts')}{' '}
+            <span className="font-semibold text-slate-800 dark:text-slate-200 tabular-nums">{stats.total ?? 0}</span>
+          </span>
+          <span className="text-slate-300">·</span>
+          <span>
+            {t('Active')}{' '}
+            <span className="font-semibold text-emerald-600 tabular-nums">{stats.active ?? 0}</span>
+          </span>
+          <span className="text-slate-300">·</span>
+          <span>
+            {t('Inactive')}{' '}
+            <span className="font-semibold text-slate-600 tabular-nums">{stats.inactive ?? 0}</span>
+          </span>
+          <span className="text-slate-300">·</span>
+          <span>
+            {t('Employees')}{' '}
+            <span className="font-semibold tabular-nums theme-color">{stats.total_employees ?? 0}</span>
+          </span>
+        </div>
         <SearchAndFilterBar
           searchTerm={searchTerm}
           onSearchChange={setSearchTerm}
           onSearch={handleSearch}
-          filters={[]}
+          onSearchClear={handleSearchClear}
+          filters={[
+            {
+              name: 'branch_id',
+              label: t('Branch'),
+              type: 'select',
+              value: selectedBranch,
+              onChange: setSelectedBranch,
+              options: branchOptions,
+            },
+            {
+              name: 'status',
+              label: t('Status'),
+              type: 'select',
+              value: selectedStatus,
+              onChange: setSelectedStatus,
+              options: statusOptions,
+            },
+            {
+              name: 'shift_type',
+              label: t('Type'),
+              type: 'select',
+              value: selectedShiftType,
+              onChange: setSelectedShiftType,
+              options: shiftTypeOptions,
+            },
+          ]}
           showFilters={showFilters}
           setShowFilters={setShowFilters}
           hasActiveFilters={hasActiveFilters}
           activeFilterCount={activeFilterCount}
           onResetFilters={handleResetFilters}
           onApplyFilters={applyFilters}
-          currentPerPage={pageFilters.per_page?.toString() || "10"}
+          currentPerPage={pageFilters.per_page?.toString() || '10'}
           onPerPageChange={(value) => {
-            router.get(route('hr.shifts.index'), {
-              page: 1,
-              per_page: parseInt(value),
-              search: searchTerm || undefined,
-              status: selectedStatus !== 'all' ? selectedStatus : undefined,
-              shift_type: selectedShiftType !== 'all' ? selectedShiftType : undefined
-            }, { preserveState: true, preserveScroll: true });
+            router.get(
+              route('hr.shifts.index'),
+              listQueryParams({ per_page: parseInt(value, 10) }),
+              { preserveState: true, preserveScroll: true }
+            );
           }}
         />
       </div>
 
-      {/* Content section */}
       <div className="bg-white dark:bg-gray-900 rounded-lg shadow overflow-hidden">
         <div className="w-full overflow-x-auto">
-          <div className="min-w-[900px]">
-            <CrudTable
-              columns={columns}
-              actions={actions}
-              data={shifts?.data || []}
-              from={shifts?.from || 1}
-              onAction={handleAction}
-              sortField={pageFilters.sort_field}
-              sortDirection={pageFilters.sort_direction}
-              onSort={handleSort}
-              permissions={permissions}
-              entityPermissions={{
-                view: 'view-shifts',
-                edit: 'edit-shifts',
-                delete: 'delete-shifts'
-              }}
-            />
-          </div>
+          <CrudTable
+            columns={columns}
+            actions={actions}
+            data={shifts?.data || []}
+            from={shifts?.from || 1}
+            onAction={handleAction}
+            sortField={pageFilters.sort_field}
+            sortDirection={pageFilters.sort_direction}
+            onSort={handleSort}
+            permissions={permissions}
+            dense
+            stickyActions
+            entityPermissions={{
+              view: 'view-shifts',
+              edit: 'edit-shifts',
+              delete: 'delete-shifts',
+            }}
+          />
         </div>
 
         {/* Pagination section */}

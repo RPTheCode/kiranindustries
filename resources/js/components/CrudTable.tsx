@@ -41,6 +41,9 @@ interface CrudTableProps {
   };
   showActionsAsIcons?: boolean;
   showActions?: boolean;
+  compactActions?: boolean;
+  stickyActions?: boolean;
+  dense?: boolean;
 }
 
 export function CrudTable({
@@ -56,6 +59,9 @@ export function CrudTable({
   permissions,
   entityPermissions,
   showActions = true,
+  compactActions = false,
+  stickyActions = false,
+  dense = false,
 }: CrudTableProps) {
   const { t } = useTranslation();
   const renderSortIcon = (column: TableColumn) => {
@@ -88,9 +94,23 @@ export function CrudTable({
 
     return !permissionKey || hasPermission(permissions, permissionKey);
   });
+  const cellPy = dense ? 'py-1.5' : 'py-2.5';
+  const headPy = dense ? 'py-1.5' : 'py-2.5';
+
+  const actionBtnSize = compactActions ? 'h-7 w-7' : 'h-8 w-8';
+  const actionIconSize = compactActions ? 14 : 16;
+  const actionGap = compactActions ? 'gap-0.5' : 'space-x-2';
+
+  const stickyActionClass = stickyActions
+    ? 'sticky right-0 z-10 bg-gray-50 dark:bg-gray-800 shadow-[-6px_0_10px_-6px_rgba(0,0,0,0.12)]'
+    : '';
+  const stickyActionCellClass = stickyActions
+    ? 'sticky right-0 z-10 bg-white dark:bg-gray-900 shadow-[-6px_0_10px_-6px_rgba(0,0,0,0.12)]'
+    : '';
+
   const renderActionButtons = (row: any) => {
     return (
-      <div className="flex items-center justify-end space-x-2">
+      <div className={cn('flex items-center justify-end', actionGap)}>
         {actions.map((action, index) => {
           // Skip if user doesn't have permission
           const permissionKey = action.requiredPermission || (
@@ -133,9 +153,9 @@ export function CrudTable({
                       <Button
                         variant="ghost"
                         size="icon"
-                        className={cn("h-8 w-8", actionClassName)}
+                        className={cn(actionBtnSize, actionClassName)}
                       >
-                        <IconComponent size={16} />
+                        <IconComponent size={actionIconSize} />
                       </Button>
                     </Link>
                   </TooltipTrigger>
@@ -149,7 +169,9 @@ export function CrudTable({
 
           // Handle regular action buttons
           const isDisabled = action.isDisabled ? action.isDisabled(row) : false;
-          const disabledTitle = action.disabledTitle || t('Action disabled');
+          const disabledTitle = typeof action.disabledTitle === 'function'
+            ? action.disabledTitle(row)
+            : (action.disabledTitle || t('Action disabled'));
 
           return (
             <TooltipProvider key={index}>
@@ -159,11 +181,11 @@ export function CrudTable({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className={cn("h-8 w-8", actionClassName, isDisabled && "opacity-50 cursor-not-allowed")}
+                      className={cn(actionBtnSize, actionClassName, isDisabled && "opacity-50 cursor-not-allowed")}
                       onClick={() => !isDisabled && onAction(action.action, row)}
                       disabled={isDisabled}
                     >
-                      <IconComponent size={16} />
+                      <IconComponent size={actionIconSize} />
                     </Button>
                   </span>
                 </TooltipTrigger>
@@ -263,13 +285,14 @@ export function CrudTable({
       <Table>
         <TableHeader>
           <TableRow className="bg-gray-50 dark:bg-gray-800 border-b">
-            <TableHead className="w-12 py-2.5 font-semibold">#</TableHead>
+            <TableHead className={cn('w-12 font-semibold', headPy)}>#</TableHead>
             {columns.map((column) => (
               <TableHead
                 key={column.key}
                 className={cn(
-                  "py-2.5 font-semibold",
-                  column.sortable && "cursor-pointer select-none",
+                  headPy,
+                  'font-semibold',
+                  column.sortable && 'cursor-pointer select-none',
                   column.className
                 )}
                 onClick={() => handleSort(column)}
@@ -281,21 +304,22 @@ export function CrudTable({
               </TableHead>
             ))}
             {/* <TableHead className="w-24 py-2.5 font-semibold text-right">{t("Actions")}</TableHead> */}
-            {showActions && hasAnyActionPermission && <TableHead className="w-24 py-2.5 text-right font-semibold">{t('Actions')}</TableHead>}
+            {showActions && hasAnyActionPermission && (
+              <TableHead className={cn(headPy, 'text-right font-semibold w-[7.25rem] px-1', stickyActionClass)}>
+                {t('Actions')}
+              </TableHead>
+            )}
           </TableRow>
         </TableHeader>
         <TableBody>
           {data.length > 0 ? (
             data.map((row, index) => (
               <TableRow key={row.id || index} className="hover:bg-gray-50 dark:hover:bg-gray-700 dark:bg-gray-900 border-b">
-                <TableCell className="font-medium py-2.5">{from + index}</TableCell>
+                <TableCell className={cn('font-medium', cellPy)}>{from + index}</TableCell>
                 {columns.map((col) => (
                   <TableCell
                     key={col.key}
-                    className={cn(
-                      "py-2.5",
-                      col.className
-                    )}
+                    className={cn(cellPy, col.className)}
                   >
                     {renderCellContent(row, col)}
                   </TableCell>
@@ -303,7 +327,11 @@ export function CrudTable({
                 {/* <TableCell className="py-2.5 text-right">
                   {renderActionButtons(row)}
                 </TableCell> */}
-                {showActions && hasAnyActionPermission && <TableCell className="py-2.5 text-right">{renderActionButtons(row)}</TableCell>}
+                {showActions && hasAnyActionPermission && (
+                  <TableCell className={cn(cellPy, 'text-right px-1', stickyActionCellClass)}>
+                    {renderActionButtons(row)}
+                  </TableCell>
+                )}
               </TableRow>
             ))
           ) : (

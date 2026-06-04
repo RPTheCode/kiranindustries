@@ -28,7 +28,7 @@ class BiometricAttendanceSyncController extends Controller
             ->pluck('id');
 
         $query = BiometricAttendance::query()
-            ->with(['employee.user', 'employee.department', 'employee.designation', 'employee.branch', 'employee.shift', 'logs'])
+            ->with(['employee.user', 'employee.department', 'employee.designation', 'employee.branch', 'employee.shift.slots', 'logs'])
             ->whereIn('employee_id', $activeEmployeeIds)
             ->where('punch_count', '>', 0)
             ->orderByDesc('attendance_date')
@@ -39,8 +39,11 @@ class BiometricAttendanceSyncController extends Controller
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('employee_code', 'like', "%$search%")
-                    ->orWhereHas('employee.user', function ($qu) use ($search) {
-                        $qu->where('name', 'like', "%$search%");
+                    ->orWhereHas('employee', function ($eq) use ($search) {
+                        $eq->withoutGlobalScopes()
+                            ->whereHas('user', function ($qu) use ($search) {
+                                $qu->where('name', 'like', "%$search%");
+                            });
                     });
             });
         }
@@ -126,6 +129,11 @@ class BiometricAttendanceSyncController extends Controller
                 );
             })->through(function ($record) {
                 $record->setAttribute('log_details', getStoredLogDetailsFromRecord($record));
+                $employee = resolveEmployeeForBiometricRecord($record);
+                if ($employee && !$record->relationLoaded('employee')) {
+                    $record->setRelation('employee', $employee);
+                }
+                $record->setAttribute('employee_display_name', getEmployeeDisplayNameForRecord($record));
 
                 return $record;
             })->withQueryString(),
@@ -251,10 +259,11 @@ class BiometricAttendanceSyncController extends Controller
 
                 $analysis = analyzePunchSequence($punches);
                 $isMisPunch = $analysis['is_mis_punch'];
+                $openInCarbon = getOpenInCarbonFromLogDetails($attDate, $analysis['log_details']);
                 if (
                     $isMisPunch
                     && logDetailsHasOpenIn($analysis['log_details'])
-                    && shouldDeferOpenInMispunch($emp, $attDate)
+                    && shouldDeferOpenInMispunch($emp, $attDate, null, $openInCarbon)
                 ) {
                     $isMisPunch = false;
                 }
@@ -273,6 +282,9 @@ class BiometricAttendanceSyncController extends Controller
                 $this->saveAttendanceRecord($emp, $consolidated);
                 $processedCount++;
             }
+
+            $this->clearMisplacedManualAttendanceInRange($emp, $fromDate, $toDate, $dedupedLogs, $punchesByDate);
+            $this->reconcileGapDaysInSyncRange($emp, $fromDate, $toDate, $punchesByDate);
         }
 
         \Log::info("Sync Process Completed. Total processed: $processedCount");
@@ -650,6 +662,92 @@ class BiometricAttendanceSyncController extends Controller
         return redirect()->back()->with('success', "Successfully updated {$updatedCount} attendance records.");
     }
 
+
+    /**
+     * Manual row jisme punches is calendar date par ESSL mein nahi — galat shift-day placement.
+     */
+    private function clearMisplacedManualAttendanceInRange($emp, Carbon $fromDate, Carbon $toDate, array $esslLogs, array $punchesByDate): void
+    {
+        $records = BiometricAttendance::where('employee_id', $emp->id)
+            ->whereBetween('attendance_date', [
+                $fromDate->format('Y-m-d'),
+                $toDate->format('Y-m-d'),
+            ])
+            ->where('is_manual', true)
+            ->get();
+
+        foreach ($records as $existing) {
+            $dateStr = Carbon::parse($existing->attendance_date)->format('Y-m-d');
+            $logDetails = getStoredLogDetailsFromRecord($existing);
+
+            if ($logDetails === '') {
+                continue;
+            }
+
+            $onThisShiftDay = array_key_exists($dateStr, $punchesByDate);
+            $matchesEssl = attendanceLogDetailsMatchEsslOnDate($esslLogs, $dateStr, $logDetails);
+
+            if ($onThisShiftDay && $matchesEssl) {
+                continue;
+            }
+
+            if (!$matchesEssl) {
+                $existing->forceFill([
+                    'is_manual' => false,
+                    'manual_by' => null,
+                    'manual_remarks' => null,
+                ])->save();
+            }
+        }
+    }
+
+    /**
+     * Sync range mein jin dinon par koi punch group nahi — purani galat MIS/log hata kar A/H/W.
+     */
+    private function reconcileGapDaysInSyncRange($emp, Carbon $fromDate, Carbon $toDate, array $punchesByDate): void
+    {
+        $activeDates = array_keys($punchesByDate);
+        $current = $fromDate->copy();
+
+        while ($current->lte($toDate)) {
+            $dateStr = $current->format('Y-m-d');
+
+            if (in_array($dateStr, $activeDates, true)) {
+                $current->addDay();
+                continue;
+            }
+
+            $existing = BiometricAttendance::where('employee_id', $emp->id)
+                ->whereDate('attendance_date', $dateStr)
+                ->first();
+
+            if ($existing && $existing->is_manual) {
+                $current->addDay();
+                continue;
+            }
+
+            $isHoliday = Holiday::whereDate('start_date', '<=', $dateStr)
+                ->whereDate('end_date', '>=', $dateStr)
+                ->exists();
+            $employeeWeekOffs = explode(',', $emp->week_off ?? 'Sunday');
+            $isWeeklyOff = in_array($current->format('l'), $employeeWeekOffs);
+            $status = $isHoliday ? 'H' : ($isWeeklyOff ? 'W' : 'A');
+
+            $this->saveAttendanceRecord($emp, [
+                'attendance_date' => $dateStr,
+                'in_time' => null,
+                'out_time' => null,
+                'in_count' => 0,
+                'out_count' => 0,
+                'is_mis_punch' => false,
+                'log_details' => '',
+                'actual_work_minutes' => 0,
+                'status' => $status,
+            ]);
+
+            $current->addDay();
+        }
+    }
 
     private function processNoLogs($emp, $fromDate, $toDate)
     {

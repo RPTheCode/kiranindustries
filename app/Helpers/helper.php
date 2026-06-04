@@ -361,87 +361,174 @@ if (!function_exists('getEmployeeDayAndNightSlots')) {
     }
 }
 
-if (!function_exists('assignPunchToAttendanceDate')) {
+if (!function_exists('resolveShiftAttendanceDate')) {
     /**
-     * Assign punch to attendance_date using shift slots.
-     * Day slot 08–20 on calendar date. Night slot 20:00 → next morning OUT on IN date
-     * (including late OUT e.g. 13:30 on 26th closing 25th 21:19 IN).
+     * Shift-day key for biometric attendance (session start calendar date).
+     * Night / multi: one shift day can span evening → next evening (e.g. 20:00–20:00).
      */
-    function assignPunchToAttendanceDate($employee, \Carbon\Carbon $punchTime, string $direction): string
+    function resolveShiftAttendanceDate($employee, \Carbon\Carbon $punchTime, string $direction): string
     {
         $direction = normalizePunchDirection($direction);
         $calendarDate = $punchTime->format('Y-m-d');
-        $timeMins = shiftTimeToMinutes($punchTime->format('H:i'));
 
-        [$daySlot, $nightSlot] = getEmployeeDayAndNightSlots($employee);
-
-        $nightStart = $nightSlot ? shiftTimeToMinutes($nightSlot->start_time) : 1200;
-        $nightEnd = $nightSlot ? shiftTimeToMinutes($nightSlot->end_time) : 480;
-
-        // Multi-shift orphan OUT (08:00–20:00) closes previous night — must run before day-slot OUT
-        if ($direction === 'out' && $daySlot && $nightSlot) {
-            if ($timeMins >= $nightEnd && $timeMins < $nightStart) {
-                return $punchTime->copy()->subDay()->format('Y-m-d');
-            }
+        if (!$employee || (!employeeShiftSpansMidnight($employee) && !employeeIsMultiShift($employee))) {
+            return $calendarDate;
         }
 
-        if ($daySlot) {
+        $timeMins = shiftTimeToMinutes($punchTime->format('H:i'));
+        [$daySlot, $nightSlot] = getEmployeeDayAndNightSlots($employee);
+
+        if ($daySlot && $nightSlot && employeeIsMultiShift($employee)) {
+            $nightStart = shiftTimeToMinutes($nightSlot->start_time);
+            $nightEnd = shiftTimeToMinutes($nightSlot->end_time);
             $dayStart = shiftTimeToMinutes($daySlot->start_time);
             $dayEnd = shiftTimeToMinutes($daySlot->end_time);
             $graceBefore = 120;
 
-            if ($direction === 'in' && $timeMins >= ($dayStart - $graceBefore) && $timeMins <= $dayEnd) {
-                return $calendarDate;
+            if ($timeMins < $nightEnd) {
+                // Morning OUT → previous shift day (night logout). Morning IN → calendar day (day login, e.g. 07:13 on 4 Jun).
+                if ($direction === 'out') {
+                    $shiftDay = $punchTime->copy()->subDay()->format('Y-m-d');
+                } elseif ($timeMins >= ($dayStart - $graceBefore) && $timeMins < $nightEnd) {
+                    $shiftDay = $calendarDate;
+                } elseif ($direction === 'in') {
+                    $shiftDay = $calendarDate;
+                } else {
+                    $shiftDay = $punchTime->copy()->subDay()->format('Y-m-d');
+                }
+            } elseif ($timeMins >= $nightStart) {
+                $shiftDay = $calendarDate;
+            } elseif ($direction === 'out') {
+                // Same-day gap OUT (e.g. 13:44 on Jun 2) — stay on calendar date; night close uses IN→OUT pairing
+                $shiftDay = $calendarDate;
+            } elseif ($timeMins >= ($dayStart - $graceBefore) && $timeMins <= $dayEnd) {
+                $shiftDay = $calendarDate;
+            } else {
+                $shiftDay = $calendarDate;
             }
 
-            if ($direction === 'out' && $timeMins >= $dayStart && $timeMins <= $dayEnd) {
-                return $calendarDate;
+            return $shiftDay;
+        }
+
+        $anchorSlot = $nightSlot;
+        if (!$anchorSlot) {
+            foreach (getEmployeeShiftSlots($employee) as $slot) {
+                if (isShiftTimeCrossesMidnight($slot->start_time, $slot->end_time)) {
+                    $anchorSlot = $slot;
+                    break;
+                }
             }
         }
 
-        if ($nightSlot) {
-            if ($direction === 'in' && $timeMins >= $nightStart) {
-                return $calendarDate;
-            }
+        $nightStart = $anchorSlot ? shiftTimeToMinutes($anchorSlot->start_time) : 1200;
+        $nightEnd = $anchorSlot ? shiftTimeToMinutes($anchorSlot->end_time) : 480;
+        $graceBefore = 120;
 
+        if ($timeMins >= $nightStart) {
+            $shiftDay = $calendarDate;
+        } elseif ($timeMins < $nightEnd) {
             if ($direction === 'out') {
-                // Morning OUT (before nominal end e.g. 08:00) → previous calendar day
-                if ($timeMins < $nightEnd) {
-                    return $punchTime->copy()->subDay()->format('Y-m-d');
-                }
-                // Late OUT (08:00–20:00) closes previous night when unmatched (orphan OUT)
-                if ($timeMins >= $nightEnd && $timeMins < $nightStart) {
-                    return $punchTime->copy()->subDay()->format('Y-m-d');
-                }
+                $shiftDay = $punchTime->copy()->subDay()->format('Y-m-d');
+            } elseif ($timeMins >= ($nightEnd - $graceBefore)) {
+                $shiftDay = $calendarDate;
+            } elseif ($direction === 'in') {
+                $shiftDay = $calendarDate;
+            } else {
+                $shiftDay = $punchTime->copy()->subDay()->format('Y-m-d');
             }
+        } else {
+            $shiftDay = $calendarDate;
         }
 
-        if (employeeShiftSpansMidnight($employee) && !$nightSlot) {
-            if ($direction === 'in' && $timeMins >= $nightStart) {
-                return $calendarDate;
-            }
+        return $shiftDay;
+    }
+}
 
-            if ($direction === 'out') {
-                if ($timeMins < $nightEnd) {
-                    return $punchTime->copy()->subDay()->format('Y-m-d');
-                }
-                if ($timeMins >= $nightEnd && $timeMins < $nightStart) {
-                    return $punchTime->copy()->subDay()->format('Y-m-d');
-                }
-            }
+if (!function_exists('getShiftSessionStart')) {
+    /** Start of the shift session containing $at. */
+    function getShiftSessionStart($employee, \Carbon\Carbon $at): \Carbon\Carbon
+    {
+        $shiftDay = resolveShiftAttendanceDate($employee, $at, 'in');
+        [$daySlot, $nightSlot] = getEmployeeDayAndNightSlots($employee);
+
+        if ($daySlot && $nightSlot && employeeIsMultiShift($employee)) {
+            $dayStart = shiftTimeToMinutes($daySlot->start_time);
+            $graceBefore = 120;
+            $startMins = max(0, $dayStart - $graceBefore);
+
+            return \Carbon\Carbon::parse($shiftDay)->startOfDay()->addMinutes($startMins)->seconds(0);
         }
 
-        return $calendarDate;
+        if ($nightSlot || employeeShiftSpansMidnight($employee)) {
+            $slot = $nightSlot;
+            if (!$slot) {
+                foreach (getEmployeeShiftSlots($employee) as $s) {
+                    if (isShiftTimeCrossesMidnight($s->start_time, $s->end_time)) {
+                        $slot = $s;
+                        break;
+                    }
+                }
+            }
+            $nightStart = $slot ? shiftTimeToMinutes($slot->start_time) : 1200;
+
+            return \Carbon\Carbon::parse($shiftDay)->startOfDay()->addMinutes($nightStart)->seconds(0);
+        }
+
+        return \Carbon\Carbon::parse($shiftDay)->startOfDay();
+    }
+}
+
+if (!function_exists('getShiftSessionEnd')) {
+    /**
+     * Exclusive end of the shift session containing $at.
+     * Open IN is not marked MIS before this time (e.g. next day 20:00 for night shift).
+     */
+    function getShiftSessionEnd($employee, \Carbon\Carbon $at): \Carbon\Carbon
+    {
+        $shiftDay = resolveShiftAttendanceDate($employee, $at, 'in');
+        [$daySlot, $nightSlot] = getEmployeeDayAndNightSlots($employee);
+
+        if (($daySlot && $nightSlot && employeeIsMultiShift($employee)) || $nightSlot || employeeShiftSpansMidnight($employee)) {
+            $slot = $nightSlot;
+            if (!$slot) {
+                foreach (getEmployeeShiftSlots($employee) as $s) {
+                    if (isShiftTimeCrossesMidnight($s->start_time, $s->end_time)) {
+                        $slot = $s;
+                        break;
+                    }
+                }
+            }
+            $nightStart = $slot ? shiftTimeToMinutes($slot->start_time) : 1200;
+
+            return \Carbon\Carbon::parse($shiftDay)->addDay()->startOfDay()->addMinutes($nightStart)->seconds(0);
+        }
+
+        return \Carbon\Carbon::parse($shiftDay)->addDay()->startOfDay();
+    }
+}
+
+if (!function_exists('getShiftAttendanceDateForPunch')) {
+    function getShiftAttendanceDateForPunch($employee, \Carbon\Carbon $punchTime, string $direction): string
+    {
+        return resolveShiftAttendanceDate($employee, $punchTime, $direction);
+    }
+}
+
+if (!function_exists('assignPunchToAttendanceDate')) {
+    /** Assign punch to attendance_date using shift session rules. */
+    function assignPunchToAttendanceDate($employee, \Carbon\Carbon $punchTime, string $direction): string
+    {
+        return getShiftAttendanceDateForPunch($employee, $punchTime, $direction);
     }
 }
 
 if (!function_exists('groupEmployeePunchesByAttendanceDate')) {
     /**
-     * Pair punches chronologically (IN→OUT), assign pairs to IN attendance date.
+     * Pair punches chronologically (IN→OUT), bucket by shift session day.
      *
-     * Cross-day rules (no time grace):
-     * - Rule 1: Open IN is closed by the next chronological OUT (even on the next calendar day).
-     * - Rule 2: If the next punch is IN (not OUT), the previous open IN stays unpaired → mispunch on that date.
+     * - Rule 1: Open IN closed by next chronological OUT (may be next calendar morning).
+     * - Rule 2: IN → next IN without OUT → first IN orphan → mispunch on that shift day.
+     * - Night / multi: mid-session pairs (21 IN, 01 OUT, 03 IN, 06 OUT) stay on one shift day.
      *
      * @param  iterable<int, object{log_date: string, direction: string}>  $logs
      * @return array<string, array<int, array{time: \Carbon\Carbon, type: string}>>
@@ -472,7 +559,7 @@ if (!function_exists('groupEmployeePunchesByAttendanceDate')) {
                     $append($currentInDate, $currentIn, 'IN');
                 }
                 $currentIn = $p['time']->copy();
-                $currentInDate = assignPunchToAttendanceDate($employee, $currentIn, 'in');
+                $currentInDate = getShiftAttendanceDateForPunch($employee, $currentIn, 'in');
                 continue;
             }
 
@@ -484,7 +571,7 @@ if (!function_exists('groupEmployeePunchesByAttendanceDate')) {
                 continue;
             }
 
-            $orphanDate = assignPunchToAttendanceDate($employee, $p['time'], 'out');
+            $orphanDate = getShiftAttendanceDateForPunch($employee, $p['time'], 'out');
             $append($orphanDate, $p['time'], 'OUT');
         }
 
@@ -899,6 +986,41 @@ if (!function_exists('parseLogDetailsToPairs')) {
     }
 }
 
+if (!function_exists('attendanceLogDetailsMatchEsslOnDate')) {
+    /**
+     * True when every punch in log_details exists on ESSL for this calendar date (±0 min).
+     */
+    function attendanceLogDetailsMatchEsslOnDate(iterable $esslLogs, string $calendarDate, string $logDetails): bool
+    {
+        $events = parseLogDetailsToEvents($logDetails);
+        if (empty($events)) {
+            return true;
+        }
+
+        foreach ($events as $event) {
+            $time = substr($event['time'], 0, 5);
+            $type = strtoupper($event['type']) === 'OUT' ? 'OUT' : 'IN';
+            $matched = false;
+
+            foreach ($esslLogs as $log) {
+                $dt = \Carbon\Carbon::parse($log->log_date);
+                $logType = strtoupper(normalizePunchDirection($log->direction)) === 'OUT' ? 'OUT' : 'IN';
+
+                if ($dt->format('Y-m-d') === $calendarDate && $dt->format('H:i') === $time && $logType === $type) {
+                    $matched = true;
+                    break;
+                }
+            }
+
+            if (!$matched) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
 if (!function_exists('getStoredLogDetailsFromRecord')) {
     /** Raw log_details column — avoid accessor that rebuilds from logs table. */
     function getStoredLogDetailsFromRecord($record): string
@@ -942,41 +1064,66 @@ if (!function_exists('logDetailsHasOpenIn')) {
     }
 }
 
+if (!function_exists('getOpenInCarbonFromLogDetails')) {
+    /** Last open IN as Carbon on attendance_date (for session defer). */
+    function getOpenInCarbonFromLogDetails(string $attendanceDate, ?string $logDetails): ?\Carbon\Carbon
+    {
+        if (!$logDetails || !logDetailsHasOpenIn($logDetails)) {
+            return null;
+        }
+
+        $pairs = parseLogDetailsToPairs($logDetails);
+        $last = $pairs[array_key_last($pairs)] ?? null;
+        if (empty($last['in'])) {
+            return null;
+        }
+
+        try {
+            return \Carbon\Carbon::parse($attendanceDate . ' ' . substr($last['in'], 0, 5));
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+}
+
 if (!function_exists('shouldDeferOpenInMispunch')) {
     /**
-     * Night / last IN on date D: wait for first punch on D+1 before marking MIS.
-     * e.g. 2 Jun IN 20:27 — on 3 Jun with zero punches yet → not mispunch.
+     * Open IN: defer only while session is open AND no later punch has decided the pair.
+     * Rule 2: first punch after open IN is IN (e.g. 3 Jun IN → 4 Jun IN) → not defer → MIS.
+     * Rule 1: first punch after open IN is OUT → not defer (sync pairs or report closes).
      */
-    function shouldDeferOpenInMispunch($employee, string $attendanceDate, ?array $punchedUserIdsByDate = null): bool
+    function shouldDeferOpenInMispunch($employee, string $attendanceDate, ?array $punchedUserIdsByDate = null, ?\Carbon\Carbon $openInTime = null): bool
     {
+        if (!$employee) {
+            return false;
+        }
+
+        if ($openInTime) {
+            $firstAfter = fetchFirstPunchAfterOpenIn(
+                $employee,
+                $attendanceDate,
+                $openInTime->format('H:i'),
+                null,
+                $openInTime
+            );
+            if ($firstAfter !== null) {
+                return false;
+            }
+        }
+
         try {
-            $nextDay = \Carbon\Carbon::parse($attendanceDate)->addDay()->format('Y-m-d');
+            $ref = $openInTime
+                ? $openInTime->copy()
+                : \Carbon\Carbon::parse($attendanceDate)->setTime(12, 0, 0);
         } catch (\Throwable $e) {
             return false;
         }
 
-        $today = now()->format('Y-m-d');
-
-        if ($nextDay > $today) {
-            return true;
+        if (!employeeShiftSpansMidnight($employee) && !employeeIsMultiShift($employee)) {
+            return $attendanceDate === now()->format('Y-m-d');
         }
 
-        if (!$employee || empty($employee->user_id)) {
-            return false;
-        }
-
-        if ($nextDay >= $today) {
-            if ($punchedUserIdsByDate !== null) {
-                return !isset($punchedUserIdsByDate[$employee->user_id]);
-            }
-
-            return !\App\Models\EsslLog::query()
-                ->where('user_id', $employee->user_id)
-                ->whereDate('log_date', $nextDay)
-                ->exists();
-        }
-
-        return false;
+        return now()->lt(getShiftSessionEnd($employee, $ref));
     }
 }
 
@@ -1001,14 +1148,71 @@ if (!function_exists('recordIsDeferredOpenInMispunch')) {
             return false;
         }
 
-        $employee = $record->employee ?? null;
-        if (!$employee && method_exists($record, 'employee')) {
-            $employee = $record->employee()->first();
+        $employee = resolveEmployeeForBiometricRecord($record);
+        if ($employee && !$employee->relationLoaded('shift')) {
+            $employee->load('shift.slots');
         }
 
         $attDate = \Carbon\Carbon::parse($record->attendance_date)->format('Y-m-d');
+        $openIn = getOpenInCarbonFromLogDetails($attDate, $logDetails);
 
-        return shouldDeferOpenInMispunch($employee, $attDate, $punchedUserIdsByDate);
+        return shouldDeferOpenInMispunch($employee, $attDate, $punchedUserIdsByDate, $openIn);
+    }
+}
+
+if (!function_exists('fetchFirstPunchAfterOpenIn')) {
+    /**
+     * First device punch strictly after open IN, within shift session when $employee is set.
+     *
+     * @return array{direction: string, time: string, at: \Carbon\Carbon}|null
+     */
+    function fetchFirstPunchAfterOpenIn(
+        $employee,
+        string $attendanceDate,
+        string $openInTime,
+        ?\Carbon\Carbon $untilExclusive = null,
+        ?\Carbon\Carbon $openInAt = null
+    ): ?array {
+        if (!$employee || empty($employee->user_id)) {
+            return null;
+        }
+
+        try {
+            $openIn = $openInAt
+                ? $openInAt->copy()
+                : \Carbon\Carbon::parse($attendanceDate . ' ' . substr($openInTime, 0, 5));
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        if ($untilExclusive === null) {
+            if (employeeShiftSpansMidnight($employee) || employeeIsMultiShift($employee)) {
+                $untilExclusive = getShiftSessionEnd($employee, $openIn);
+            } else {
+                $untilExclusive = \Carbon\Carbon::parse($attendanceDate)->endOfDay();
+            }
+        }
+
+        $afterOpenIn = $openIn->copy()->addSecond();
+
+        $query = \App\Models\EsslLog::query()
+            ->where('user_id', $employee->user_id)
+            ->where('log_date', '>=', $afterOpenIn->format('Y-m-d H:i:s'))
+            ->where('log_date', '<', $untilExclusive->format('Y-m-d H:i:s'));
+
+        $firstLog = $query->orderBy('log_date')->first();
+
+        if (!$firstLog) {
+            return null;
+        }
+
+        $punchDt = \Carbon\Carbon::parse($firstLog->log_date);
+
+        return [
+            'direction' => normalizePunchDirection($firstLog->direction),
+            'time' => $punchDt->format('H:i'),
+            'at' => $punchDt,
+        ];
     }
 }
 
@@ -1054,37 +1258,59 @@ if (!function_exists('fetchNextCalendarDayFirstPunch')) {
 
 if (!function_exists('enrichMispunchPairsForRecord')) {
     /**
-     * Rule 1: If next calendar day's first punch is OUT, close open IN on this record.
-     * Rule 2: If that first punch is IN, leave open IN as missing OUT (mispunch).
+     * Before session end: defer open IN. After session end: if first punch after open IN is OUT, close pair.
+     * If that punch is IN, leave as mispunch.
      *
      * @param  array<int, array{in: string, out: string}>  $pairs
-     * @return array<int, array{in: string, out: string, out_next_day?: bool}>
+     * @return array<int, array{in: string, out: string, pending_next_day?: bool}>
      */
     function enrichMispunchPairsForRecord($record, array $pairs): array
     {
-        $employee = $record->employee ?? null;
-        if (!$employee && method_exists($record, 'employee')) {
-            $employee = $record->employee()->with(['shift.slots'])->first();
+        $employee = resolveEmployeeForBiometricRecord($record);
+        if ($employee && !$employee->relationLoaded('shift')) {
+            $employee->load('shift.slots');
         }
 
         $attDate = \Carbon\Carbon::parse($record->attendance_date)->format('Y-m-d');
 
         foreach ($pairs as &$pair) {
-            unset($pair['out_next_day']);
+            unset($pair['pending_next_day'], $pair['suggested_out']);
 
             if (empty($pair['in']) || !empty($pair['out'])) {
                 continue;
             }
 
-            if (shouldDeferOpenInMispunch($employee, $attDate)) {
+            $openInCarbon = null;
+            try {
+                $openInCarbon = \Carbon\Carbon::parse($attDate . ' ' . substr($pair['in'], 0, 5));
+            } catch (\Throwable $e) {
+                // ignore
+            }
+
+            if (shouldDeferOpenInMispunch($employee, $attDate, null, $openInCarbon)) {
                 $pair['pending_next_day'] = true;
                 continue;
             }
 
-            $firstNextDay = fetchNextCalendarDayFirstPunch($employee, $attDate);
-            if ($firstNextDay && $firstNextDay['direction'] === 'out') {
-                $pair['out'] = $firstNextDay['time'];
-                $pair['out_next_day'] = true;
+            $sessionEnd = $employee && $openInCarbon
+                ? getShiftSessionEnd($employee, $openInCarbon)
+                : null;
+            $firstAfterIn = fetchFirstPunchAfterOpenIn(
+                $employee,
+                $attDate,
+                $pair['in'],
+                $sessionEnd,
+                $openInCarbon
+            );
+
+            if (
+                $firstAfterIn
+                && $firstAfterIn['direction'] === 'out'
+                && !empty($firstAfterIn['at'])
+                && (!$employee || resolveShiftAttendanceDate($employee, $firstAfterIn['at'], 'out') === $attDate)
+            ) {
+                $pair['out'] = $firstAfterIn['time'];
+                $pair['suggested_out'] = true;
             }
         }
         unset($pair);
@@ -1127,7 +1353,12 @@ if (!function_exists('getMispunchIssuesFromPairs')) {
                 }
                 $issues[] = "Pair {$n}: missing OUT";
             }
-            if (!empty($pair['in']) && !empty($pair['out']) && $pair['in'] === $pair['out']) {
+            if (
+                !empty($pair['in'])
+                && !empty($pair['out'])
+                && $pair['in'] === $pair['out']
+                && empty($pair['suggested_out'])
+            ) {
                 $issues[] = "Pair {$n}: IN and OUT same time ({$pair['in']})";
             }
         }
@@ -1213,21 +1444,63 @@ if (!function_exists('buildMispunchPairsForReport')) {
                 $issue = 'Same time';
             }
 
-            $outLabel = $pair['out'] ?: null;
-            if ($outLabel && !empty($pair['out_next_day'])) {
-                $outLabel .= ' (+1 day)';
-            }
-
             $result[] = [
                 'num' => $num,
                 'in' => $pair['in'] ?: null,
-                'out' => $outLabel,
+                'out' => $pair['out'] ?: null,
                 'complete' => $issue === null,
                 'issue' => $issue,
             ];
         }
 
         return $result;
+    }
+}
+
+if (!function_exists('resolveEmployeeForBiometricRecord')) {
+    /**
+     * Load employee for attendance (bypass branch scope; fallback by employee_code).
+     */
+    function resolveEmployeeForBiometricRecord($record): ?\App\Models\Employee
+    {
+        if ($record->relationLoaded('employee') && $record->employee) {
+            $employee = $record->employee;
+            if (!$employee->relationLoaded('shift')) {
+                $employee->load('shift.slots');
+            }
+
+            return $employee;
+        }
+
+        $employee = $record->employee()
+            ->with(['user', 'department', 'designation', 'shift.slots'])
+            ->first();
+
+        if ($employee) {
+            return $employee;
+        }
+
+        $code = $record->employee_code ?? null;
+        if (!$code) {
+            return null;
+        }
+
+        return \App\Models\Employee::withoutGlobalScopes()
+            ->withTrashed()
+            ->with(['user', 'department', 'designation', 'shift.slots'])
+            ->where('emy_code', $code)
+            ->first();
+    }
+}
+
+if (!function_exists('getEmployeeDisplayNameForRecord')) {
+    function getEmployeeDisplayNameForRecord($record): string
+    {
+        $employee = resolveEmployeeForBiometricRecord($record);
+
+        return $employee?->user?->name
+            ?? $record->employee_code
+            ?? '—';
     }
 }
 
@@ -1264,10 +1537,12 @@ if (!function_exists('buildMispunchReportRowFromRecord')) {
             ? \Carbon\Carbon::parse($record->out_time)->format('H:i')
             : ($pairs[count($pairs) - 1]['out'] ?? '---');
 
+        $displayName = $employee->user?->name ?? $record->employee_code ?? 'N/A';
+
         return [
             'date' => \Carbon\Carbon::parse($record->attendance_date)->format('d/m/Y'),
-            'name' => strtoupper(optional($employee->user)->name ?? 'N/A'),
-            'code' => $employee->emy_code ?? $employee->employee_id,
+            'name' => strtoupper($displayName),
+            'code' => $employee->emy_code ?? $employee->employee_id ?? $record->employee_code,
             'dept' => strtoupper(optional($employee->department)->name ?? '---'),
             'designation' => strtoupper(optional($employee->designation)->name ?? '---'),
             'is_multiple' => $isMultiple,
@@ -2597,5 +2872,45 @@ if (!function_exists('isAllowedFinancialYearOption')) {
     function isAllowedFinancialYearOption(?string $year): bool
     {
         return $year !== null && $year !== '' && in_array($year, financialYearSelectOptions(), true);
+    }
+}
+
+if (!function_exists('countEmployeesInBranchForMaster')) {
+    /**
+     * Count employees in the employees table for a branch-wise master FK (department, shift, etc.).
+     */
+    function countEmployeesInBranchForMaster(string $column, int $masterId, int $branchId): int
+    {
+        return (int) \App\Models\Employee::query()
+            ->withoutGlobalScope(\App\Models\Scopes\BranchScope::class)
+            ->where('branch_id', $branchId)
+            ->where($column, $masterId)
+            ->count();
+    }
+}
+
+if (!function_exists('countEmployeesInBranchForSkill')) {
+    /**
+     * skill_id is JSON (often string ids like ["1"]); match int and string for branch-wise delete checks.
+     */
+    function countEmployeesInBranchForSkill(int $skillId, int $branchId): int
+    {
+        return (int) \App\Models\Employee::query()
+            ->withoutGlobalScope(\App\Models\Scopes\BranchScope::class)
+            ->where('branch_id', $branchId)
+            ->where(function ($q) use ($skillId) {
+                $q->whereJsonContains('skill_id', $skillId)
+                    ->orWhereJsonContains('skill_id', (string) $skillId);
+            })
+            ->count();
+    }
+}
+
+if (!function_exists('applyMasterDeleteAttributes')) {
+    function applyMasterDeleteAttributes(\Illuminate\Database\Eloquent\Model $model, bool $canDelete, ?string $blockReason, int $employeesCount = 0): void
+    {
+        $model->setAttribute('can_delete', $canDelete);
+        $model->setAttribute('delete_block_reason', $blockReason);
+        $model->setAttribute('employees_count', $employeesCount);
     }
 }

@@ -49,9 +49,21 @@ class SectionController extends Controller
             $query->latest();
         }
 
-        $sections = $query->withCount('employees')
-            ->paginate($request->per_page ?? 10)
-            ->withQueryString();
+        $sections = $query->paginate($request->per_page ?? 10)->withQueryString();
+
+        $sections->getCollection()->transform(function (Section $section) {
+            $employeesCount = countEmployeesInBranchForMaster(
+                'section_id',
+                (int) $section->id,
+                (int) $section->branch_id
+            );
+            $blockReason = $employeesCount > 0
+                ? __('Cannot delete: :count employee(s) in this branch use this section.', ['count' => $employeesCount])
+                : null;
+            applyMasterDeleteAttributes($section, $blockReason === null, $blockReason, $employeesCount);
+
+            return $section;
+        });
 
         $branches = Branch::all();
 
@@ -142,8 +154,13 @@ class SectionController extends Controller
      */
     public function destroy(Section $section)
     {
-        if ($section->employees()->exists()) {
-            return redirect()->back()->with('error', 'Cannot delete section because it is used in employees.');
+        $employeesCount = countEmployeesInBranchForMaster(
+            'section_id',
+            (int) $section->id,
+            (int) $section->branch_id
+        );
+        if ($employeesCount > 0) {
+            return redirect()->back()->with('error', __('Cannot delete: :count employee(s) in this branch use this section.', ['count' => $employeesCount]));
         }
 
         $this->logMasterDeleted($section);

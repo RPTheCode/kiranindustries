@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Employee;
 use App\Models\Shift;
 use App\Models\Branch;
+use App\Models\Scopes\BranchScope;
 use App\Services\ActivityLogger;
 use App\Services\ShiftDutyRuleService;
 use Illuminate\Http\Request;
@@ -15,6 +17,35 @@ use Inertia\Inertia;
 class ShiftController extends Controller
 {
     use Concerns\LogsMasterCrud;
+
+    /**
+     * Shift cannot be deleted while allocated to employees or referenced in attendance.
+     *
+     * @return array{can_delete: bool, employees_count: int, attendance_records_count: int, production_entries_count: int, block_reason: ?string}
+     */
+    private function shiftDeletionMeta(Shift $shift): array
+    {
+        $employeesCount = countEmployeesInBranchForMaster('shift_id', (int) $shift->id, (int) $shift->branch_id);
+        $attendanceCount = (int) DB::table('attendance_records')->where('shift_id', $shift->id)->count();
+        $productionCount = (int) DB::table('daily_production_attendance_entries')->where('shift_id', $shift->id)->count();
+
+        $blockReason = null;
+        if ($employeesCount > 0) {
+            $blockReason = __('Cannot delete: :count employee(s) in this branch use this shift.', ['count' => $employeesCount]);
+        } elseif ($attendanceCount > 0) {
+            $blockReason = __('Cannot delete: :count attendance record(s) use this shift.', ['count' => $attendanceCount]);
+        } elseif ($productionCount > 0) {
+            $blockReason = __('Cannot delete: :count production attendance entries use this shift.', ['count' => $productionCount]);
+        }
+
+        return [
+            'can_delete' => $blockReason === null,
+            'employees_count' => $employeesCount,
+            'attendance_records_count' => $attendanceCount,
+            'production_entries_count' => $productionCount,
+            'block_reason' => $blockReason,
+        ];
+    }
 
     private function calculateShiftDurationMinutes(string $startTime, string $endTime): int
     {
@@ -90,37 +121,66 @@ class ShiftController extends Controller
 
     public function index(Request $request)
     {
-        $query = Shift::withPermissionCheck()
-            ->with(['creator', 'branch', 'slots.dutyRules']);
+        $activeBranchId = session('active_branch_id');
 
-        // Handle search
-        if ($request->has('search') && !empty($request->search)) {
-            $query->where(function ($q) use ($request) {
-                $q->where('name', 'like', '%' . $request->search . '%')
-                    ->orWhere('short_code', 'like', '%' . $request->search . '%')
-                    ->orWhere('description', 'like', '%' . $request->search . '%')
-                    ->orWhereHas('branch', function ($q) use ($request) {
-                        $q->where('name', 'like', '%' . $request->search . '%');
-                    });
+        $baseQuery = Shift::withPermissionCheck()
+            ->withoutGlobalScope(BranchScope::class);
+
+        $branchId = $request->input('branch_id') ?? $activeBranchId;
+
+        $statsQuery = clone $baseQuery;
+        if ($branchId && $branchId !== 'all') {
+            $statsQuery->where('branch_id', $branchId);
+        }
+
+        $statsShiftIds = (clone $statsQuery)->pluck('id');
+
+        $employeeStatsQuery = Employee::query()
+            ->withoutGlobalScope(BranchScope::class)
+            ->whereNotNull('shift_id')
+            ->whereIn('shift_id', $statsShiftIds->isEmpty() ? [-1] : $statsShiftIds);
+
+        if ($branchId && $branchId !== 'all') {
+            $employeeStatsQuery->where('branch_id', $branchId);
+        }
+
+        $stats = [
+            'total' => (clone $statsQuery)->count(),
+            'active' => (clone $statsQuery)->where('status', 'active')->count(),
+            'inactive' => (clone $statsQuery)->where('status', 'inactive')->count(),
+            'total_employees' => (int) $employeeStatsQuery->count(),
+            'branch_id' => ($branchId && $branchId !== 'all') ? (string) $branchId : null,
+        ];
+
+        $query = (clone $baseQuery)->with(['creator', 'branch', 'slots.dutyRules']);
+
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('short_code', 'like', "%{$search}%")
+                    ->orWhere('description', 'like', "%{$search}%");
             });
         }
 
-        // Handle status filter
-        if ($request->has('status') && !empty($request->status) && $request->status !== 'all') {
-            $query->where('status', $request->status);
+        $statusFilter = $request->input('status', 'active');
+        if ($statusFilter !== 'all' && $statusFilter !== '') {
+            $query->where('status', $statusFilter);
         }
 
-        // Handle shift type filter
-        if ($request->has('shift_type') && !empty($request->shift_type) && $request->shift_type !== 'all') {
-            if ($request->shift_type === 'night') {
-                $query->where('is_night_shift', true);
-            } else {
-                $query->where('is_night_shift', false);
-            }
+        $shiftType = $request->input('shift_type', 'all');
+        if ($shiftType !== 'all' && $shiftType !== '') {
+            match ($shiftType) {
+                'multi' => $query->where('is_multi', true),
+                'fixed' => $query->where('is_multi', false),
+                'night' => $query->where('is_night_shift', true),
+                'day' => $query->where(function ($q) {
+                    $q->where('is_night_shift', false)->orWhereNull('is_night_shift');
+                }),
+                default => null,
+            };
         }
 
-        // Handle branch filter
-        $branchId = $request->input('branch_id') ?? session('active_branch_id');
         if ($branchId && $branchId !== 'all') {
             $query->where('branch_id', $branchId);
         }
@@ -132,18 +192,54 @@ class ShiftController extends Controller
             $query->orderBy('created_at', 'desc');
         }
 
-        $shifts = $query->paginate($request->per_page ?? 10);
+        $shifts = $query->withCount(['employees', 'attendanceRecords'])->paginate($request->per_page ?? 10);
+
+        $shiftIds = $shifts->getCollection()->pluck('id');
+        $productionCounts = $shiftIds->isEmpty()
+            ? collect()
+            : DB::table('daily_production_attendance_entries')
+                ->whereIn('shift_id', $shiftIds)
+                ->selectRaw('shift_id, COUNT(*) as aggregate')
+                ->groupBy('shift_id')
+                ->pluck('aggregate', 'shift_id');
+
+        $shifts->getCollection()->transform(function (Shift $shift) use ($productionCounts) {
+            $productionCount = (int) ($productionCounts[$shift->id] ?? 0);
+            $employeesCount = countEmployeesInBranchForMaster('shift_id', (int) $shift->id, (int) $shift->branch_id);
+            $attendanceCount = (int) $shift->attendance_records_count;
+
+            $canDelete = $employeesCount === 0 && $attendanceCount === 0 && $productionCount === 0;
+            $blockReason = null;
+            if ($employeesCount > 0) {
+                $blockReason = __('Assigned to :count employee(s) — reassign before delete.', ['count' => $employeesCount]);
+            } elseif ($attendanceCount > 0) {
+                $blockReason = __('Used in :count attendance record(s) — cannot delete.', ['count' => $attendanceCount]);
+            } elseif ($productionCount > 0) {
+                $blockReason = __('Used in :count production entries — cannot delete.', ['count' => $productionCount]);
+            }
+
+            applyMasterDeleteAttributes($shift, $canDelete, $blockReason, $employeesCount);
+            $shift->setAttribute('production_entries_count', $productionCount);
+            $shift->setAttribute('attendance_records_count', $attendanceCount);
+
+            return $shift;
+        });
 
         $branches = Branch::all();
 
         $filters = $request->all(['search', 'status', 'shift_type', 'branch_id', 'sort_field', 'sort_direction', 'per_page']);
-        if (!isset($filters['branch_id'])) {
+        if (! isset($filters['status']) || $filters['status'] === null || $filters['status'] === '') {
+            $filters['status'] = 'active';
+        }
+        if (! isset($filters['branch_id'])) {
             $filters['branch_id'] = $branchId ? (string) $branchId : 'all';
         }
 
         return Inertia::render('hr/shifts/index', [
             'shifts' => $shifts,
             'branches' => $branches,
+            'stats' => $stats,
+            'activeBranchId' => $activeBranchId,
             'filters' => $filters,
         ]);
     }
@@ -343,22 +439,9 @@ class ShiftController extends Controller
             ->first();
 
         if ($shift) {
-            // Check if shift is assigned to any employee (including soft-deleted ones for integrity)
-            $employeeCount = DB::table('employees')->where('shift_id', $shiftId)->count();
-            if ($employeeCount > 0) {
-                return redirect()->back()->with('error', __("Cannot delete shift. It is currently assigned to $employeeCount employees. Please reassign them before deleting."));
-            }
-
-            // Check if shift has any attendance records
-            $attendanceCount = DB::table('attendance_records')->where('shift_id', $shiftId)->count();
-            if ($attendanceCount > 0) {
-                return redirect()->back()->with('error', __("Cannot delete shift. It has $attendanceCount attendance records associated with it."));
-            }
-
-            // Check if shift has any production attendance entries
-            $productionCount = DB::table('daily_production_attendance_entries')->where('shift_id', $shiftId)->count();
-            if ($productionCount > 0) {
-                return redirect()->back()->with('error', __("Cannot delete shift. It has $productionCount production attendance entries associated with it."));
+            $meta = $this->shiftDeletionMeta($shift);
+            if (!$meta['can_delete']) {
+                return redirect()->back()->with('error', $meta['block_reason']);
             }
 
             try {

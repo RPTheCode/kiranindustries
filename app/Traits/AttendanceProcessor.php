@@ -46,8 +46,11 @@ trait AttendanceProcessor
         }
 
         $isMisPunch = (bool) ($record['is_mis_punch'] ?? false);
+        $openInCarbon = function_exists('getOpenInCarbonFromLogDetails')
+            ? getOpenInCarbonFromLogDetails($dateStr, $logDetails)
+            : null;
         $deferOpenIn = function_exists('shouldDeferOpenInMispunch')
-            && shouldDeferOpenInMispunch($emp, $dateStr)
+            && shouldDeferOpenInMispunch($emp, $dateStr, null, $openInCarbon)
             && function_exists('logDetailsHasOpenIn')
             && logDetailsHasOpenIn($logDetails);
 

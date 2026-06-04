@@ -447,17 +447,22 @@ class ReportController extends Controller
 
         $ids = explode(',', $idsStr);
         
-        $records = \App\Models\BiometricAttendance::with(['employee.user', 'employee.department', 'employee.designation'])
+        $records = \App\Models\BiometricAttendance::with(['employee.user', 'employee.department', 'employee.designation', 'employee.shift.slots'])
             ->whereIn('id', $ids)
+            ->orderBy('employee_code')
             ->get();
 
         $reportData = [];
         foreach ($records as $record) {
-            $employee = $record->employee;
-            if (!$employee) continue;
+            $employee = resolveEmployeeForBiometricRecord($record);
+            if (!$employee) {
+                continue;
+            }
 
             $reportData[] = buildMispunchReportRowFromRecord($record, $employee);
         }
+
+        usort($reportData, fn ($a, $b) => strnatcmp((string) ($a['code'] ?? ''), (string) ($b['code'] ?? '')));
 
         // Get logo
         $logoDark = getSetting('logoDark');
@@ -532,7 +537,8 @@ class ReportController extends Controller
         
         $query = BiometricAttendance::with(['employee.user', 'employee.department', 'employee.designation', 'employee.shift.slots'])
             ->where('attendance_date', $yesterday)
-            ->where('status', 'MIS');
+            ->where('status', 'MIS')
+            ->orderBy('employee_code');
             
         if ($branchId && $branchId !== 'all') {
             $query->where('branch_id', $branchId);
@@ -550,7 +556,7 @@ class ReportController extends Controller
         }
 
         $reportData = $records->map(function ($record) {
-            $employee = $record->employee;
+            $employee = resolveEmployeeForBiometricRecord($record);
             if (!$employee) {
                 return null;
             }
@@ -558,7 +564,9 @@ class ReportController extends Controller
             return buildMispunchReportRowFromRecord($record, $employee);
         })->filter(function ($row) {
             return $row && !empty($row['has_incomplete']);
-        })->values()->toArray();
+        })->values()->all();
+
+        usort($reportData, fn ($a, $b) => strnatcmp((string) ($a['code'] ?? ''), (string) ($b['code'] ?? '')));
 
         $logo = null;
         $settingLogo = getSetting('app_logo');

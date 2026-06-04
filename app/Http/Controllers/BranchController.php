@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Branch;
+use App\Models\Employee;
+use App\Models\Scopes\BranchScope;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
@@ -56,25 +58,46 @@ class BranchController extends Controller
     }
     public function index(Request $request)
     {
-        $query = Branch::withPermissionCheck()
-            ->withCount([
-                'employees' => function ($query) {
-                    $query->withoutGlobalScope(\App\Models\Scopes\BranchScope::class);
-                },
-                'departments' => function ($query) {
-                    $query->withoutGlobalScope(\App\Models\Scopes\BranchScope::class);
-                }
-            ]);
+        $activeBranchId = session('active_branch_id');
 
-        // Handle search
-        if ($request->has('search') && !empty($request->search)) {
-            $query->where('name', 'like', '%' . $request->search . '%')
-                ->orWhere('email', 'like', '%' . $request->search . '%')
-                ->orWhere('phone', 'like', '%' . $request->search . '%');
+        $baseQuery = Branch::withPermissionCheck();
+
+        $stats = [
+            'total' => (clone $baseQuery)->count(),
+            'active' => (clone $baseQuery)->where('status', 'active')->count(),
+            'inactive' => (clone $baseQuery)->where('status', 'inactive')->count(),
+            'total_employees' => (int) Employee::query()
+                ->withoutGlobalScope(BranchScope::class)
+                ->whereIn('branch_id', (clone $baseQuery)->pluck('id'))
+                ->count(),
+        ];
+
+        $query = (clone $baseQuery)->withCount([
+            'employees' => function ($query) {
+                $query->withoutGlobalScope(BranchScope::class);
+            },
+            'departments' => function ($query) {
+                $query->withoutGlobalScope(BranchScope::class);
+            },
+        ]);
+
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%")
+                    ->orWhere('phone', 'like', "%{$search}%")
+                    ->orWhere('city', 'like', "%{$search}%")
+                    ->orWhere('in_charge_name', 'like', "%{$search}%");
+            });
         }
 
-        // Handle sorting
-        if ($request->has('sort_field') && !empty($request->sort_field)) {
+        $statusFilter = $request->input('status', 'all');
+        if ($statusFilter !== 'all' && $statusFilter !== '') {
+            $query->where('status', $statusFilter);
+        }
+
+        if ($request->filled('sort_field')) {
             $query->orderBy($request->sort_field, $request->sort_direction ?? 'asc');
         } else {
             $query->orderBy('id', 'desc');
@@ -82,9 +105,34 @@ class BranchController extends Controller
 
         $branches = $query->paginate($request->per_page ?? 10);
 
+        $branches->getCollection()->transform(function (Branch $branch) use ($activeBranchId) {
+            $employeesCount = (int) $branch->employees_count;
+            $departmentsCount = (int) $branch->departments_count;
+
+            $blockReason = null;
+            if ($employeesCount > 0) {
+                $blockReason = __('Cannot delete: :count employee(s) assigned to this branch.', ['count' => $employeesCount]);
+            } elseif ($departmentsCount > 0) {
+                $blockReason = __('Cannot delete: :count department(s) exist in this branch.', ['count' => $departmentsCount]);
+            }
+
+            applyMasterDeleteAttributes($branch, $blockReason === null, $blockReason, $employeesCount);
+            $branch->setAttribute('departments_count', $departmentsCount);
+            $branch->setAttribute('is_current', $activeBranchId && (int) $activeBranchId === (int) $branch->id);
+
+            return $branch;
+        });
+
+        $filters = $request->all(['search', 'status', 'sort_field', 'sort_direction', 'per_page']);
+        if (! isset($filters['status']) || $filters['status'] === null || $filters['status'] === '') {
+            $filters['status'] = 'all';
+        }
+
         return Inertia::render('hr/branches/index', [
             'branches' => $branches,
-            'filters' => $request->all(['search', 'sort_field', 'sort_direction', 'per_page']),
+            'stats' => $stats,
+            'activeBranchId' => $activeBranchId,
+            'filters' => $filters,
         ]);
     }
 
@@ -189,11 +237,25 @@ class BranchController extends Controller
 
         if ($branch) {
             try {
-                // Check if branch has departments
-                if (class_exists('App\\Models\\Department')) {
-                    $departmentCount = \App\Models\Department::where('branch_id', $branchId)->count();
-                    if ($departmentCount > 0) {
-                        return redirect()->back()->with('error', __('Cannot delete branch with assigned departments'));
+                $employeesCount = (int) Employee::query()
+                    ->withoutGlobalScope(BranchScope::class)
+                    ->where('branch_id', $branchId)
+                    ->count();
+                if ($employeesCount > 0) {
+                    return redirect()->back()->with('error', __('Cannot delete: :count employee(s) assigned to this branch.', ['count' => $employeesCount]));
+                }
+
+                $departmentCount = \App\Models\Department::withoutGlobalScope(BranchScope::class)
+                    ->where('branch_id', $branchId)
+                    ->count();
+                if ($departmentCount > 0) {
+                    return redirect()->back()->with('error', __('Cannot delete: :count department(s) exist in this branch.', ['count' => $departmentCount]));
+                }
+
+                if (session('active_branch_id') == $branch->id) {
+                    session()->forget('active_branch_id');
+                    if (auth()->user()) {
+                        auth()->user()->update(['last_active_branch_id' => null]);
                     }
                 }
 

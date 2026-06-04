@@ -8,3 +8,8 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 \Illuminate\Support\Facades\Schedule::command('reports:cleanup')->daily();
+
+\Illuminate\Support\Facades\Schedule::command('activity-logs:cleanup')
+    ->dailyAt('03:00')
+    ->withoutOverlapping()
+    ->appendOutputTo(storage_path('logs/activity_logs_cleanup.log'));

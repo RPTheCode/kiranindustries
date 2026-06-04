@@ -52,6 +52,7 @@ interface AttendanceRecord {
     status: string;
     base_shift?: string;
     log_details?: string;
+    employee_display_name?: string;
     employee: {
         user: { name: string };
     };
@@ -787,9 +788,9 @@ export default function AttendanceSync({
                                                         <span className="text-xs font-bold text-primary shrink-0">{record.employee_code}</span>
                                                         <span
                                                             className="text-sm font-semibold text-slate-800 truncate max-w-[180px] lg:max-w-[280px]"
-                                                            title={record.employee?.user?.name || ''}
+                                                            title={record.employee_display_name || record.employee?.user?.name || ''}
                                                         >
-                                                            {record.employee?.user?.name || '—'}
+                                                            {record.employee_display_name || record.employee?.user?.name || '—'}
                                                         </span>
                                                         {misHint && (
                                                             <Badge variant="outline" className="text-[10px] font-semibold text-red-600 border-red-200 bg-red-50 shrink-0">
@@ -1061,7 +1062,7 @@ export default function AttendanceSync({
                                             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-2">
                                                 <div className="min-w-0 flex-1">
                                                     <p className="text-sm font-black text-slate-800 dark:text-slate-200 uppercase truncate">
-                                                        {rec.employee?.user?.name || '---'}
+                                                        {rec.employee_display_name || rec.employee?.user?.name || '---'}
                                                     </p>
                                                     <p className="text-[10px] font-bold text-slate-500">
                                                         Code {rec.employee_code} · {new Date(rec.attendance_date).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}

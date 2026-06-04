@@ -341,7 +341,7 @@ class DashboardController extends Controller
 
 
         // MisPunch list for dashboard (24h / yesterday only)
-        $mispunchListQuery = \App\Models\BiometricAttendance::with('employee.user')
+        $mispunchListQuery = \App\Models\BiometricAttendance::with(['employee.user', 'employee.shift.slots'])
             ->where('attendance_date', $mispunch24hDate)
             ->where('status', 'MIS');
 

@@ -231,17 +231,18 @@ Gaps (e.g. 10:27 – 19:45) are **not** counted as work.
 
 ## 7. Cross-Day Open IN (No 24-Hour Grace)
 
-### 7.1 Rules (implemented)
+### 7.1 Rules (implemented — shift session)
 
 | Rule | Behaviour |
 |------|-----------|
-| **Rule 1** | Last punch is IN → next chronological punch must be **OUT** (may be next calendar day). That OUT closes the IN on the IN’s attendance date. |
-| **Rule 2** | Next calendar day’s **first** punch is **IN** → previous day’s open IN stays **unpaired** → **MIS**. New IN starts a fresh cycle. |
-| **Rule 3 (wait)** | Next calendar day has **no punch yet** (duty not started) → **not MIS** until first punch on D+1 appears. |
-| **No 24h grace** | No time-based wait; only “first punch of next day” decides. |
+| **Rule 1** | Last punch is IN → next chronological punch must be **OUT** (may be next calendar morning). That OUT closes the IN on the **shift day**. |
+| **Rule 2** | Next punch after open IN is **IN** (no OUT) → previous open IN stays **unpaired** → **MIS**. |
+| **Rule 3 (defer)** | Open IN is **not MIS** until `getShiftSessionEnd()` (e.g. next day 20:00 for night / multi). Day-only: defer while `attendance_date` is today. |
 
-**Sync:** `groupEmployeePunchesByAttendanceDate()` pairs IN→OUT in time order.  
-**Reports:** `enrichMispunchPairsForRecord()` uses next day’s **first** device punch only (OUT closes, IN does not).
+**Shift session helpers:** `resolveShiftAttendanceDate()`, `getShiftSessionStart()`, `getShiftSessionEnd()`, `getShiftAttendanceDateForPunch()`.
+
+**Sync:** `groupEmployeePunchesByAttendanceDate()` buckets by shift day; pairs IN→OUT in time order.  
+**Reports:** `enrichMispunchPairsForRecord()` + `fetchFirstPunchAfterOpenIn()`.
 
 ### 7.2 Examples
 

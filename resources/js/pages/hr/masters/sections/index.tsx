@@ -106,6 +106,13 @@ export default function Sections() {
                 setIsCopyModalOpen(true);
                 break;
             case 'delete':
+                if (item.can_delete === false) {
+                    toast.error(
+                        item.delete_block_reason ||
+                            t('This section is assigned to employees in this branch and cannot be deleted.')
+                    );
+                    return;
+                }
                 setIsDeleteModalOpen(true);
                 break;
             case 'toggle-status':
@@ -430,8 +437,10 @@ export default function Sections() {
             icon: 'Trash2',
             action: 'delete',
             className: 'text-red-500',
-            isDisabled: (item: any) => item.employees_count > 0,
-            disabledTitle: t('Cannot delete section because it is used in employees')
+            isDisabled: (item: any) => item.can_delete === false,
+            disabledTitle: (item: any) =>
+                item.delete_block_reason ||
+                t('This section is assigned to employees in this branch and cannot be deleted.'),
         }
     ];
 

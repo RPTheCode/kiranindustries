@@ -1,8 +1,8 @@
 // pages/hr/skills/index.tsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { PageTemplate } from '@/components/page-template';
 import { usePage, router } from '@inertiajs/react';
-import { Plus, FileUp, FileText, Copy } from 'lucide-react';
+import { Plus, FileUp, FileText, Copy, Users } from 'lucide-react';
 import { hasPermission } from '@/utils/authorization';
 import { CrudTable } from '@/components/CrudTable';
 import { CrudFormModal } from '@/components/CrudFormModal';
@@ -15,17 +15,27 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 import { CopyToBranchesModal } from '@/components/CopyToBranchesModal';
 
 export default function Skills() {
     const { t } = useTranslation();
-    const { auth, skills, branches = [], activeBranchId, filters: pageFilters = {} } = usePage().props as any;
+    const { auth, skills, branches = [], stats = {}, activeBranchId, filters: pageFilters = {} } = usePage().props as any;
     const permissions = auth?.permissions || [];
+    const sessionActiveBranchId = activeBranchId ?? auth?.active_branch_id ?? null;
+    const defaultStatus = 'all';
+
+    const branchFilterFromUrl = pageFilters.branch_id
+        ? String(pageFilters.branch_id)
+        : sessionActiveBranchId
+            ? String(sessionActiveBranchId)
+            : 'all';
 
     // State
     const [searchTerm, setSearchTerm] = useState(pageFilters.search || '');
-    const [selectedBranch, setSelectedBranch] = useState(pageFilters.branch_id || 'all');
-    const [selectedStatus, setSelectedStatus] = useState(pageFilters.status || 'all');
+    const [selectedBranch, setSelectedBranch] = useState(branchFilterFromUrl);
+    const [selectedStatus, setSelectedStatus] = useState(pageFilters.status ?? defaultStatus);
     const [selectedSkills, setSelectedSkills] = useState<number[]>([]);
 
     // Modal state
@@ -45,21 +55,50 @@ export default function Skills() {
     const [importFile, setImportFile] = useState<File | null>(null);
     const [importErrors, setImportErrors] = useState<string | null>(null);
 
-    // Clipboard utility
-    const copyToClipboardText = (text: string, message: string) => {
-        navigator.clipboard.writeText(text);
-        toast.success(message);
-    };
+    useEffect(() => {
+        setSelectedBranch(branchFilterFromUrl);
+        if (pageFilters.status) {
+            setSelectedStatus(pageFilters.status);
+        }
+    }, [pageFilters.branch_id, pageFilters.status]);
 
-    // Check if any filters are active
-    const hasActiveFilters = () => {
-        return searchTerm !== '' || selectedStatus !== 'all' || selectedBranch !== 'all';
-    };
+    const listQueryParams = (extra: Record<string, unknown> = {}) => ({
+        page: 1,
+        search: searchTerm || undefined,
+        branch_id: selectedBranch,
+        status: selectedStatus,
+        per_page: pageFilters.per_page,
+        sort_field: pageFilters.sort_field,
+        sort_direction: pageFilters.sort_direction,
+        ...extra,
+    });
 
-    // Count active filters
-    const activeFilterCount = () => {
-        return (searchTerm ? 1 : 0) + (selectedStatus !== 'all' ? 1 : 0) + (selectedBranch !== 'all' ? 1 : 0);
-    };
+    const defaultBranchFilter = sessionActiveBranchId ? String(sessionActiveBranchId) : 'all';
+
+    const showBranchColumn =
+        !sessionActiveBranchId || selectedBranch === 'all' || String(selectedBranch) !== String(sessionActiveBranchId);
+
+    const hasActiveFilters = () =>
+        searchTerm !== '' ||
+        selectedStatus !== defaultStatus ||
+        selectedBranch !== defaultBranchFilter;
+
+    const activeFilterCount = () =>
+        (searchTerm ? 1 : 0) +
+        (selectedStatus !== defaultStatus ? 1 : 0) +
+        (selectedBranch !== defaultBranchFilter ? 1 : 0);
+
+    const filteredBranchName =
+        selectedBranch !== 'all' ? branches.find((b: any) => String(b.id) === selectedBranch)?.name : null;
+
+    const activeBranchName = sessionActiveBranchId
+        ? branches.find((b: any) => String(b.id) === String(sessionActiveBranchId))?.name
+        : null;
+
+    const isViewingOtherBranch =
+        selectedBranch !== 'all' &&
+        sessionActiveBranchId &&
+        String(selectedBranch) !== String(sessionActiveBranchId);
 
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault();
@@ -68,35 +107,41 @@ export default function Skills() {
 
     const handleSearchClear = () => {
         setSearchTerm('');
-        router.get(route('hr.skills.index'), {
-            page: 1,
-            search: undefined,
-            status: selectedStatus !== 'all' ? selectedStatus : undefined,
-            branch_id: selectedBranch !== 'all' ? selectedBranch : undefined,
-            per_page: pageFilters.per_page
-        }, { preserveState: true, preserveScroll: true });
+        router.get(route('hr.skills.index'), listQueryParams({ search: undefined }), {
+            preserveState: true,
+            preserveScroll: true,
+        });
     };
 
     const applyFilters = () => {
-        router.get(route('hr.skills.index'), {
-            page: 1,
-            search: searchTerm || undefined,
-            status: selectedStatus !== 'all' ? selectedStatus : undefined,
-            branch_id: selectedBranch !== 'all' ? selectedBranch : undefined,
-            per_page: pageFilters.per_page
-        }, { preserveState: true, preserveScroll: true });
+        router.get(route('hr.skills.index'), listQueryParams(), { preserveState: true, preserveScroll: true });
+    };
+
+    const handleSort = (field: string) => {
+        const direction = pageFilters.sort_field === field && pageFilters.sort_direction === 'asc' ? 'desc' : 'asc';
+        router.get(
+            route('hr.skills.index'),
+            listQueryParams({ sort_field: field, sort_direction: direction }),
+            { preserveState: true, preserveScroll: true }
+        );
     };
 
     const handleResetFilters = () => {
         setSearchTerm('');
-        setSelectedBranch('all');
-        setSelectedStatus('all');
+        setSelectedBranch(defaultBranchFilter);
+        setSelectedStatus(defaultStatus);
         setShowFilters(false);
 
-        router.get(route('hr.skills.index'), {
-            page: 1,
-            per_page: pageFilters.per_page
-        }, { preserveState: true, preserveScroll: true });
+        router.get(
+            route('hr.skills.index'),
+            {
+                page: 1,
+                per_page: pageFilters.per_page,
+                status: defaultStatus,
+                branch_id: defaultBranchFilter,
+            },
+            { preserveState: true, preserveScroll: true }
+        );
     };
 
     const handleAction = (action: string, item: any) => {
@@ -116,6 +161,13 @@ export default function Skills() {
                 setIsCopyModalOpen(true);
                 break;
             case 'delete':
+                if (!item.can_delete) {
+                    toast.error(
+                        item.delete_block_reason ||
+                            t('This skill is assigned to employees in this branch and cannot be deleted.')
+                    );
+                    return;
+                }
                 setIsDeleteModalOpen(true);
                 break;
             case 'toggle-status':
@@ -267,12 +319,6 @@ export default function Skills() {
         });
     };
 
-    const handleResetFilterStates = () => {
-        setSearchTerm('');
-        setSelectedBranch('all');
-        setSelectedStatus('all');
-    };
-
     const handleImportModalOpenChange = (open: boolean) => {
         setIsImportModalOpen(open);
         if (!open) {
@@ -344,7 +390,7 @@ export default function Skills() {
                 label: `${t('Copy Selected to Branches')} (${selectedSkills.length})`,
                 icon: <Copy className="h-4 w-4 mr-2" />,
                 variant: 'secondary' as const,
-                className: 'bg-purple-600 hover:bg-purple-700 text-white border-none',
+                className: 'theme-bg hover:opacity-90 text-white border-none',
                 onClick: () => {
                     setIsBulkCopy(true);
                     setIsCopyModalOpen(true);
@@ -383,18 +429,23 @@ export default function Skills() {
 
     const breadcrumbs = [
         { title: t('Dashboard'), href: route('dashboard') },
-        { title: t('Skills') }
+        { title: t('Skill Management'), href: route('hr.skills.index') },
+        { title: t('Skills') },
     ];
 
-    // Define table columns
-    const columns = [
-        // Checkbox column
+    const checkboxClass =
+        'rounded border-slate-300 h-4 w-4 cursor-pointer accent-[var(--theme-color)] focus:ring-[color-mix(in_srgb,var(--theme-color)_40%,transparent)]';
+
+    const isSkillActive = (record: any) =>
+        record.status === true || record.status === 1 || record.status === 'active';
+
+    const tableColumns = [
         {
             key: 'select',
             label: (
                 <input
                     type="checkbox"
-                    className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 h-4 w-4 cursor-pointer"
+                    className={checkboxClass}
                     checked={(skills?.data || []).length > 0 && selectedSkills.length === (skills?.data || []).length}
                     onChange={(e) => {
                         e.target.checked
@@ -406,7 +457,7 @@ export default function Skills() {
             render: (_: any, record: any) => (
                 <input
                     type="checkbox"
-                    className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 h-4 w-4 cursor-pointer"
+                    className={checkboxClass}
                     checked={selectedSkills.includes(record.id)}
                     onChange={(e) => {
                         e.target.checked
@@ -418,104 +469,140 @@ export default function Skills() {
         },
         {
             key: 'name',
-            label: t('Name'),
+            label: t('Skill'),
             sortable: true,
-            render: (value: string) => (
-                <div className="flex items-center gap-1.5 group">
-                    <span>{value}</span>
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            copyToClipboardText(value, t('Name copied to clipboard'));
-                        }}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-slate-600 cursor-pointer border-none bg-transparent"
-                        title={t('Copy to Clipboard')}
-                    >
-                        <Copy className="h-3 w-3" />
-                    </button>
+            render: (_: string, record: any) => (
+                <div className="min-w-[7.5rem] max-w-[12rem]">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 leading-tight truncate" title={record.name}>
+                        {record.name}
+                    </p>
+                    {record.code ? (
+                        <p className="font-mono text-[11px] text-slate-500 mt-0.5">{record.code}</p>
+                    ) : (
+                        <p className="text-[11px] text-slate-400 mt-0.5">—</p>
+                    )}
                 </div>
-            )
+            ),
         },
         {
-            key: 'code',
-            label: t('Short Code'),
-            sortable: true,
-            render: (value: string) => (
-                <div className="flex items-center gap-1.5 group">
-                    <span className="font-mono text-xs font-semibold bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300">{value}</span>
+            key: 'employees_count',
+            label: t('Employees'),
+            render: (_: number, record: any) => {
+                const count = record.employees_count ?? 0;
+                const branchId = record.branch_id ?? record.branch?.id;
+                if (!hasPermission(permissions, 'view-employees') || !branchId) {
+                    return <span className="text-sm tabular-nums text-slate-600">{count}</span>;
+                }
+                return (
                     <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            copyToClipboardText(value, t('Short code copied to clipboard'));
-                        }}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-400 hover:text-slate-600 cursor-pointer border-none bg-transparent"
-                        title={t('Copy to Clipboard')}
+                        type="button"
+                        title={t('View employees with this skill')}
+                        onClick={() =>
+                            router.get(route('hr.employees.index'), {
+                                branch: branchId,
+                                skill: record.id,
+                                status: 'active',
+                            })
+                        }
+                        className="flex items-center gap-1 text-sm font-medium tabular-nums theme-color hover:opacity-80 hover:underline border-none bg-transparent p-0 cursor-pointer"
                     >
-                        <Copy className="h-3 w-3" />
+                        <Users className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--theme-color)' }} />
+                        {count}
                     </button>
-                </div>
-            )
+                );
+            },
         },
-        {
-            key: 'branch',
-            label: t('Branch'),
-            render: (_: any, record: any) => record.branch ? (
-                <span className="inline-flex items-center rounded-md bg-purple-50 dark:bg-purple-900/20 px-2 py-1 text-xs font-medium text-purple-700 dark:text-purple-300 ring-1 ring-inset ring-purple-700/10">
-                    {record.branch.name}
-                </span>
-            ) : (
-                <span className="text-slate-400 italic text-xs">{t('Global')}</span>
-            )
-        },
+        ...(showBranchColumn
+            ? [
+                {
+                    key: 'branch',
+                    label: t('Branch'),
+                    render: (_: any, record: any) => (
+                        <Badge
+                            variant="outline"
+                            className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-slate-50 text-slate-600 border-slate-200"
+                        >
+                            {record.branch?.name || t('N/A')}
+                        </Badge>
+                    ),
+                },
+            ]
+            : []),
         {
             key: 'status',
             label: t('Status'),
-            render: (value: boolean, record: any) => {
-                const isActive = record.status === true || record.status === 1 || record.status === 'active';
+            render: (_: boolean, record: any) => {
+                const isActive = isSkillActive(record);
+                const canToggle =
+                    hasPermission(permissions, 'toggle-status-skills') || hasPermission(permissions, 'edit-skills');
+
                 return (
                     <button
-                        onClick={() => handleAction('toggle-status', record)}
-                        title={isActive ? t('Click to Deactivate') : t('Click to Activate')}
-                        className="flex items-center gap-1.5 cursor-pointer select-none border-none bg-transparent"
+                        type="button"
+                        onClick={() => canToggle && handleAction('toggle-status', record)}
+                        title={
+                            canToggle
+                                ? isActive
+                                    ? t('Click to Deactivate')
+                                    : t('Click to Activate')
+                                : t('No permission to change status')
+                        }
+                        disabled={!canToggle}
+                        className={cn(
+                            'flex items-center gap-1 select-none border-none bg-transparent',
+                            canToggle ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'
+                        )}
                     >
-                        <span className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors duration-200 ease-in-out ${
-                            isActive ? 'bg-emerald-500' : 'bg-slate-300'
-                        }`}>
-                            <span className={`inline-block h-2.5 w-2.5 rounded-full bg-white shadow transition-transform duration-200 ease-in-out ${
-                                isActive ? 'translate-x-3.5' : 'translate-x-0.5'
-                            }`} />
+                        <span
+                            className={cn(
+                                'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors',
+                                isActive ? 'bg-emerald-500' : 'bg-slate-300'
+                            )}
+                        >
+                            <span
+                                className={cn(
+                                    'inline-block h-2.5 w-2.5 rounded-full bg-white shadow transition-transform',
+                                    isActive ? 'translate-x-3.5' : 'translate-x-0.5'
+                                )}
+                            />
                         </span>
-                        <span className={`text-[10px] font-semibold uppercase tracking-wide ${
-                            isActive ? 'text-emerald-600' : 'text-slate-400'
-                        }`}>
+                        <span
+                            className={cn(
+                                'text-[10px] font-semibold uppercase tracking-wide',
+                                isActive ? 'text-emerald-600' : 'text-slate-400'
+                            )}
+                        >
                             {isActive ? t('Active') : t('Inactive')}
                         </span>
                     </button>
                 );
             },
         },
-        {
-            key: 'created_at',
-            label: t('Created At'),
-            render: (value: string) => window.appSettings?.formatDateTime(value, false) || new Date(value).toLocaleDateString()
-        }
     ];
 
-    // Define table actions
+    const columns = tableColumns;
+
     const actions = [
+        {
+            label: t('View'),
+            icon: 'Eye',
+            action: 'view',
+            className: 'text-blue-500',
+            requiredPermission: 'view-skills',
+        },
         {
             label: t('Edit'),
             icon: 'Edit',
             action: 'edit',
             className: 'text-amber-500',
-            requiredPermission: 'edit-skills'
+            requiredPermission: 'edit-skills',
         },
         {
             label: t('Copy to Branches'),
             icon: 'Copy',
             action: 'copy',
             className: 'text-purple-500',
-            requiredPermission: 'create-skills'
+            requiredPermission: 'create-skills',
         },
         {
             label: t('Delete'),
@@ -523,9 +610,11 @@ export default function Skills() {
             action: 'delete',
             className: 'text-red-500',
             requiredPermission: 'delete-skills',
-            isDisabled: (item: any) => item.employee_work_histories_count > 0,
-            disabledTitle: t('Cannot delete skill because it is used in employee work history')
-        }
+            isDisabled: (item: any) => !item.can_delete,
+            disabledTitle: (item: any) =>
+                item.delete_block_reason ||
+                t('This skill is assigned to employees in this branch and cannot be deleted.'),
+        },
     ];
 
     const statusOptions = [
@@ -550,8 +639,65 @@ export default function Skills() {
             breadcrumbs={breadcrumbs}
             noPadding
         >
-            {/* Search and filters section */}
+            {filteredBranchName && isViewingOtherBranch && (
+                <div
+                    className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm"
+                    style={{
+                        borderColor: 'color-mix(in srgb, var(--theme-color) 28%, transparent)',
+                        backgroundColor: 'color-mix(in srgb, var(--theme-color) 8%, transparent)',
+                        color: 'var(--theme-color)',
+                    }}
+                >
+                    <span>
+                        {t('Showing skills for')}: <strong>{filteredBranchName}</strong>
+                    </span>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            const activeId = String(sessionActiveBranchId);
+                            setSelectedBranch(activeId);
+                            router.get(route('hr.skills.index'), listQueryParams({ branch_id: activeId }), {
+                                preserveState: true,
+                                preserveScroll: true,
+                            });
+                        }}
+                        className="text-xs font-semibold underline border-none bg-transparent cursor-pointer hover:opacity-80"
+                        style={{ color: 'var(--theme-color)' }}
+                    >
+                        {t('Show active branch')}
+                        {activeBranchName ? ` (${activeBranchName})` : ''}
+                    </button>
+                </div>
+            )}
+
             <div className="bg-white dark:bg-gray-900 rounded-lg shadow mb-4 p-4">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500 mb-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                    {filteredBranchName && selectedBranch !== 'all' && (
+                        <>
+                            <span className="font-semibold text-slate-700 dark:text-slate-300">{filteredBranchName}</span>
+                            <span className="text-slate-300">·</span>
+                        </>
+                    )}
+                    <span>
+                        {t('Skills')}{' '}
+                        <span className="font-semibold text-slate-800 dark:text-slate-200 tabular-nums">{stats.total ?? 0}</span>
+                    </span>
+                    <span className="text-slate-300">·</span>
+                    <span>
+                        {t('Active')}{' '}
+                        <span className="font-semibold text-emerald-600 tabular-nums">{stats.active ?? 0}</span>
+                    </span>
+                    <span className="text-slate-300">·</span>
+                    <span>
+                        {t('Inactive')}{' '}
+                        <span className="font-semibold text-slate-600 tabular-nums">{stats.inactive ?? 0}</span>
+                    </span>
+                    <span className="text-slate-300">·</span>
+                    <span>
+                        {t('Employees')}{' '}
+                        <span className="font-semibold tabular-nums theme-color">{stats.total_employees ?? 0}</span>
+                    </span>
+                </div>
                 <SearchAndFilterBar
                     searchTerm={searchTerm}
                     onSearchChange={setSearchTerm}
@@ -583,32 +729,36 @@ export default function Skills() {
                     onApplyFilters={applyFilters}
                     currentPerPage={pageFilters.per_page?.toString() || "10"}
                     onPerPageChange={(value) => {
-                        router.get(route('hr.skills.index'), {
-                            page: 1,
-                            per_page: parseInt(value),
-                            search: searchTerm || undefined,
-                            status: selectedStatus !== 'all' ? selectedStatus : undefined,
-                            branch_id: selectedBranch !== 'all' ? selectedBranch : undefined,
-                        }, { preserveState: true, preserveScroll: true });
+                        router.get(
+                            route('hr.skills.index'),
+                            listQueryParams({ per_page: parseInt(value, 10) }),
+                            { preserveState: true, preserveScroll: true }
+                        );
                     }}
                 />
             </div>
 
-            {/* Content section */}
             <div className="bg-white dark:bg-gray-900 rounded-lg shadow overflow-hidden">
-                <CrudTable
-                    columns={columns}
-                    actions={actions}
-                    data={skills?.data || []}
-                    from={skills?.from || 1}
-                    onAction={handleAction}
-                    permissions={permissions}
-                    entityPermissions={{
-                        view: 'view-skills',
-                        edit: 'edit-skills',
-                        delete: 'delete-skills'
-                    }}
-                />
+                <div className="w-full overflow-x-auto">
+                    <CrudTable
+                        columns={columns}
+                        actions={actions}
+                        data={skills?.data || []}
+                        from={skills?.from || 1}
+                        onAction={handleAction}
+                        sortField={pageFilters.sort_field}
+                        sortDirection={pageFilters.sort_direction}
+                        onSort={handleSort}
+                        permissions={permissions}
+                        dense
+                        stickyActions
+                        entityPermissions={{
+                            view: 'view-skills',
+                            edit: 'edit-skills',
+                            delete: 'delete-skills',
+                        }}
+                    />
+                </div>
 
                 {/* Pagination section */}
                 <Pagination

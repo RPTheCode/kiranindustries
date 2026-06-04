@@ -100,6 +100,13 @@ export default function Categories() {
         setIsFormModalOpen(true);
         break;
       case 'delete':
+        if (item.can_delete === false) {
+          toast.error(
+            item.delete_block_reason ||
+              t('This category is assigned to employees in this branch and cannot be deleted.')
+          );
+          return;
+        }
         setIsDeleteModalOpen(true);
         break;
       case 'toggle-status':
@@ -455,8 +462,10 @@ export default function Categories() {
       icon: 'Trash2',
       action: 'delete',
       className: 'text-red-500',
-      isDisabled: (row: any) => (row.employees_count > 0),
-      disabledTitle: t('This category is in use and cannot be deleted')
+      isDisabled: (row: any) => row.can_delete === false,
+      disabledTitle: (row: any) =>
+        row.delete_block_reason ||
+        t('This category is assigned to employees in this branch and cannot be deleted.'),
     }
   ];
 

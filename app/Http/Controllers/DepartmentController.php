@@ -4,6 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Branch;
 use App\Models\Department;
+use App\Models\Designation;
+use App\Models\Employee;
+use App\Models\Scopes\BranchScope;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -20,38 +23,75 @@ class DepartmentController extends Controller
 
     public function index(Request $request)
     {
-        $query = Department::withPermissionCheck()
+        $activeBranchId = session('active_branch_id');
+
+        $baseQuery = Department::withPermissionCheck()
+            ->withoutGlobalScope(BranchScope::class);
+
+        $branchId = $request->input('branch_id') ?? $activeBranchId;
+
+        $statsQuery = clone $baseQuery;
+        if ($branchId && $branchId !== 'all') {
+            $statsQuery->where('branch_id', $branchId);
+        }
+
+        $statsDeptIds = (clone $statsQuery)->pluck('id');
+
+        $employeeStatsQuery = Employee::query()
+            ->withoutGlobalScope(BranchScope::class)
+            ->whereNotNull('department_id')
+            ->whereIn('department_id', $statsDeptIds->isEmpty() ? [-1] : $statsDeptIds);
+
+        if ($branchId && $branchId !== 'all') {
+            $employeeStatsQuery->where('branch_id', $branchId);
+        }
+
+        $designationStatsQuery = Designation::query()
+            ->withoutGlobalScope(BranchScope::class)
+            ->whereIn('department_id', $statsDeptIds->isEmpty() ? [-1] : $statsDeptIds);
+
+        if ($branchId && $branchId !== 'all') {
+            $designationStatsQuery->where('branch_id', $branchId);
+        }
+
+        $stats = [
+            'total' => (clone $statsQuery)->count(),
+            'active' => (clone $statsQuery)->where('status', 'active')->count(),
+            'inactive' => (clone $statsQuery)->where('status', 'inactive')->count(),
+            'total_employees' => (int) $employeeStatsQuery->count(),
+            'total_designations' => (int) $designationStatsQuery->count(),
+            'branch_id' => ($branchId && $branchId !== 'all') ? (string) $branchId : null,
+        ];
+
+        $query = (clone $baseQuery)
             ->with(['branch', 'creator'])
             ->withCount([
                 'employees' => function ($query) {
-                    $query->withoutGlobalScope(\App\Models\Scopes\BranchScope::class);
+                    $query->withoutGlobalScope(BranchScope::class);
                 },
                 'desginations' => function ($query) {
-                    $query->withoutGlobalScope(\App\Models\Scopes\BranchScope::class);
-                }
+                    $query->withoutGlobalScope(BranchScope::class);
+                },
             ]);
 
-        // Handle search
-        if ($request->has('search') && !empty($request->search)) {
-            $query->where(function ($q) use ($request) {
-                $q->where('name', 'like', '%' . $request->search . '%')
-                    ->orWhere('short_code', 'like', '%' . $request->search . '%')
-                    ->orWhere('code', 'like', '%' . $request->search . '%');
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('short_code', 'like', "%{$search}%")
+                    ->orWhere('code', 'like', "%{$search}%");
             });
         }
 
-        // Handle status filter
-        if ($request->has('status') && !empty($request->status) && $request->status !== 'all') {
-            $query->where('status', $request->status);
+        $statusFilter = $request->input('status', 'all');
+        if ($statusFilter !== 'all' && $statusFilter !== '') {
+            $query->where('status', $statusFilter);
         }
 
-        // Branch-wise filtering: use request branch_id or fall back to active session branch
-        $branchId = $request->input('branch_id') ?? session('active_branch_id');
         if ($branchId && $branchId !== 'all') {
             $query->where('branch_id', $branchId);
         }
 
-        // Handle sorting
         if ($request->has('sort_field') && !empty($request->sort_field)) {
             $query->orderBy($request->sort_field, $request->sort_direction ?? 'asc');
         } else {
@@ -59,17 +99,42 @@ class DepartmentController extends Controller
         }
 
         $departments = $query->paginate($request->per_page ?? 10);
+
+        $departments->getCollection()->transform(function (Department $department) {
+            $employeesCount = countEmployeesInBranchForMaster(
+                'department_id',
+                (int) $department->id,
+                (int) $department->branch_id
+            );
+            $designationsCount = (int) ($department->desginations_count ?? 0);
+
+            $blockReason = null;
+            if ($employeesCount > 0) {
+                $blockReason = __('Cannot delete: :count employee(s) in this branch use this department.', ['count' => $employeesCount]);
+            } elseif ($designationsCount > 0) {
+                $blockReason = __('Cannot delete: :count designation(s) exist under this department.', ['count' => $designationsCount]);
+            }
+
+            applyMasterDeleteAttributes($department, $blockReason === null, $blockReason, $employeesCount);
+
+            return $department;
+        });
+
         $branches = Branch::all();
 
         $filters = $request->all(['search', 'status', 'branch_id', 'sort_field', 'sort_direction', 'per_page']);
-        if (!isset($filters['branch_id'])) {
+        if (! isset($filters['status']) || $filters['status'] === null || $filters['status'] === '') {
+            $filters['status'] = 'all';
+        }
+        if (! isset($filters['branch_id'])) {
             $filters['branch_id'] = $branchId ? (string) $branchId : 'all';
         }
 
         return Inertia::render('hr/departments/index', [
             'departments' => $departments,
             'branches' => $branches,
-            'activeBranchId' => session('active_branch_id'),
+            'stats' => $stats,
+            'activeBranchId' => $activeBranchId,
             'filters' => $filters,
         ]);
     }
@@ -92,6 +157,7 @@ class DepartmentController extends Controller
                 }),
             ],
             'status' => 'nullable|in:active,inactive',
+            'sanction_strength' => 'nullable|integer|min:0|max:99999',
         ]);
 
         $validated['created_by'] = creatorId();
@@ -135,6 +201,7 @@ class DepartmentController extends Controller
                     })->ignore($departmentId),
                 ],
                 'status' => 'nullable|in:active,inactive',
+                'sanction_strength' => 'nullable|integer|min:0|max:99999',
             ]);
 
             $department->update($validated);
@@ -157,14 +224,16 @@ class DepartmentController extends Controller
         }
 
         try {
-            if (class_exists('App\\Models\\Employee')) {
-                $employeeCount = \App\Models\User::where('type', 'employee')
-                    ->whereHas('employee', function ($q) use ($departmentId) {
-                        $q->where('department_id', $departmentId);
-                    })->count();
-                if ($employeeCount > 0) {
-                    return response()->json(['message' => __('Cannot delete department with assigned employees')], 400);
-                }
+            $employeesCount = countEmployeesInBranchForMaster(
+                'department_id',
+                (int) $department->id,
+                (int) $department->branch_id
+            );
+            if ($employeesCount > 0) {
+                return redirect()->back()->with('error', __('Cannot delete: :count employee(s) in this branch use this department.', ['count' => $employeesCount]));
+            }
+            if ($department->desginations()->withoutGlobalScope(\App\Models\Scopes\BranchScope::class)->where('branch_id', $department->branch_id)->exists()) {
+                return redirect()->back()->with('error', __('Cannot delete: designations exist under this department.'));
             }
             $this->logMasterDeleted($department);
             $department->delete();

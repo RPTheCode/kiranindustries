@@ -45,6 +45,16 @@ class Shift extends BaseModel
         return $this->belongsTo(Branch::class);
     }
 
+    public function employees()
+    {
+        return $this->hasMany(Employee::class, 'shift_id');
+    }
+
+    public function attendanceRecords()
+    {
+        return $this->hasMany(AttendanceRecord::class, 'shift_id');
+    }
+
     /**
      * Check if the shift is a night shift.
      */

@@ -13,36 +13,90 @@ use Illuminate\Validation\Rule;
 class SkillController extends Controller
 {
     use Concerns\LogsMasterCrud;
+
+    /**
+     * Skill cannot be deleted while assigned to employees (branch) or used in work history.
+     *
+     * @return array{can_delete: bool, employees_count: int, employee_work_histories_count: int, block_reason: ?string}
+     */
+    private function skillDeletionMeta(Skill $skill, ?int $workHistoryCount = null): array
+    {
+        $employeesCount = $this->countEmployeesAllocatedToSkill($skill);
+        $workHistoryCount = $workHistoryCount ?? (int) ($skill->employee_work_histories_count ?? $skill->employeeWorkHistories()->count());
+
+        $blockReason = null;
+        if ($employeesCount > 0) {
+            $blockReason = __('Cannot delete: :count employee(s) in this branch are assigned this skill.', ['count' => $employeesCount]);
+        } elseif ($workHistoryCount > 0) {
+            $blockReason = __('Cannot delete: skill is used in :count work history record(s).', ['count' => $workHistoryCount]);
+        }
+
+        return [
+            'can_delete' => $blockReason === null,
+            'employees_count' => $employeesCount,
+            'employee_work_histories_count' => $workHistoryCount,
+            'block_reason' => $blockReason,
+        ];
+    }
+
+    private function countEmployeesAllocatedToSkill(Skill $skill): int
+    {
+        return countEmployeesInBranchForSkill((int) $skill->id, (int) $skill->branch_id);
+    }
+
     /**
      * Display a listing of the resource.
      */
     public function index(Request $request)
     {
-        $query = Skill::query()
-            ->with(['branch'])
-            ->whereIn('created_by', getCompanyAndUsersId());
+        $activeBranchId = session('active_branch_id');
+        $companyUserIds = getCompanyAndUsersId();
 
-        // Handle search
-        if ($request->has('search') && !empty($request->search)) {
-            $query->where(function ($q) use ($request) {
-                $search = $request->search;
+        $baseQuery = Skill::query()
+            ->with(['branch'])
+            ->whereIn('created_by', $companyUserIds);
+
+        $branchId = $request->input('branch_id') ?? $activeBranchId;
+
+        $statsQuery = clone $baseQuery;
+        if ($branchId && $branchId !== 'all') {
+            $statsQuery->where('branch_id', $branchId);
+        }
+
+        $statsSkills = (clone $statsQuery)->get();
+        $totalEmployeesAssigned = (int) $statsSkills->sum(
+            fn (Skill $skill) => countEmployeesInBranchForSkill((int) $skill->id, (int) $skill->branch_id)
+        );
+
+        $stats = [
+            'total' => (clone $statsQuery)->count(),
+            'active' => (clone $statsQuery)->where('status', true)->count(),
+            'inactive' => (clone $statsQuery)->where('status', false)->count(),
+            'total_employees' => $totalEmployeesAssigned,
+            'branch_id' => ($branchId && $branchId !== 'all') ? (string) $branchId : null,
+        ];
+
+        $query = clone $baseQuery;
+
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('code', 'like', "%{$search}%");
+                    ->orWhere('code', 'like', "%{$search}%");
             });
         }
 
-        // Branch-wise filtering: use request branch_id or fall back to active session branch
-        $branchId = $request->input('branch_id') ?? session('active_branch_id');
         if ($branchId && $branchId !== 'all') {
             $query->where('branch_id', $branchId);
         }
 
-        // Handle status filter
-        if ($request->has('status') && !empty($request->status) && $request->status !== 'all') {
-            $query->where('status', $request->status === 'active');
+        $statusFilter = $request->input('status', 'all');
+        if ($statusFilter === 'active') {
+            $query->where('status', true);
+        } elseif ($statusFilter === 'inactive') {
+            $query->where('status', false);
         }
 
-        // Handle sorting
         if ($request->has('sort_field') && !empty($request->sort_field)) {
             $query->orderBy($request->sort_field, $request->sort_direction ?? 'asc');
         } else {
@@ -53,18 +107,29 @@ class SkillController extends Controller
             ->paginate($request->per_page ?? 10)
             ->withQueryString();
 
+        $skills->getCollection()->transform(function (Skill $skill) {
+            $meta = $this->skillDeletionMeta($skill, (int) $skill->employee_work_histories_count);
+            applyMasterDeleteAttributes($skill, $meta['can_delete'], $meta['block_reason'], $meta['employees_count']);
+
+            return $skill;
+        });
+
         $branches = Branch::all();
 
         $filters = $request->all(['search', 'status', 'branch_id', 'sort_field', 'sort_direction', 'per_page']);
-        if (!isset($filters['branch_id'])) {
-            $filters['branch_id'] = $branchId ? (string)$branchId : 'all';
+        if (! isset($filters['status']) || $filters['status'] === null || $filters['status'] === '') {
+            $filters['status'] = 'all';
+        }
+        if (! isset($filters['branch_id'])) {
+            $filters['branch_id'] = $branchId ? (string) $branchId : 'all';
         }
 
         return Inertia::render('hr/skills/index', [
             'skills' => $skills,
             'branches' => $branches,
-            'activeBranchId' => session('active_branch_id'),
-            'filters' => $filters
+            'stats' => $stats,
+            'activeBranchId' => $activeBranchId,
+            'filters' => $filters,
         ]);
     }
 
@@ -142,14 +207,15 @@ class SkillController extends Controller
      */
     public function destroy(Skill $skill)
     {
-        if ($skill->employeeWorkHistories()->exists()) {
-            return redirect()->back()->with('error', 'Cannot delete skill because it is used in employee work history.');
+        $meta = $this->skillDeletionMeta($skill);
+        if (! $meta['can_delete']) {
+            return redirect()->back()->with('error', $meta['block_reason']);
         }
 
         $this->logMasterDeleted($skill);
         $skill->delete();
 
-            return redirect()->back()->with('success', 'Skill deleted successfully.');
+        return redirect()->back()->with('success', __('Skill deleted successfully.'));
     }
 
     /**

@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Branch;
 use App\Models\Department;
 use App\Models\Designation;
-use App\Models\Branch;
+use App\Models\Employee;
+use App\Models\Scopes\BranchScope;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -40,38 +42,66 @@ class DesignationController extends Controller
 
     public function index(Request $request)
     {
-        $query = Designation::withPermissionCheck()->with(['department', 'department.branch', 'branch'])
+        $activeBranchId = session('active_branch_id');
+
+        $baseQuery = Designation::withPermissionCheck()
+            ->withoutGlobalScope(BranchScope::class);
+
+        $branchId = $request->input('branch_id') ?? $activeBranchId;
+
+        $statsQuery = clone $baseQuery;
+        if ($branchId && $branchId !== 'all') {
+            $statsQuery->where('branch_id', $branchId);
+        }
+
+        $statsDesignationIds = (clone $statsQuery)->pluck('id');
+
+        $employeeStatsQuery = Employee::query()
+            ->withoutGlobalScope(BranchScope::class)
+            ->whereNotNull('designation_id')
+            ->whereIn('designation_id', $statsDesignationIds->isEmpty() ? [-1] : $statsDesignationIds);
+
+        if ($branchId && $branchId !== 'all') {
+            $employeeStatsQuery->where('branch_id', $branchId);
+        }
+
+        $stats = [
+            'total' => (clone $statsQuery)->count(),
+            'active' => (clone $statsQuery)->where('status', 'active')->count(),
+            'inactive' => (clone $statsQuery)->where('status', 'inactive')->count(),
+            'total_employees' => (int) $employeeStatsQuery->count(),
+            'branch_id' => ($branchId && $branchId !== 'all') ? (string) $branchId : null,
+        ];
+
+        $query = (clone $baseQuery)
+            ->with(['department', 'department.branch', 'branch'])
             ->withCount([
                 'employees' => function ($query) {
-                    $query->withoutGlobalScope(\App\Models\Scopes\BranchScope::class);
-                }
+                    $query->withoutGlobalScope(BranchScope::class);
+                },
             ]);
 
-        // Handle search
-        if ($request->has('search') && !empty($request->search)) {
-            $query->where(function ($q) use ($request) {
-                $q->where('name', 'like', '%' . $request->search . '%')
-                    ->orWhere('code', 'like', '%' . $request->search . '%');
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('code', 'like', "%{$search}%");
             });
         }
 
-        // Handle department filter
-        if ($request->has('department') && !empty($request->department) && $request->department !== 'all') {
+        if ($request->filled('department') && $request->department !== 'all') {
             $query->where('department_id', $request->department);
         }
 
-        // Handle status filter
-        if ($request->has('status') && !empty($request->status) && $request->status !== 'all') {
-            $query->where('status', $request->status);
+        $statusFilter = $request->input('status', 'all');
+        if ($statusFilter !== 'all' && $statusFilter !== '') {
+            $query->where('status', $statusFilter);
         }
 
-        // Branch-wise filtering: use request branch_id or fall back to active session branch
-        $branchId = $request->input('branch_id') ?? session('active_branch_id');
         if ($branchId && $branchId !== 'all') {
             $query->where('branch_id', $branchId);
         }
 
-        // Handle sorting
         if ($request->has('sort_field') && !empty($request->sort_field)) {
             $query->orderBy($request->sort_field, $request->sort_direction ?? 'asc');
         } else {
@@ -79,6 +109,20 @@ class DesignationController extends Controller
         }
 
         $designations = $query->paginate($request->per_page ?? 10);
+
+        $designations->getCollection()->transform(function (Designation $designation) {
+            $employeesCount = countEmployeesInBranchForMaster(
+                'designation_id',
+                (int) $designation->id,
+                (int) $designation->branch_id
+            );
+            $blockReason = $employeesCount > 0
+                ? __('Cannot delete: :count employee(s) in this branch use this designation.', ['count' => $employeesCount])
+                : null;
+            applyMasterDeleteAttributes($designation, $blockReason === null, $blockReason, $employeesCount);
+
+            return $designation;
+        });
 
         // Get departments for dropdown - scoped by branch if filtered
         $departmentsQuery = Department::with('branch')
@@ -92,15 +136,22 @@ class DesignationController extends Controller
         $branches = Branch::all();
 
         $filters = $request->all(['search', 'status', 'branch_id', 'sort_field', 'sort_direction', 'per_page', 'department']);
-        if (!isset($filters['branch_id'])) {
+        if (! isset($filters['status']) || $filters['status'] === null || $filters['status'] === '') {
+            $filters['status'] = 'all';
+        }
+        if (! isset($filters['branch_id'])) {
             $filters['branch_id'] = $branchId ? (string) $branchId : 'all';
+        }
+        if (! isset($filters['department'])) {
+            $filters['department'] = 'all';
         }
 
         return Inertia::render('hr/designations/index', [
             'designations' => $designations,
             'departments' => $departments,
             'branches' => $branches,
-            'activeBranchId' => session('active_branch_id'),
+            'stats' => $stats,
+            'activeBranchId' => $activeBranchId,
             'filters' => $filters,
         ]);
     }
@@ -204,6 +255,15 @@ class DesignationController extends Controller
             ->first();
 
         if ($designation) {
+            $employeesCount = countEmployeesInBranchForMaster(
+                'designation_id',
+                (int) $designation->id,
+                (int) $designation->branch_id
+            );
+            if ($employeesCount > 0) {
+                return redirect()->back()->with('error', __('Cannot delete: :count employee(s) in this branch use this designation.', ['count' => $employeesCount]));
+            }
+
             try {
                 $this->logMasterDeleted($designation);
                 $designation->delete();

@@ -37,3 +37,4 @@ yarn-error.log
 /config/app.php
 /config/verification.php
 /storage/installed
+/debug-*.log

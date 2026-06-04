@@ -1,8 +1,8 @@
 // pages/hr/departments/index.tsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { PageTemplate } from '@/components/page-template';
 import { usePage, router } from '@inertiajs/react';
-import { Plus, FileUp, FileText, Copy } from 'lucide-react';
+import { Plus, FileUp, FileText, Copy, Users, Layers } from 'lucide-react';
 import { hasPermission } from '@/utils/authorization';
 import { CrudTable } from '@/components/CrudTable';
 import { CrudFormModal } from '@/components/CrudFormModal';
@@ -21,12 +21,21 @@ import { CopyToBranchesModal } from '@/components/CopyToBranchesModal';
 
 export default function Departments() {
   const { t } = useTranslation();
-  const { auth, departments, branches = [], filters: pageFilters = {} } = usePage().props as any;
+  const { auth, departments, branches = [], stats = {}, activeBranchId, filters: pageFilters = {} } = usePage().props as any;
   const permissions = auth?.permissions || [];
+  const sessionActiveBranchId = activeBranchId ?? auth?.active_branch_id ?? null;
+  const defaultStatus = 'all';
+
+  const branchFilterFromUrl = pageFilters.branch_id
+    ? String(pageFilters.branch_id)
+    : sessionActiveBranchId
+      ? String(sessionActiveBranchId)
+      : 'all';
 
   // State
   const [searchTerm, setSearchTerm] = useState(pageFilters.search || '');
-  const [selectedStatus, setSelectedStatus] = useState(pageFilters.status || 'all');
+  const [selectedBranch, setSelectedBranch] = useState(branchFilterFromUrl);
+  const [selectedStatus, setSelectedStatus] = useState(pageFilters.status ?? defaultStatus);
   const [showFilters, setShowFilters] = useState(false);
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -46,8 +55,52 @@ const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importErrors, setImportErrors] = useState<string | null>(null);
 
-  const hasActiveFilters = () => searchTerm !== '' || selectedStatus !== 'all';
-  const activeFilterCount = () => (searchTerm ? 1 : 0) + (selectedStatus !== 'all' ? 1 : 0);
+  useEffect(() => {
+    setSelectedBranch(branchFilterFromUrl);
+    if (pageFilters.status) {
+      setSelectedStatus(pageFilters.status);
+    }
+  }, [pageFilters.branch_id, pageFilters.status]);
+
+  const listQueryParams = (extra: Record<string, unknown> = {}) => ({
+    page: 1,
+    search: searchTerm || undefined,
+    branch_id: selectedBranch,
+    status: selectedStatus,
+    per_page: pageFilters.per_page,
+    sort_field: pageFilters.sort_field,
+    sort_direction: pageFilters.sort_direction,
+    ...extra,
+  });
+
+  const showBranchColumn =
+    !sessionActiveBranchId || selectedBranch === 'all' || String(selectedBranch) !== String(sessionActiveBranchId);
+
+  const defaultBranchFilter = sessionActiveBranchId ? String(sessionActiveBranchId) : 'all';
+
+  const hasActiveFilters = () =>
+    searchTerm !== '' ||
+    selectedStatus !== defaultStatus ||
+    selectedBranch !== defaultBranchFilter;
+
+  const activeFilterCount = () =>
+    (searchTerm ? 1 : 0) +
+    (selectedStatus !== defaultStatus ? 1 : 0) +
+    (selectedBranch !== defaultBranchFilter ? 1 : 0);
+
+  const filteredBranchName =
+    selectedBranch !== 'all'
+      ? branches.find((b: any) => String(b.id) === selectedBranch)?.name
+      : null;
+
+  const activeBranchName = sessionActiveBranchId
+    ? branches.find((b: any) => String(b.id) === String(sessionActiveBranchId))?.name
+    : null;
+
+  const isViewingOtherBranch =
+    selectedBranch !== 'all' &&
+    sessionActiveBranchId &&
+    String(selectedBranch) !== String(sessionActiveBranchId);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,33 +109,23 @@ const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
 
   const handleSearchClear = () => {
     setSearchTerm('');
-    router.get(route('hr.departments.index'), {
-      page: 1,
-      search: undefined,
-      status: selectedStatus !== 'all' ? selectedStatus : undefined,
-      per_page: pageFilters.per_page,
-    }, { preserveState: true, preserveScroll: true });
+    router.get(route('hr.departments.index'), listQueryParams({ search: undefined }), {
+      preserveState: true,
+      preserveScroll: true,
+    });
   };
 
   const applyFilters = () => {
-    router.get(route('hr.departments.index'), {
-      page: 1,
-      search: searchTerm || undefined,
-      status: selectedStatus !== 'all' ? selectedStatus : undefined,
-      per_page: pageFilters.per_page,
-    }, { preserveState: true, preserveScroll: true });
+    router.get(route('hr.departments.index'), listQueryParams(), { preserveState: true, preserveScroll: true });
   };
 
   const handleSort = (field: string) => {
     const direction = pageFilters.sort_field === field && pageFilters.sort_direction === 'asc' ? 'desc' : 'asc';
-    router.get(route('hr.departments.index'), {
-      sort_field: field,
-      sort_direction: direction,
-      page: 1,
-      search: searchTerm || undefined,
-      status: selectedStatus !== 'all' ? selectedStatus : undefined,
-      per_page: pageFilters.per_page,
-    }, { preserveState: true, preserveScroll: true });
+    router.get(
+      route('hr.departments.index'),
+      listQueryParams({ sort_field: field, sort_direction: direction }),
+      { preserveState: true, preserveScroll: true }
+    );
   };
 
   const handleAction = (action: string, item: any) => {
@@ -97,6 +140,13 @@ const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
         setIsFormModalOpen(true);
         break;
       case 'delete':
+        if (!item.can_delete) {
+          toast.error(
+            item.delete_block_reason ||
+              t('This department is assigned to employees in this branch and cannot be deleted.')
+          );
+          return;
+        }
         setIsDeleteModalOpen(true);
         break;
       case 'toggle-status':
@@ -230,9 +280,19 @@ const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
 
   const handleResetFilters = () => {
     setSearchTerm('');
-    setSelectedStatus('all');
+    setSelectedBranch(defaultBranchFilter);
+    setSelectedStatus(defaultStatus);
     setShowFilters(false);
-    router.get(route('hr.departments.index'), { page: 1, per_page: pageFilters.per_page }, { preserveState: true, preserveScroll: true });
+    router.get(
+      route('hr.departments.index'),
+      {
+        page: 1,
+        per_page: pageFilters.per_page,
+        status: defaultStatus,
+        branch_id: defaultBranchFilter,
+      },
+      { preserveState: true, preserveScroll: true }
+    );
   };
 
   // ── Page Actions ──────────────────────────────────────────────────
@@ -251,7 +311,7 @@ const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
         label: `${t('Copy Selected')} (${selectedDepts.length})`,
         icon: <Copy className="h-4 w-4 mr-2" />,
         variant: 'secondary' as const,
-        className: 'bg-purple-600 hover:bg-purple-700 text-white border-none',
+        className: 'theme-bg hover:opacity-90 text-white border-none',
         onClick: () => { setIsBulkCopy(true); setSelectedBranchIds([]); setIsCopyModalOpen(true); },
       });
     }
@@ -275,18 +335,20 @@ const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
 
   const breadcrumbs = [
     { title: t('Dashboard'), href: route('dashboard') },
+    { title: t('Department Management'), href: route('hr.departments.index') },
     { title: t('Departments') },
   ];
 
-  // ── Table columns ─────────────────────────────────────────────────
-  const columns = [
-    // Checkbox column
+  const checkboxClass =
+    'rounded border-slate-300 h-4 w-4 cursor-pointer accent-[var(--theme-color)] focus:ring-[color-mix(in_srgb,var(--theme-color)_40%,transparent)]';
+
+  const tableColumns = [
     {
       key: 'select',
       label: (
         <input
           type="checkbox"
-          className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 h-4 w-4 cursor-pointer"
+          className={checkboxClass}
           checked={departments?.data?.length > 0 && selectedDepts.length === departments.data.length}
           onChange={(e) => {
             e.target.checked
@@ -298,7 +360,7 @@ const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
       render: (_: any, record: any) => (
         <input
           type="checkbox"
-          className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 h-4 w-4 cursor-pointer"
+          className={checkboxClass}
           checked={selectedDepts.includes(record.id)}
           onChange={(e) => {
             e.target.checked
@@ -308,57 +370,165 @@ const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
         />
       ),
     },
-    { key: 'name', label: t('Name'), sortable: true },
-    { key: 'short_code', label: t('Short Code'), sortable: true },
-    // Branch badge
     {
-      key: 'branch',
-      label: t('Branch'),
-      render: (_: any, record: any) => (
-        <Badge variant="outline" className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-slate-50 text-slate-600 border-slate-200">
-          {record.branch?.name || t('N/A')}
-        </Badge>
+      key: 'name',
+      label: t('Department'),
+      sortable: true,
+      render: (_: string, record: any) => (
+        <div className="min-w-[8rem] max-w-[14rem]">
+          <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 leading-tight truncate" title={record.name}>
+            {record.name}
+          </p>
+          {record.short_code ? (
+            <p className="font-mono text-[11px] text-slate-500 mt-0.5">{record.short_code}</p>
+          ) : (
+            <p className="text-[11px] text-slate-400 mt-0.5">—</p>
+          )}
+        </div>
       ),
     },
-    // Toggle-switch Status column
+    {
+      key: 'sanction_strength',
+      label: t('Sanction'),
+      sortable: true,
+      render: (value: number | null, record: any) => {
+        const sanction = value ?? record.sanction_strength;
+        const current = record.employees_count ?? 0;
+        if (sanction == null || sanction === '') {
+          return <span className="text-slate-400 text-sm">—</span>;
+        }
+        const over = current > sanction;
+        return (
+          <div className="text-sm tabular-nums">
+            <span className={cn('font-semibold', over && 'text-amber-600')}>{sanction}</span>
+            <span className="block text-[10px] text-slate-500">
+              {current} {t('present')}
+            </span>
+          </div>
+        );
+      },
+    },
+    {
+      key: 'workforce',
+      label: t('Workforce'),
+      render: (_: unknown, record: any) => {
+        const branchId = record.branch_id ?? record.branch?.id;
+        const empCount = record.employees_count ?? 0;
+        const desigCount = record.desginations_count ?? 0;
+
+        return (
+          <div className="flex items-center gap-3 text-sm tabular-nums">
+            {hasPermission(permissions, 'view-employees') && branchId ? (
+              <button
+                type="button"
+                title={t('View employees in this department')}
+                onClick={() =>
+                  router.get(route('hr.employees.index'), {
+                    branch: branchId,
+                    department: record.id,
+                    status: 'active',
+                  })
+                }
+                className="flex items-center gap-1 font-medium theme-color hover:opacity-80 hover:underline border-none bg-transparent p-0 cursor-pointer"
+              >
+                <Users className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--theme-color)' }} />
+                {empCount}
+              </button>
+            ) : (
+              <span className="text-slate-600">{empCount}</span>
+            )}
+            {hasPermission(permissions, 'view-designations') && branchId ? (
+              <button
+                type="button"
+                title={t('View designations in this department')}
+                onClick={() =>
+                  router.get(route('hr.designations.index'), {
+                    branch_id: branchId,
+                    department: record.id,
+                    status: 'all',
+                  })
+                }
+                className="flex items-center gap-1 font-medium theme-color hover:opacity-80 hover:underline border-none bg-transparent p-0 cursor-pointer"
+              >
+                <Layers className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--theme-color)' }} />
+                {desigCount}
+              </button>
+            ) : (
+              <span className="text-slate-600">{desigCount}</span>
+            )}
+          </div>
+        );
+      },
+    },
+    ...(showBranchColumn
+      ? [
+          {
+            key: 'branch',
+            label: t('Branch'),
+            render: (_: any, record: any) => (
+              <Badge
+                variant="outline"
+                className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-slate-50 text-slate-600 border-slate-200"
+              >
+                {record.branch?.name || t('N/A')}
+              </Badge>
+            ),
+          },
+        ]
+      : []),
     {
       key: 'status',
       label: t('Status'),
       render: (_: any, record: any) => {
         const isActive = record.status === 'active';
+        const canToggle =
+          hasPermission(permissions, 'toggle-status-departments') || hasPermission(permissions, 'edit-departments');
+
         return (
           <button
-            onClick={() => { const canToggle = hasPermission(permissions, 'toggle-status-departments') || hasPermission(permissions, 'edit-departments'); if(canToggle) handleAction('toggle-status', record); }}
-            title={hasPermission(permissions, 'toggle-status-departments') || hasPermission(permissions, 'edit-departments') ? (isActive ? t('Click to Deactivate') : t('Click to Activate')) : t('No permission to change status')}
-            disabled={!(hasPermission(permissions, 'toggle-status-departments') || hasPermission(permissions, 'edit-departments'))}
-            className={`flex items-center gap-1.5 select-none ${hasPermission(permissions, 'toggle-status-departments') || hasPermission(permissions, 'edit-departments') ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}
+            type="button"
+            onClick={() => canToggle && handleAction('toggle-status', record)}
+            title={
+              canToggle
+                ? isActive
+                  ? t('Click to Deactivate')
+                  : t('Click to Activate')
+                : t('No permission to change status')
+            }
+            disabled={!canToggle}
+            className={cn(
+              'flex items-center gap-1 select-none',
+              canToggle ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'
+            )}
           >
-            <span className={cn(
-              'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors duration-200 ease-in-out',
-              isActive ? 'bg-emerald-500' : 'bg-slate-300'
-            )}>
-              <span className={cn(
-                'inline-block h-2.5 w-2.5 rounded-full bg-white shadow transition-transform duration-200 ease-in-out',
-                isActive ? 'translate-x-3.5' : 'translate-x-0.5'
-              )} />
+            <span
+              className={cn(
+                'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors',
+                isActive ? 'bg-emerald-500' : 'bg-slate-300'
+              )}
+            >
+              <span
+                className={cn(
+                  'inline-block h-2.5 w-2.5 rounded-full bg-white shadow transition-transform',
+                  isActive ? 'translate-x-3.5' : 'translate-x-0.5'
+                )}
+              />
             </span>
-            <span className={cn(
-              'text-[10px] font-semibold uppercase tracking-wide',
-              isActive ? 'text-emerald-600' : 'text-slate-400'
-            )}>
+            <span
+              className={cn(
+                'text-[10px] font-semibold uppercase tracking-wide',
+                isActive ? 'text-emerald-600' : 'text-slate-400'
+              )}
+            >
               {isActive ? t('Active') : t('Inactive')}
             </span>
           </button>
         );
       },
     },
-    {
-      key: 'created_at',
-      label: t('Created At'),
-      sortable: true,
-      render: (value: string) => window.appSettings?.formatDateTime(value, false) || new Date(value).toLocaleDateString(),
-    },
   ];
+
+  const columns = tableColumns;
 
   // ── Table actions (NO toggle-status button — it's in the Status column) ──
   const actions = [
@@ -389,8 +559,10 @@ const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
       action: 'delete',
       className: 'text-red-500',
       requiredPermission: 'delete-departments',
-      isDisabled: (row: any) => (row.employees_count > 0 || row.desginations_count > 0),
-      disabledTitle: t('This department is in use and cannot be deleted'),
+      isDisabled: (row: any) => !row.can_delete,
+      disabledTitle: (row: any) =>
+        row.delete_block_reason ||
+        t('This department is assigned to employees in this branch and cannot be deleted.'),
     },
   ];
 
@@ -398,6 +570,14 @@ const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
     { value: 'all', label: t('All Statuses') },
     { value: 'active', label: t('Active') },
     { value: 'inactive', label: t('Inactive') },
+  ];
+
+  const branchOptions = [
+    { value: 'all', label: t('All Branches') },
+    ...(branches || []).map((b: any) => ({
+      value: b.id.toString(),
+      label: b.name,
+    })),
   ];
 
   // Branches available for copy (exclude the department's own branch)
@@ -413,14 +593,84 @@ const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
       breadcrumbs={breadcrumbs}
       noPadding
     >
-      {/* Search and filters */}
+      {filteredBranchName && isViewingOtherBranch && (
+        <div
+          className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm"
+          style={{
+            borderColor: 'color-mix(in srgb, var(--theme-color) 28%, transparent)',
+            backgroundColor: 'color-mix(in srgb, var(--theme-color) 8%, transparent)',
+            color: 'var(--theme-color)',
+          }}
+        >
+          <span>
+            {t('Showing departments for')}: <strong>{filteredBranchName}</strong>
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const activeId = String(sessionActiveBranchId);
+              setSelectedBranch(activeId);
+              router.get(route('hr.departments.index'), listQueryParams({ branch_id: activeId }), {
+                preserveState: true,
+                preserveScroll: true,
+              });
+            }}
+            className="text-xs font-semibold underline border-none bg-transparent cursor-pointer hover:opacity-80"
+            style={{ color: 'var(--theme-color)' }}
+          >
+            {t('Show active branch')}
+            {activeBranchName ? ` (${activeBranchName})` : ''}
+          </button>
+        </div>
+      )}
+
       <div className="bg-white dark:bg-gray-900 rounded-lg shadow mb-4 p-4">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500 mb-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+          {filteredBranchName && selectedBranch !== 'all' && (
+            <>
+              <span className="font-semibold text-slate-700 dark:text-slate-300">{filteredBranchName}</span>
+              <span className="text-slate-300">·</span>
+            </>
+          )}
+          <span>
+            {t('Departments')}{' '}
+            <span className="font-semibold text-slate-800 dark:text-slate-200 tabular-nums">{stats.total ?? 0}</span>
+          </span>
+          <span className="text-slate-300">·</span>
+          <span>
+            {t('Active')}{' '}
+            <span className="font-semibold text-emerald-600 tabular-nums">{stats.active ?? 0}</span>
+          </span>
+          <span className="text-slate-300">·</span>
+          <span>
+            {t('Inactive')}{' '}
+            <span className="font-semibold text-slate-600 tabular-nums">{stats.inactive ?? 0}</span>
+          </span>
+          <span className="text-slate-300">·</span>
+          <span>
+            {t('Employees')}{' '}
+            <span className="font-semibold tabular-nums theme-color">{stats.total_employees ?? 0}</span>
+          </span>
+          <span className="text-slate-300">·</span>
+          <span>
+            {t('Designations')}{' '}
+            <span className="font-semibold tabular-nums text-slate-700">{stats.total_designations ?? 0}</span>
+          </span>
+        </div>
         <SearchAndFilterBar
           searchTerm={searchTerm}
           onSearchChange={setSearchTerm}
           onSearch={handleSearch}
           onSearchClear={handleSearchClear}
           filters={[
+            {
+              name: 'branch_id',
+              label: t('Branch'),
+              type: 'select',
+              value: selectedBranch,
+              onChange: setSelectedBranch,
+              options: branchOptions,
+            },
             {
               name: 'status',
               label: t('Status'),
@@ -438,34 +688,36 @@ const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
           onApplyFilters={applyFilters}
           currentPerPage={pageFilters.per_page?.toString() || '10'}
           onPerPageChange={(value) => {
-            router.get(route('hr.departments.index'), {
-              page: 1,
-              per_page: parseInt(value),
-              search: searchTerm || undefined,
-              status: selectedStatus !== 'all' ? selectedStatus : undefined,
-            }, { preserveState: true, preserveScroll: true });
+            router.get(
+              route('hr.departments.index'),
+              listQueryParams({ per_page: parseInt(value, 10) }),
+              { preserveState: true, preserveScroll: true }
+            );
           }}
         />
       </div>
 
-      {/* Table */}
       <div className="bg-white dark:bg-gray-900 rounded-lg shadow overflow-hidden">
-        <CrudTable
-          columns={columns}
-          actions={actions}
-          data={departments?.data || []}
-          from={departments?.from || 1}
-          onAction={handleAction}
-          sortField={pageFilters.sort_field}
-          sortDirection={pageFilters.sort_direction}
-          onSort={handleSort}
-          permissions={permissions}
-          entityPermissions={{
-            view: 'view-departments',
-            edit: 'edit-departments',
-            delete: 'delete-departments',
-          }}
-        />
+        <div className="w-full overflow-x-auto">
+          <CrudTable
+            columns={columns}
+            actions={actions}
+            data={departments?.data || []}
+            from={departments?.from || 1}
+            onAction={handleAction}
+            sortField={pageFilters.sort_field}
+            sortDirection={pageFilters.sort_direction}
+            onSort={handleSort}
+            permissions={permissions}
+            dense
+            stickyActions
+            entityPermissions={{
+              view: 'view-departments',
+              edit: 'edit-departments',
+              delete: 'delete-departments',
+            }}
+          />
+        </div>
         <Pagination
           from={departments?.from || 0}
           to={departments?.to || 0}
@@ -485,6 +737,14 @@ const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
           fields: [
             { name: 'name', label: t('Department Name'), type: 'text', required: true },
             { name: 'short_code', label: t('Short Code'), type: 'text', required: true },
+            {
+              name: 'sanction_strength',
+              label: t('Sanction Strength'),
+              type: 'number',
+              required: false,
+              placeholder: t('Approved manpower for this department'),
+              min: 0,
+            },
             {
               name: 'status',
               label: t('Status'),

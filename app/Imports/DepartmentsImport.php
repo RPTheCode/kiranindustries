@@ -34,6 +34,9 @@ class DepartmentsImport implements ToModel, WithHeadingRow, WithValidation, Skip
             'code' => $row['code'] ?? null,
             'short_code' => $row['short_code'] ?? null,
             'status' => strtolower($row['status'] ?? 'active') === 'active' ? 'active' : 'inactive',
+            'sanction_strength' => isset($row['sanction_strength']) && $row['sanction_strength'] !== ''
+                ? (int) $row['sanction_strength']
+                : null,
             'branch_id' => session('active_branch_id'),
             'created_by' => creatorId(),
         ]);
@@ -49,6 +52,7 @@ class DepartmentsImport implements ToModel, WithHeadingRow, WithValidation, Skip
             'code' => $row['code'] ?? null,
             'short_code' => $row['short_code'] ?? null,
             'status' => $row['status'] ?? 'active',
+            'sanction_strength' => $row['sanction_strength'] ?? $row['sanction'] ?? $row['strength'] ?? null,
         ];
     }
 
@@ -71,6 +75,7 @@ class DepartmentsImport implements ToModel, WithHeadingRow, WithValidation, Skip
                 }
             ],
             'status' => 'nullable|in:active,inactive',
+            'sanction_strength' => 'nullable|integer|min:0|max:99999',
         ];
     }
 

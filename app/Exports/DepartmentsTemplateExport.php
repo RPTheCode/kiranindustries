@@ -20,12 +20,14 @@ class DepartmentsTemplateExport implements FromCollection, WithHeadings, WithSty
                 'code' => 'HRD',
                 'short_code' => 'HR',
                 'name' => 'Human Resources',
+                'sanction_strength' => 25,
                 'status' => 'active',
             ],
             [
                 'code' => 'ENG',
                 'short_code' => 'EN',
                 'name' => 'Engineering',
+                'sanction_strength' => 50,
                 'status' => 'active',
             ]
         ]);
@@ -37,6 +39,7 @@ class DepartmentsTemplateExport implements FromCollection, WithHeadings, WithSty
             'code',
             'short_code',
             'name',
+            'sanction_strength',
             'status',
         ];
     }

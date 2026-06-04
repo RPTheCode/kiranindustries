@@ -61,7 +61,9 @@ class BiometricAttendance extends Model
 
     public function employee()
     {
-        return $this->belongsTo(Employee::class);
+        return $this->belongsTo(Employee::class)
+            ->withoutGlobalScopes()
+            ->withTrashed();
     }
 
     public function department()

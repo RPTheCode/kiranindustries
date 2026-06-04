@@ -48,6 +48,20 @@ class CategoryController extends Controller
 
         $categories = $query->paginate($request->per_page ?? 10)->withQueryString();
 
+        $categories->getCollection()->transform(function (Category $category) {
+            $employeesCount = countEmployeesInBranchForMaster(
+                'category_id',
+                (int) $category->id,
+                (int) $category->branch_id
+            );
+            $blockReason = $employeesCount > 0
+                ? __('Cannot delete: :count employee(s) in this branch use this category.', ['count' => $employeesCount])
+                : null;
+            applyMasterDeleteAttributes($category, $blockReason === null, $blockReason, $employeesCount);
+
+            return $category;
+        });
+
         $branches = Branch::all();
 
         $filters = $request->all(['search', 'status', 'branch_id', 'sort_field', 'sort_direction', 'per_page']);
@@ -140,8 +154,13 @@ class CategoryController extends Controller
             return redirect()->back()->with('error', __('Category Not Found.'));
         }
 
-        if ($category->employees()->count() > 0) {
-            return redirect()->back()->with('error', __('Cannot delete category with assigned employees.'));
+        $employeesCount = countEmployeesInBranchForMaster(
+            'category_id',
+            (int) $category->id,
+            (int) $category->branch_id
+        );
+        if ($employeesCount > 0) {
+            return redirect()->back()->with('error', __('Cannot delete: :count employee(s) in this branch use this category.', ['count' => $employeesCount]));
         }
 
         $this->logMasterDeleted($category);

@@ -25,6 +25,7 @@ export default function Employees() {
   const { auth, employees, branches, planLimits, departments, designations, categories, skills, filters: pageFilters = {} } = usePage().props as any;
   const permissions = auth?.permissions || [];
   const getInitials = useInitials();
+  const defaultStatus = 'active';
 
   // State
   const [activeView, setActiveView] = useState<'list' | 'grid'>('list');
@@ -32,7 +33,7 @@ export default function Employees() {
   const [selectedBranch, setSelectedBranch] = useState(pageFilters.branch || 'all');
   const [selectedDepartment, setSelectedDepartment] = useState(pageFilters.department || 'all');
   const [selectedDesignation, setSelectedDesignation] = useState(pageFilters.designation || 'all');
-  const [selectedStatus, setSelectedStatus] = useState(pageFilters.status || 'all');
+  const [selectedStatus, setSelectedStatus] = useState(pageFilters.status ?? defaultStatus);
   const [selectedCategory, setSelectedCategory] = useState(pageFilters.category || 'all');
   const [selectedSkill, setSelectedSkill] = useState(pageFilters.skill || 'all');
   const [showFilters, setShowFilters] = useState(false);
@@ -45,7 +46,7 @@ export default function Employees() {
 
   // Check if any filters are active
   const hasActiveFilters = () => {
-    return selectedBranch !== 'all' || selectedDepartment !== 'all' || selectedDesignation !== 'all' || selectedStatus !== 'all' || selectedCategory !== 'all' || selectedSkill !== 'all' || searchTerm !== '';
+    return selectedBranch !== 'all' || selectedDepartment !== 'all' || selectedDesignation !== 'all' || selectedStatus !== defaultStatus || selectedCategory !== 'all' || selectedSkill !== 'all' || searchTerm !== '';
   };
 
   // Count active filters
@@ -53,7 +54,7 @@ export default function Employees() {
     return (selectedBranch !== 'all' ? 1 : 0) +
       (selectedDepartment !== 'all' ? 1 : 0) +
       (selectedDesignation !== 'all' ? 1 : 0) +
-      (selectedStatus !== 'all' ? 1 : 0) +
+      (selectedStatus !== defaultStatus ? 1 : 0) +
       (selectedCategory !== 'all' ? 1 : 0) +
       (selectedSkill !== 'all' ? 1 : 0) +
       (searchTerm ? 1 : 0);
@@ -72,7 +73,7 @@ export default function Employees() {
       branch: selectedBranch !== 'all' ? selectedBranch : undefined,
       department: selectedDepartment !== 'all' ? selectedDepartment : undefined,
       designation: selectedDesignation !== 'all' ? selectedDesignation : undefined,
-      status: selectedStatus !== 'all' ? selectedStatus : undefined,
+      status: selectedStatus,
       category: selectedCategory !== 'all' ? selectedCategory : undefined,
       skill: selectedSkill !== 'all' ? selectedSkill : undefined,
       per_page: pageFilters.per_page
@@ -86,7 +87,7 @@ export default function Employees() {
       branch: selectedBranch !== 'all' ? selectedBranch : undefined,
       department: selectedDepartment !== 'all' ? selectedDepartment : undefined,
       designation: selectedDesignation !== 'all' ? selectedDesignation : undefined,
-      status: selectedStatus !== 'all' ? selectedStatus : undefined,
+      status: selectedStatus,
       category: selectedCategory !== 'all' ? selectedCategory : undefined,
       skill: selectedSkill !== 'all' ? selectedSkill : undefined,
       per_page: pageFilters.per_page
@@ -103,7 +104,7 @@ export default function Employees() {
       search: searchTerm || undefined,
       department: selectedDepartment !== 'all' ? selectedDepartment : undefined,
       designation: selectedDesignation !== 'all' ? selectedDesignation : undefined,
-      status: selectedStatus !== 'all' ? selectedStatus : undefined,
+      status: selectedStatus,
       category: selectedCategory !== 'all' ? selectedCategory : undefined,
       skill: selectedSkill !== 'all' ? selectedSkill : undefined,
       per_page: pageFilters.per_page
@@ -220,13 +221,14 @@ export default function Employees() {
     setSelectedBranch('all');
     setSelectedDepartment('all');
     setSelectedDesignation('all');
-    setSelectedStatus('all');
+    setSelectedStatus(defaultStatus);
     setSelectedCategory('all');
     setSelectedSkill('all');
     setShowFilters(false);
 
     router.get(route('hr.employees.index'), {
       page: 1,
+      status: defaultStatus,
       per_page: pageFilters.per_page
     }, { preserveState: true, preserveScroll: true });
   };
@@ -626,7 +628,7 @@ export default function Employees() {
               search: searchTerm || undefined,
               department: selectedDepartment !== 'all' ? selectedDepartment : undefined,
               designation: selectedDesignation !== 'all' ? selectedDesignation : undefined,
-              status: selectedStatus !== 'all' ? selectedStatus : undefined,
+              status: selectedStatus,
               category: selectedCategory !== 'all' ? selectedCategory : undefined,
               skill: selectedSkill !== 'all' ? selectedSkill : undefined,
             }, { preserveState: true, preserveScroll: true });

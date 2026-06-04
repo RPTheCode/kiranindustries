@@ -316,21 +316,20 @@
                                                         $pairNum = $pairIdx + 1;
                                                         $missingIn = empty($pair['in']);
                                                         $missingOut = empty($pair['out']);
-                                                        $outNextDay = !empty($pair['out_next_day']);
                                                         $sameTime = !$missingIn && !$missingOut && $pair['in'] === $pair['out'];
                                                         $statusText = 'OK';
                                                         if ($missingIn && $missingOut) {
                                                             $statusText = 'Empty pair';
                                                         } elseif ($missingIn) {
-                                                            $statusText = 'MISSING IN — fill below';
+                                                            $statusText = 'MISSING IN';
                                                         } elseif ($missingOut && !empty($pair['pending_next_day'])) {
-                                                            $statusText = 'OUT pending — next day duty not started';
+                                                            $statusText = 'OUT pending — duty not finished';
                                                         } elseif ($missingOut) {
-                                                            $statusText = 'MISSING OUT — fill below';
+                                                            $statusText = 'MISSING OUT';
+                                                        } elseif ($sameTime && !empty($pair['suggested_out'])) {
+                                                            $statusText = 'Check OUT time (device)';
                                                         } elseif ($sameTime) {
-                                                            $statusText = 'Same IN/OUT time — correct OUT';
-                                                        } elseif ($outNextDay) {
-                                                            $statusText = 'OK (OUT next day)';
+                                                            $statusText = 'Same IN/OUT time — verify OUT';
                                                         }
                                                     @endphp
                                                     <tr>
@@ -343,7 +342,7 @@
                                                         <td>
                                                             <span class="punch-val {{ $missingOut ? '' : 'punch-val-filled' }}">
                                                                 @if(!$missingOut)
-                                                                    {{ $pair['out'] }}@if($outNextDay) <span style="font-size:9px;color:#64748b;">(+1 day)</span>@endif
+                                                                    {{ $pair['out'] }}
                                                                 @endif
                                                             </span>
                                                         </td>

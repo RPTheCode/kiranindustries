@@ -252,12 +252,20 @@ export function CrudFormModal({
     // Create a clean copy without any unexpected properties
     const cleanData = { ...formData };
 
-    // Process multi-select fields before submission
+    // Process multi-select and number fields before submission
     formConfig.fields.forEach(field => {
       if (field.type === 'multi-select' && cleanData[field.name]) {
         // Ensure it's an array of strings
         if (!Array.isArray(cleanData[field.name])) {
           cleanData[field.name] = [cleanData[field.name].toString()];
+        }
+      }
+      if (field.type === 'number') {
+        const v = cleanData[field.name];
+        if (v === '' || v === undefined || v === null) {
+          cleanData[field.name] = null;
+        } else {
+          cleanData[field.name] = Number(v);
         }
       }
     });
@@ -362,6 +370,28 @@ export function CrudFormModal({
               }
               handleChange(field.name, e.target.value);
             }}
+            required={field.required}
+            className={errors[field.name] ? 'border-red-500' : ''}
+          />
+        );
+
+      case 'number':
+        return (
+          <Input
+            id={field.name}
+            name={field.name}
+            type="number"
+            placeholder={field.placeholder}
+            value={formData[field.name] ?? ''}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val === '' || !Number.isNaN(Number(val))) {
+                handleChange(field.name, val);
+              }
+            }}
+            min={field.min}
+            max={field.max}
+            step={field.step}
             required={field.required}
             className={errors[field.name] ? 'border-red-500' : ''}
           />
