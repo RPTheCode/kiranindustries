@@ -1,6 +1,6 @@
 [phases.setup]
 nixPkgs = ["...", "python311Packages.supervisor"]
-aptPkgs = ["unixodbc", "unixodbc-dev", "odbcinst1debian2", "libodbc2", "curl", "gnupg2"]
+aptPkgs = ["unixodbc", "unixodbc-dev", "unixodbc-common", "libodbcinst2", "curl", "gnupg2"]
 
 [phases.mssql]
 dependsOn = ["setup"]
