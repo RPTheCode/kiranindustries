@@ -36,6 +36,11 @@ cmd = '/assets/start.sh'
 "start.sh" = '''
 #!/bin/bash
 
+# Export library path for Nix processes to find host system libraries
+export LD_LIBRARY_PATH="/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib:$LD_LIBRARY_PATH"
+echo 'export LD_LIBRARY_PATH="/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib:$LD_LIBRARY_PATH"' >> /etc/profile
+echo 'LD_LIBRARY_PATH="/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib"' >> /etc/environment
+
 # Scaffold only required directory structures quickly
 mkdir -p /app/storage/logs
 mkdir -p /app/storage/framework/{cache,sessions,views}
