@@ -188,6 +188,7 @@ http {
             fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
             include $!{nginx}/conf/fastcgi_params;
             include $!{nginx}/conf/fastcgi.conf;
+            fastcgi_read_timeout 300s;
         }
      
         location ~ /\.(?!well-known).* {
