@@ -51,7 +51,7 @@ class EsslService
                 ]);
             } catch (Exception $e2) {
                 // If both fail, throw the original error
-                throw new Exception("Could not connect to ESSL database using ODBC Driver 18 or 17. Error: " . $e2->getMessage());
+                throw new Exception("Could not connect to ESSL database using ODBC Driver 18 or 17. Error: " . $e2->getMessage().' PDO error = ' . $e->getMessage().' DSN = '.$dsn);
             }
         }
     }
