@@ -15,9 +15,9 @@ aptPkgs = ["unixodbc", "unixodbc-dev", "unixodbc-common", "libodbcinst2", "curl"
 dependsOn = ["setup"]
 cmds = [
     "curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg",
-    "curl -fsSL https://packages.microsoft.com/config/ubuntu/24.04/prod.list -o /etc/apt/sources.list.d/mssql-release.list",
+    "curl -fsSL \"https://packages.microsoft.com/config/debian/$(. /etc/os-release && echo $VERSION_ID || echo 12)/prod.list\" -o /etc/apt/sources.list.d/mssql-release.list",
     "apt-get update -qq",
-    "ACCEPT_EULA=Y apt-get install -y msodbcsql18"
+    "ACCEPT_EULA=Y apt-get install -y msodbcsql17"
 ]
 
 [phases.build]
@@ -56,7 +56,7 @@ chown www-data:www-data /app/storage /app/bootstrap/cache /app/storage/logs/lara
 touch /app/storage/installed
 
 # Setup MS SQL Server ODBC driver configuration dynamically at runtime
-printf '[essl]\nDriver=ODBC Driver 18 for SQL Server\nServer=%s\nDatabase=%s\nEncrypt=no\nTrustServerCertificate=yes\n' "$ESSL_DB_HOST" "$ESSL_DB_DATABASE" > /etc/odbc.ini
+printf '[essl]\nDriver=ODBC Driver 17 for SQL Server\nServer=%s\nDatabase=%s\nEncrypt=no\nTrustServerCertificate=yes\n' "$ESSL_DB_HOST" "$ESSL_DB_DATABASE" > /etc/odbc.ini
 
 # Transform nginx config
 node /assets/scripts/prestart.mjs /assets/nginx.template.conf /etc/nginx.conf

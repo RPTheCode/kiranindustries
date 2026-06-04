@@ -44,7 +44,7 @@ class EsslService
             );
         } catch (Exception $e) {
             // If Driver 18 fails (e.g. not installed), try Driver 17
-            $dsn17 = str_replace('ODBC Driver 18', 'ODBC Driver 18', $dsn);
+            $dsn17 = str_replace('ODBC Driver 18', 'ODBC Driver 17', $dsn);
             try {
                 $this->pdo = new PDO($dsn17, null, null, [
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
