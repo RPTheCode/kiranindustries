@@ -62,6 +62,13 @@
     </style>
 </head>
 <body>
+    @php
+        $isDedicatedAttendanceReport = !empty($hideDeptCategoryColumns)
+            || str_contains(strtoupper((string) ($reportTitle ?? '')), 'CODEWISE')
+            || str_contains(strtoupper((string) ($reportTitle ?? '')), 'DEPARTMENTWISE');
+        $showDeptCategoryColumns = !$isDedicatedAttendanceReport;
+        $hideStatusColumn = !empty($hideStatusColumn) || $isDedicatedAttendanceReport;
+    @endphp
     @include('reports.partials.header')
     
     @foreach($reportData as $groupName => $rows)
@@ -74,16 +81,20 @@
                     <th style="width:3%;">No</th>
                     <th style="width:6%;">Date</th>
                     <th style="width:5%;">Code</th>
-                    <th style="width:11%;">Name</th>
+                    <th style="width:{{ $showDeptCategoryColumns ? '11' : '18' }}%;">Name</th>
+                    @if($showDeptCategoryColumns)
                     <th style="width:8%;">Dept</th>
                     <th style="width:7%;">Category</th>
+                    @endif
                     <th style="width:4%;">Sft</th>
                     <th style="width:5%;">In</th>
                     <th style="width:5%;">Out</th>
                     <th style="width:5%;">Hrs</th>
                     <th style="width:4%;">OT</th>
                     <th style="width:4%;">Duty</th>
+                    @unless($hideStatusColumn)
                     <th style="width:6%;">Status</th>
+                    @endunless
                     <th style="width:5%;">Late</th>
                     <th style="width:5%;">Erly</th>
                     <th style="width:4%;">Mis</th>
@@ -91,15 +102,6 @@
             </thead>
             <tbody>
                 @foreach($rows as $row)
-                    @php
-                        $sts = strtoupper($row['status'] ?? 'P');
-                        $stsClass = match($sts) {
-                            'P', 'HD', 'OD', 'CO' => 'status-p',
-                            'A' => 'status-a',
-                            'MIS' => 'status-mis',
-                            default => '',
-                        };
-                    @endphp
                     <tr class="{{ $loop->index % 2 != 0 ? 'row-alt' : '' }}">
                         <td style="color: #64748b;">{{ $sno++ }}</td>
                         <td>{{ $row['date'] ?? '-' }}</td>
@@ -110,15 +112,28 @@
                                 <span style="color:#4338ca;font-size:7px;font-weight:bold;">(M)</span>
                             @endif
                         </td>
+                        @if($showDeptCategoryColumns)
                         <td class="cell-dept">{{ $row['department'] ?? '-' }}</td>
                         <td class="cell-dept">{{ $row['category'] ?? '-' }}</td>
+                        @endif
                         <td>{{ $row['shift'] ?? '-' }}</td>
                         <td class="cell-time">{!! str_replace(' (M)', ' <span style="color:#4338ca;font-size:7px;font-weight:bold;">(M)</span>', $row['time_in'] ?? $row['in_time'] ?? '-') !!}</td>
                         <td class="cell-time">{!! str_replace(' (M)', ' <span style="color:#4338ca;font-size:7px;font-weight:bold;">(M)</span>', $row['time_out'] ?? $row['out_time'] ?? '-') !!}</td>
                         <td style="font-weight:bold;">{{ $row['hours'] ?? '-' }}</td>
                         <td class="ot">{{ (!empty($row['overtime']) && $row['overtime'] !== '0h 0m' && $row['overtime'] !== '-') ? $row['overtime'] : '-' }}</td>
                         <td style="font-weight:bold;">{{ $row['duty'] ?? '-' }}</td>
+                        @unless($hideStatusColumn)
+                        @php
+                            $sts = strtoupper($row['status'] ?? 'P');
+                            $stsClass = match($sts) {
+                                'P', 'HD', 'OD', 'CO' => 'status-p',
+                                'A' => 'status-a',
+                                'MIS' => 'status-mis',
+                                default => '',
+                            };
+                        @endphp
                         <td class="{{ $stsClass }}">{{ $row['status_label'] ?? ($row['status'] ?? '-') }}</td>
+                        @endunless
                         <td class="late">{{ ($row['late_in'] ?? 'ON TIME') !== 'ON TIME' ? $row['late_in'] : '-' }}</td>
                         <td class="early">{{ ($row['early_out'] ?? '-') !== '-' ? $row['early_out'] : '-' }}</td>
                         <td class="mis-punch">{{ ($row['mis_punch'] ?? '-') === 'YES' ? 'YES' : '-' }}</td>

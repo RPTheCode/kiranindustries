@@ -22,7 +22,7 @@ class MediaController extends Controller
         $user = auth()->user();
         $directoryId = request('directory_id');
 
-        $mediaQuery = Media::WithPermissionCheck();
+        $mediaQuery = Media::withPermissionCheck();
 
         // Filter by directory
         if ($directoryId) {
@@ -261,7 +261,7 @@ class MediaController extends Controller
     public function download($id)
     {
         $user = auth()->user();
-        $query = Media::WithPermissionCheck()->where('id', $id);
+        $query = Media::withPermissionCheck()->where('id', $id);
 
         $media = $query->first();
 

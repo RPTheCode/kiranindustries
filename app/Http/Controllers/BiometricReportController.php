@@ -377,11 +377,16 @@ class BiometricReportController extends Controller
         $branchNameDisplay = $selectedBranch ? " - " . strtoupper($selectedBranch->name) : "";
         $companyNameFull = getSetting('titleText', 'KIRAN INDUSTRIES') . $branchNameDisplay;
 
-        $reportTitle = strtoupper($reportType) . ' BIOMETRIC REPORT';
         if ($isMispunchReport) {
             $reportTitle = ($reportType === 'department')
                 ? 'DEPARTMENTWISE MISPUNCH REPORT'
                 : 'CODEWISE MISPUNCH REPORT';
+        } elseif ($reportType === 'department') {
+            $reportTitle = 'DEPARTMENTWISE BIOMETRIC REPORT';
+        } elseif ($reportType === 'codewise') {
+            $reportTitle = 'CODEWISE BIOMETRIC REPORT';
+        } else {
+            $reportTitle = strtoupper($reportType) . ' BIOMETRIC REPORT';
         }
         if ($employeeId && $employeeId !== 'all') {
             $selectedEmployee = Employee::withoutGlobalScopes()
@@ -428,6 +433,8 @@ class BiometricReportController extends Controller
             'reportData' => $reportData,
             'reportTitle' => $reportTitle,
             'reportType' => strtoupper($reportType),
+            'hideDeptCategoryColumns' => in_array($reportType, ['codewise', 'department'], true) && ! $isMispunchReport,
+            'hideStatusColumn' => in_array($reportType, ['codewise', 'department'], true) && ! $isMispunchReport,
             'period' => $fromDate->format('d/m/Y') . " - " . $toDate->format('d/m/Y'),
             'departmentName' => $departmentName,
             'sectionName' => $sectionName,
