@@ -1,5 +1,17 @@
 [phases.setup]
 nixPkgs = ["...", "python311Packages.supervisor"]
+aptPkgs = ["unixodbc", "unixodbc-dev", "odbcinst1debian2", "libodbc2", "curl", "gnupg2"]
+
+[phases.mssql]
+dependsOn = ["setup"]
+cmds = [
+    "curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg",
+    "curl -fsSL https://packages.microsoft.com/config/ubuntu/24.04/prod.list -o /etc/apt/sources.list.d/mssql-release.list",
+    "apt-get update -qq",
+    "ACCEPT_EULA=Y apt-get install -y msodbcsql18",
+    "pecl install sqlsrv pdo_sqlsrv",
+    "PHP_INI=$(php --ini | grep 'Loaded Configuration' | awk '{print $NF}') && echo 'extension=sqlsrv.so' >> $PHP_INI && echo 'extension=pdo_sqlsrv.so' >> $PHP_INI"
+]
 
 [phases.build]
 cmds = [
@@ -15,8 +27,6 @@ cmd = '/assets/start.sh'
 
 [staticAssets]
 "start.sh" = '''
-#!/bin/bash
-
 #!/bin/bash
 
 # Laravel permissions
@@ -129,7 +139,7 @@ daemon off;
 worker_rlimit_nofile 8192;
 
 events {
-  worker_connections  4096;  # Default: 1024
+  worker_connections  4096;
 }
 
 http {
@@ -144,13 +154,14 @@ http {
     error_log /var/log/nginx-error.log;
     sendfile     on;
     tcp_nopush   on;
-    server_names_hash_bucket_size 128; # this seems to be required for some vhosts
+    server_names_hash_bucket_size 128;
 
     server {
         listen ${PORT};
         listen [::]:${PORT};
         server_name localhost;
 
+        # Fix: "upstream sent too big header" (large session/CSRF cookies)
         fastcgi_buffers 16 16k;
         fastcgi_buffer_size 32k;
         proxy_buffer_size 128k;
@@ -166,29 +177,28 @@ http {
         add_header X-Content-Type-Options "nosniff";
 
         client_max_body_size 35M;
-     
+
         index index.php;
-     
+
         charset utf-8;
-     
 
         $if(NIXPACKS_PHP_FALLBACK_PATH) (
             location / {
                 try_files $uri $uri/ ${NIXPACKS_PHP_FALLBACK_PATH}?$query_string;
             }
         ) else (
-          location / {
+            location / {
                 try_files $uri $uri/ /index.php?$query_string;
-           }
+            }
         )
-     
+
         location = /favicon.ico { access_log off; log_not_found off; }
         location = /robots.txt  { access_log off; log_not_found off; }
-     
+
         $if(IS_LARAVEL) (
             error_page 404 /index.php;
         ) else ()
-     
+
         location ~ \.php$ {
             fastcgi_pass 127.0.0.1:9000;
             fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
@@ -196,12 +206,10 @@ http {
             include $!{nginx}/conf/fastcgi.conf;
             fastcgi_read_timeout 300s;
         }
-     
+
         location ~ /\.(?!well-known).* {
             deny all;
         }
     }
-    
-    
 }
 '''
