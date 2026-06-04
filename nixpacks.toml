@@ -9,8 +9,7 @@ cmds = [
     "curl -fsSL https://packages.microsoft.com/config/ubuntu/24.04/prod.list -o /etc/apt/sources.list.d/mssql-release.list",
     "apt-get update -qq",
     "ACCEPT_EULA=Y apt-get install -y msodbcsql18",
-    "pecl channel-update pecl.php.net && pecl install sqlsrv-5.12.0 pdo_sqlsrv-5.12.0",
-    "PHP_INI=$(php --ini | grep 'Loaded Configuration' | awk '{print $NF}') && echo 'extension=sqlsrv.so' >> $PHP_INI && echo 'extension=pdo_sqlsrv.so' >> $PHP_INI"
+    "cd /tmp && curl -L https://github.com/microsoft/msphpsql/releases/download/v5.12.0/Linux-5.12.0.tar.gz -o msphpsql.tar.gz && tar -xzf msphpsql.tar.gz && cp /tmp/Linux-5.12.0/Ubuntu2404/php8.2/sqlsrv.so /tmp/Linux-5.12.0/Ubuntu2404/php8.2/pdo_sqlsrv.so $(php -r 'echo ini_get(\"extension_dir\");')/ && echo 'extension=sqlsrv.so' >> $(php --ini | grep 'Loaded Configuration' | awk '{print $NF}') && echo 'extension=pdo_sqlsrv.so' >> $(php --ini | grep 'Loaded Configuration' | awk '{print $NF}')"
 ]
 
 [phases.build]
@@ -19,7 +18,7 @@ cmds = [
     "cp /assets/worker-*.conf /etc/supervisor/conf.d/",
     "cp /assets/supervisord.conf /etc/supervisord.conf",
     "chmod +x /assets/start.sh",
-    "..."
+    "npm run build"
 ]
 
 [start]
@@ -161,7 +160,6 @@ http {
         listen [::]:${PORT};
         server_name localhost;
 
-        # Fix: "upstream sent too big header" (large session/CSRF cookies)
         fastcgi_buffers 16 16k;
         fastcgi_buffer_size 32k;
         proxy_buffer_size 128k;
