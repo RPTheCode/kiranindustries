@@ -9,6 +9,9 @@ nixPkgs = [
     "python311Packages.supervisor",
     "patchelf"
 ]
+cmds = [
+    "PHP_INI_PATH=$(php --ini 2>/dev/null | grep 'Additional .ini files parsed' | cut -d: -f2- | tr -d ' ') && test -n \"$PHP_INI_PATH\" && echo 'memory_limit=512M' >> \"$PHP_INI_PATH\" || true"
+]
 # Cleaned up compilation tools (autoconf, make, php-dev removed)
 aptPkgs = ["unixodbc", "unixodbc-dev", "unixodbc-common", "libodbcinst2", "curl", "gnupg2", "wget", "libgssapi-krb5-2", "libkrb5-3", "libssl-dev", "libcurl4"]
 
@@ -29,7 +32,8 @@ cmds = [
     "cp /assets/worker-*.conf /etc/supervisor/conf.d/",
     "cp /assets/supervisord.conf /etc/supervisord.conf",
     "chmod +x /assets/start.sh",
-    "npm run build"
+    "npm run build",
+    "php artisan storage:link --force || php artisan storage:link || true"
 ]
 
 [start]
@@ -60,6 +64,9 @@ chown www-data:www-data /app/storage /app/bootstrap/cache /app/storage/logs/lara
 
 # Mark app as installed
 touch /app/storage/installed
+
+# public/storage -> storage/app/public (avatars, media, reports, etc.)
+php /app/artisan storage:link --force 2>/dev/null || php /app/artisan storage:link || true
 
 # Setup MS SQL Server ODBC driver configuration dynamically at runtime
 printf '[essl]\nDriver=ODBC Driver 17 for SQL Server\nServer=%s,%s\nDatabase=%s\nEncrypt=no\nTrustServerCertificate=yes\n' "$ESSL_DB_HOST" "${ESSL_DB_PORT:-1433}" "$ESSL_DB_DATABASE" > /etc/odbc.ini
@@ -144,7 +151,7 @@ stderr_logfile=/var/log/worker-phpfpm.log
 "worker-laravel.conf" = '''
 [program:worker-laravel]
 process_name=%(program_name)s_%(process_num)02d
-command=bash -c 'exec php /app/artisan queue:work --sleep=3 --tries=3 --max-time=3600'
+command=bash -c 'exec php -d memory_limit=512M /app/artisan queue:work --sleep=3 --tries=3 --max-time=3600'
 autostart=true
 autorestart=true
 stopasgroup=true
@@ -170,8 +177,10 @@ pm.min_spare_servers = 2
 pm.max_spare_servers = 8
 
 clear_env = no
-php_admin_value[post_max_size] = 35M
+php_admin_value[memory_limit] = 512M
+php_admin_value[post_max_size] = 50M
 php_admin_value[upload_max_filesize] = 30M
+php_admin_value[max_execution_time] = 300
 '''
 
 "nginx.template.conf" = '''
