@@ -43,7 +43,6 @@ class EsslService
                 ]
             );
         } catch (Exception $e) {
-             throw new Exception("Could not connect to ESSL database using ODBC Driver 18 or 17. Error: " . $e->getMessage());
             // If Driver 18 fails (e.g. not installed), try Driver 17
             $dsn17 = str_replace('ODBC Driver 18', 'ODBC Driver 17', $dsn);
             try {

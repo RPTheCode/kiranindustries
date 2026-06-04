@@ -9,7 +9,7 @@ nixPkgs = [
     "python311Packages.supervisor"
 ]
 # Cleaned up compilation tools (autoconf, make, php-dev removed)
-aptPkgs = ["unixodbc", "unixodbc-dev", "unixodbc-common", "libodbcinst2", "curl", "gnupg2", "wget"]
+aptPkgs = ["unixodbc", "unixodbc-dev", "unixodbc-common", "libodbcinst2", "curl", "gnupg2", "wget", "libgssapi-krb5-2", "libkrb5-3", "libssl-dev", "libcurl4"]
 
 [phases.mssql]
 dependsOn = ["setup"]
@@ -17,7 +17,7 @@ cmds = [
     "curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg",
     "curl -fsSL \"https://packages.microsoft.com/config/debian/$(. /etc/os-release && echo $VERSION_ID || echo 12)/prod.list\" -o /etc/apt/sources.list.d/mssql-release.list",
     "apt-get update -qq",
-    "ACCEPT_EULA=Y apt-get install -y msodbcsql17"
+    "ACCEPT_EULA=Y apt-get install -y msodbcsql17 msodbcsql18"
 ]
 
 [phases.build]
