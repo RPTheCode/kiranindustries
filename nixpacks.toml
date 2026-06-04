@@ -1,32 +1,27 @@
-[variables]
-NIXPACKS_PHP_EXTENSIONS = "sqlsrv, pdo_sqlsrv"
-NIXPACKS_PHP_FALLBACK_PATH = "/index.php"
-NIXPACKS_PHP_ROOT_DIR = "/app/public"
-NIXPACKS_NODE_VERSION = "22"
-
 [phases.setup]
-nixPkgs = ["nginx", "libmysqlclient", "nodejs_22", "npm-9_x", "python311Packages.supervisor"]
+nixPkgs = [
+    # Pulling native pre-compiled extensions via Nix
+    "(php.withExtensions (pe: pe.enabled ++ [ pe.sqlsrv pe.pdo_sqlsrv ]))",
+    "nginx",
+    "libmysqlclient",
+    "phpPackages.composer",
+    "nodejs_22",
+    "npm-9_x",
+    "python311Packages.supervisor"
+]
+# Cleaned up compilation tools (autoconf, make, php-dev removed)
 aptPkgs = ["unixodbc", "unixodbc-dev", "unixodbc-common", "libodbcinst2", "curl", "gnupg2", "wget"]
 
 [phases.mssql]
 dependsOn = ["setup"]
 cmds = [
     "curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg",
-    "curl -fsSL https://packages.microsoft.com/config/ubuntu/22.04/prod.list -o /etc/apt/sources.list.d/mssql-release.list",
+    "curl -fsSL https://packages.microsoft.com/config/ubuntu/24.04/prod.list -o /etc/apt/sources.list.d/mssql-release.list",
     "apt-get update -qq",
     "ACCEPT_EULA=Y apt-get install -y msodbcsql18"
 ]
 
-[phases.install]
-dependsOn = ["mssql"]
-cmds = [
-    "mkdir -p /var/log/nginx && mkdir -p /var/cache/nginx",
-    "composer install --ignore-platform-reqs",
-    "npm ci"
-]
-
 [phases.build]
-dependsOn = ["install"]
 cmds = [
     "mkdir -p /etc/supervisor/conf.d/",
     "cp /assets/worker-*.conf /etc/supervisor/conf.d/",
@@ -36,7 +31,7 @@ cmds = [
 ]
 
 [start]
-cmd = "/assets/start.sh"
+cmd = '/assets/start.sh'
 
 [staticAssets]
 "start.sh" = '''
