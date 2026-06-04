@@ -99,13 +99,39 @@ use Illuminate\Support\Facades\DB;
 
 Route::get('essl-test', function () {
     try {
-        // Try common ESSL table names
-        $table = 'DeviceLogs_5_2026';
-        if (!Schema::connection('essl')->hasTable($table)) {
-            $table = 'AttLog';
+        $esslService = app(\App\Services\EsslService::class);
+        
+        // Try to find a table we can read from
+        $date = \Carbon\Carbon::now();
+        $table = $esslService->resolveDeviceLogsTable($date);
+        
+        if (!$table) {
+            // Fallback: check if we can query Employees table
+            try {
+                $employees = $esslService->getEmployees();
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'Connected successfully! Employees table accessed.',
+                    'employee_count' => count($employees),
+                    'sample_employees' => array_slice($employees, 0, 5)
+                ]);
+            } catch (\Exception $employeeEx) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Connected to database, but both DeviceLogs and Employees tables failed: ' . $employeeEx->getMessage(),
+                    'connection_details' => config('database.connections.essl')
+                ], 500);
+            }
         }
 
-        return DB::connection('essl')->table($table)->limit(5)->get();
+        $logs = $esslService->getLogsFromTable($table, $date->copy()->subDays(30)->format('Y-m-d H:i:s'), $date->format('Y-m-d H:i:s'));
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Connected successfully!',
+            'table_queried' => $table,
+            'log_count' => count($logs),
+            'sample_logs' => array_slice($logs, 0, 5)
+        ]);
     } catch (\Exception $e) {
         return response()->json([
             'status' => 'error',
