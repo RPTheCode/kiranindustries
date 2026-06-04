@@ -1,7 +1,6 @@
 [phases.setup]
 nixPkgs = [
-    # Pulling native pre-compiled extensions via Nix
-    "(php.withExtensions (pe: pe.enabled ++ [ pe.sqlsrv pe.pdo_sqlsrv ]))",
+    "php",
     "nginx",
     "libmysqlclient",
     "phpPackages.composer",
