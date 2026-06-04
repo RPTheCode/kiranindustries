@@ -55,6 +55,9 @@ chown www-data:www-data /app/storage /app/bootstrap/cache /app/storage/logs/lara
 # Mark app as installed
 touch /app/storage/installed
 
+# Setup MS SQL Server ODBC driver configuration dynamically at runtime
+printf '[essl]\nDriver=ODBC Driver 18 for SQL Server\nServer=%s\nDatabase=%s\nEncrypt=no\nTrustServerCertificate=yes\n' "$ESSL_DB_HOST" "$ESSL_DB_DATABASE" > /etc/odbc.ini
+
 # Transform nginx config
 node /assets/scripts/prestart.mjs /assets/nginx.template.conf /etc/nginx.conf
 

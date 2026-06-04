@@ -95,23 +95,14 @@ return [
         // ],
 
 
-        // 'essl' => [
-        //     'driver' => 'odbc',
-        //     'dsn' => 'odbc:essl',
-        //     'host' => env('ESSL_DB_HOST'),
-        //     'database' => env('ESSL_DB_DATABASE'),
-        //     'username' => env('ESSL_DB_USERNAME'),
-        //     'password' => env('ESSL_DB_PASSWORD'),
-        // ],
-
-    'essl' => [
-        'driver' => 'sqlsrv',
-        'host' => env('ESSL_DB_HOST'),
-        'port' => env('ESSL_DB_PORT', '1433'),
-        'database' => env('ESSL_DB_DATABASE'),
-        'username' => env('ESSL_DB_USERNAME'),
-        'password' => env('ESSL_DB_PASSWORD'),
-    ],
+        'essl' => [
+            'driver' => 'odbc',
+            'dsn' => 'odbc:essl',
+            'host' => env('ESSL_DB_HOST'),
+            'database' => env('ESSL_DB_DATABASE'),
+            'username' => env('ESSL_DB_USERNAME'),
+            'password' => env('ESSL_DB_PASSWORD'),
+        ],
 
         'pgsql' => [
             'driver' => 'pgsql',
