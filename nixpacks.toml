@@ -53,7 +53,7 @@ logfile_maxbytes=50MB
 logfile_backups=10
 loglevel=info
 pidfile=/assets/supervisord.pid
-nodaemon=false
+nodaemon=true
 silent=false
 minfds=1024
 minprocs=200
@@ -96,21 +96,11 @@ autostart=true
 autorestart=true
 stopasgroup=true
 killasgroup=true
-numprocs=12
+numprocs=2
 startsecs=0
 stopwaitsecs=3600
 stdout_logfile=/var/log/worker-laravel.log
 stderr_logfile=/var/log/worker-laravel.log
-'''
-
-"worker-reverb.conf" = '''
-[program:worker-reverb]
-process_name=%(program_name)s_%(process_num)02d
-command=php /app/artisan reverb:start --host=0.0.0.0 --port=8080
-autostart=true
-autorestart=true
-stdout_logfile=/var/log/worker-reverb.log
-stderr_logfile=/var/log/worker-reverb.log
 '''
 
 "php-fpm.conf" = '''
@@ -121,10 +111,11 @@ group = www-data
 listen.owner = www-data
 listen.group = www-data
 pm = dynamic
-pm.max_children = 50
-pm.min_spare_servers = 4
-pm.max_spare_servers = 32
-pm.start_servers = 18
+pm.max_children = 20
+pm.start_servers = 4
+pm.min_spare_servers = 2
+pm.max_spare_servers = 8
+
 clear_env = no
 php_admin_value[post_max_size] = 35M
 php_admin_value[upload_max_filesize] = 30M
