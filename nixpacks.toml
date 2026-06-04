@@ -39,6 +39,9 @@ cmd = '/assets/start.sh'
 "start.sh" = '''
 #!/bin/bash
 
+# Export OpenSSL config to allow TLS 1.0 and TLS 1.1 for legacy SQL Servers
+export OPENSSL_CONF=/assets/openssl.cnf
+
 # Scaffold only required directory structures quickly
 mkdir -p /app/storage/logs
 mkdir -p /app/storage/framework/{cache,sessions,views}
@@ -59,13 +62,38 @@ chown www-data:www-data /app/storage /app/bootstrap/cache /app/storage/logs/lara
 touch /app/storage/installed
 
 # Setup MS SQL Server ODBC driver configuration dynamically at runtime
-printf '[essl]\nDriver=ODBC Driver 17 for SQL Server\nServer=%s\nDatabase=%s\nEncrypt=no\nTrustServerCertificate=yes\n' "$ESSL_DB_HOST" "$ESSL_DB_DATABASE" > /etc/odbc.ini
+printf '[essl]\nDriver=ODBC Driver 17 for SQL Server\nServer=%s,%s\nDatabase=%s\nEncrypt=no\nTrustServerCertificate=yes\n' "$ESSL_DB_HOST" "${ESSL_DB_PORT:-1433}" "$ESSL_DB_DATABASE" > /etc/odbc.ini
 
 # Transform nginx config
 node /assets/scripts/prestart.mjs /assets/nginx.template.conf /etc/nginx.conf
 
 # Start supervisor
 supervisord -c /etc/supervisord.conf -n
+'''
+
+"openssl.cnf" = '''
+openssl_conf = openssl_init
+
+[openssl_init]
+providers = provider_sect
+ssl_conf = ssl_configuration
+
+[provider_sect]
+default = default_sect
+legacy = legacy_sect
+
+[default_sect]
+activate = 1
+
+[legacy_sect]
+activate = 1
+
+[ssl_configuration]
+system_default = tls_system_default
+
+[tls_system_default]
+MinProtocol = TLSv1.0
+CipherString = DEFAULT@SECLEVEL=0
 '''
 
 "supervisord.conf" = '''
