@@ -7,6 +7,8 @@ return [
      */
     'disk_name' => env('MEDIA_DISK', 'public'),
 
+    'media_model' => App\Models\Media::class,
+
     /*
      * The maximum file size of an item in bytes.
      * Adding a larger file will result in an exception.

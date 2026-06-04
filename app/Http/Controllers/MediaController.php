@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
-use Spatie\MediaLibrary\MediaCollections\Models\Media;
+use App\Models\Media;
 
 class MediaController extends Controller
 {
@@ -292,14 +292,7 @@ class MediaController extends Controller
             return response()->json(['error' => __('Permission denied')], 403);
         }
 
-        $query = Media::where('id', $id);
-
-        // SuperAdmin and users with manage-any-media can delete any media
-        if ($user->type !== 'superadmin' && !$user->hasPermissionTo('manage-any-media')) {
-            $query->where('created_by', $user->id);
-        }
-
-        $media = $query->firstOrFail();
+        $media = Media::withPermissionCheck()->where('id', $id)->firstOrFail();
         $mediaItem = $media->model;
 
         $fileSize = $media->size;
