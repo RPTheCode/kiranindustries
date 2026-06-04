@@ -1,0 +1,266 @@
+[phases.setup]
+nixPkgs = [
+    "php",
+    "nginx",
+    "libmysqlclient",
+    "phpPackages.composer",
+    "nodejs_22",
+    "npm-9_x",
+    "python311Packages.supervisor",
+    "patchelf"
+]
+cmds = [
+    "PHP_INI_PATH=$(php --ini 2>/dev/null | grep 'Additional .ini files parsed' | cut -d: -f2- | tr -d ' ') && test -n \"$PHP_INI_PATH\" && echo 'memory_limit=512M' >> \"$PHP_INI_PATH\" || true"
+]
+# Cleaned up compilation tools (autoconf, make, php-dev removed)
+aptPkgs = ["unixodbc", "unixodbc-dev", "unixodbc-common", "libodbcinst2", "curl", "gnupg2", "wget", "libgssapi-krb5-2", "libkrb5-3", "libssl-dev", "libcurl4"]
+
+[phases.mssql]
+dependsOn = ["setup"]
+cmds = [
+    "curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg",
+    "curl -fsSL \"https://packages.microsoft.com/config/$(. /etc/os-release && echo $ID)/$(. /etc/os-release && echo $VERSION_ID)/prod.list\" -o /etc/apt/sources.list.d/mssql-release.list",
+    "apt-get update -qq",
+    "ACCEPT_EULA=Y apt-get install -y msodbcsql17 msodbcsql18",
+    "UNIXODBC_LIB=$(find /nix/store -name 'libodbcinst.so.2' | head -n 1 | xargs dirname); patchelf --set-rpath \"$UNIXODBC_LIB:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu\" /opt/microsoft/msodbcsql17/lib64/libmsodbcsql-17.*.so* || true",
+    "UNIXODBC_LIB=$(find /nix/store -name 'libodbcinst.so.2' | head -n 1 | xargs dirname); patchelf --set-rpath \"$UNIXODBC_LIB:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu\" /opt/microsoft/msodbcsql18/lib64/libmsodbcsql-18.*.so* || true"
+]
+
+[phases.build]
+cmds = [
+    "mkdir -p /etc/supervisor/conf.d/",
+    "cp /assets/worker-*.conf /etc/supervisor/conf.d/",
+    "cp /assets/supervisord.conf /etc/supervisord.conf",
+    "chmod +x /assets/start.sh",
+    "npm run build",
+    "php artisan storage:link --force || php artisan storage:link || true"
+]
+
+[start]
+cmd = '/assets/start.sh'
+
+[staticAssets]
+"start.sh" = '''
+#!/bin/bash
+
+# Export OpenSSL config to allow TLS 1.0 and TLS 1.1 for legacy SQL Servers
+export OPENSSL_CONF=/assets/openssl.cnf
+
+# Scaffold only required directory structures quickly
+mkdir -p /app/storage/logs
+mkdir -p /app/storage/framework/{cache,sessions,views}
+mkdir -p /app/bootstrap/cache
+
+touch /app/storage/logs/laravel.log
+
+# Specific, shallow permissioning instead of recursive -R over user uploads
+chmod 775 /app/storage /app/bootstrap/cache
+chmod -R 775 /app/storage/framework
+chmod 777 /app/storage/logs
+chmod 666 /app/storage/logs/laravel.log
+
+chown -R www-data:www-data /app/storage/framework
+chown www-data:www-data /app/storage /app/bootstrap/cache /app/storage/logs/laravel.log
+
+# Mark app as installed
+touch /app/storage/installed
+
+# public/storage -> storage/app/public (avatars, media, reports, etc.)
+php /app/artisan storage:link --force 2>/dev/null || php /app/artisan storage:link || true
+
+# Setup MS SQL Server ODBC driver configuration dynamically at runtime
+printf '[essl]\nDriver=ODBC Driver 17 for SQL Server\nServer=%s,%s\nDatabase=%s\nEncrypt=no\nTrustServerCertificate=yes\n' "$ESSL_DB_HOST" "${ESSL_DB_PORT:-1433}" "$ESSL_DB_DATABASE" > /etc/odbc.ini
+
+# Transform nginx config
+node /assets/scripts/prestart.mjs /assets/nginx.template.conf /etc/nginx.conf
+
+# Start supervisor
+supervisord -c /etc/supervisord.conf -n
+'''
+
+"openssl.cnf" = '''
+openssl_conf = openssl_init
+
+[openssl_init]
+providers = provider_sect
+ssl_conf = ssl_configuration
+
+[provider_sect]
+default = default_sect
+legacy = legacy_sect
+
+[default_sect]
+activate = 1
+
+[legacy_sect]
+activate = 1
+
+[ssl_configuration]
+system_default = tls_system_default
+
+[tls_system_default]
+MinProtocol = TLSv1.0
+CipherString = DEFAULT@SECLEVEL=0
+'''
+
+"supervisord.conf" = '''
+[unix_http_server]
+file=/assets/supervisor.sock
+
+[supervisord]
+logfile=/var/log/supervisord.log
+logfile_maxbytes=50MB
+logfile_backups=10
+loglevel=info
+pidfile=/assets/supervisord.pid
+nodaemon=true
+silent=false
+minfds=1024
+minprocs=200
+
+[rpcinterface:supervisor]
+supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
+
+[supervisorctl]
+serverurl=unix:///assets/supervisor.sock
+
+[include]
+files = /etc/supervisor/conf.d/*.conf
+'''
+
+"worker-nginx.conf" = '''
+[program:worker-nginx]
+process_name=%(program_name)s_%(process_num)02d
+command=nginx -c /etc/nginx.conf
+autostart=true
+autorestart=true
+stdout_logfile=/var/log/worker-nginx.log
+stderr_logfile=/var/log/worker-nginx.log
+'''
+
+"worker-phpfpm.conf" = '''
+[program:worker-phpfpm]
+process_name=%(program_name)s_%(process_num)02d
+command=php-fpm -y /assets/php-fpm.conf -F
+autostart=true
+autorestart=true
+stdout_logfile=/var/log/worker-phpfpm.log
+stderr_logfile=/var/log/worker-phpfpm.log
+'''
+
+"worker-laravel.conf" = '''
+[program:worker-laravel]
+process_name=%(program_name)s_%(process_num)02d
+command=bash -c 'exec php -d memory_limit=512M /app/artisan queue:work --sleep=3 --tries=3 --max-time=3600'
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+numprocs=2
+startsecs=0
+stopwaitsecs=3600
+stdout_logfile=/var/log/worker-laravel.log
+stderr_logfile=/var/log/worker-laravel.log
+'''
+
+"php-fpm.conf" = '''
+[www]
+listen = 127.0.0.1:9000
+user = www-data
+group = www-data
+listen.owner = www-data
+listen.group = www-data
+pm = dynamic
+pm.max_children = 20
+pm.start_servers = 4
+pm.min_spare_servers = 2
+pm.max_spare_servers = 8
+
+clear_env = no
+php_admin_value[memory_limit] = 512M
+php_admin_value[post_max_size] = 50M
+php_admin_value[upload_max_filesize] = 30M
+php_admin_value[max_execution_time] = 300
+'''
+
+"nginx.template.conf" = '''
+user www-data www-data;
+worker_processes 5;
+daemon off;
+
+worker_rlimit_nofile 8192;
+
+events {
+  worker_connections  4096;
+}
+
+http {
+    include    $!{nginx}/conf/mime.types;
+    index    index.html index.htm index.php;
+
+    default_type application/octet-stream;
+    log_format   main '$remote_addr - $remote_user [$time_local]  $status '
+        '"$request" $body_bytes_sent "$http_referer" '
+        '"$http_user_agent" "$http_x_forwarded_for"';
+    access_log /var/log/nginx-access.log;
+    error_log /var/log/nginx-error.log;
+    sendfile     on;
+    tcp_nopush   on;
+    server_names_hash_bucket_size 128;
+
+    server {
+        listen ${PORT};
+        listen [::]:${PORT};
+        server_name localhost;
+
+        fastcgi_buffers 16 16k;
+        fastcgi_buffer_size 32k;
+        proxy_buffer_size 128k;
+        proxy_buffers 4 256k;
+        proxy_busy_buffers_size 256k;
+
+        $if(NIXPACKS_PHP_ROOT_DIR) (
+            root ${NIXPACKS_PHP_ROOT_DIR};
+        ) else (
+            root /app;
+        )
+
+        add_header X-Content-Type-Options "nosniff";
+
+        client_max_body_size 35M;
+
+        index index.php;
+
+        charset utf-8;
+
+        $if(NIXPACKS_PHP_FALLBACK_PATH) (
+            location / {
+                try_files $uri $uri/ ${NIXPACKS_PHP_FALLBACK_PATH}?$query_string;
+            }
+        ) else (
+            location / {
+                try_files $uri $uri/ /index.php?$query_string;
+            }
+        )
+
+        location = /favicon.ico { access_log off; log_not_found off; }
+        location = /robots.txt  { access_log off; log_not_found off; }
+
+        $if(IS_LARAVEL) (
+            error_page 404 /index.php;
+        ) else ()
+
+        location ~ \.php$ {
+            fastcgi_pass 127.0.0.1:9000;
+            fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+            include $!{nginx}/conf/fastcgi_params;
+            include $!{nginx}/conf/fastcgi.conf;
+            fastcgi_read_timeout 300s;
+        }
+
+        location ~ /\.(?!well-known).* {
+            deny all;
+        }
+    }
+}
+'''

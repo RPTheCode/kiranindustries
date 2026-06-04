@@ -1,0 +1,357 @@
+// components/CrudTable.tsx
+import { Button } from '@/components/ui/button';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
+import { ChevronDown, ChevronUp, ChevronsUpDown } from 'lucide-react';
+import * as LucidIcons from 'lucide-react';
+import { hasPermission } from '@/utils/authorization';
+import { TableColumn, TableAction } from '@/types/crud';
+import { Link } from '@inertiajs/react';
+import { useTranslation } from 'react-i18next';
+
+interface CrudTableProps {
+  columns: TableColumn[];
+  actions: TableAction[];
+  data: any[];
+  from?: number;
+  onAction: (action: string, row: any) => void;
+  sortField?: string;
+  sortDirection?: 'asc' | 'desc';
+  onSort?: (field: string) => void;
+  statusColors?: Record<string, string>;
+  permissions: string[];
+  entityPermissions?: {
+    view: string;
+    edit: string;
+    delete: string;
+  };
+  showActionsAsIcons?: boolean;
+  showActions?: boolean;
+  compactActions?: boolean;
+  stickyActions?: boolean;
+  dense?: boolean;
+}
+
+export function CrudTable({
+  columns,
+  actions,
+  data,
+  from = 1,
+  onAction,
+  sortField,
+  sortDirection,
+  onSort,
+  statusColors = {},
+  permissions,
+  entityPermissions,
+  showActions = true,
+  compactActions = false,
+  stickyActions = false,
+  dense = false,
+}: CrudTableProps) {
+  const { t } = useTranslation();
+  const renderSortIcon = (column: TableColumn) => {
+    if (!column.sortable) return null;
+
+    if (sortField === column.key) {
+      return sortDirection === 'asc' ?
+        <ChevronUp className="ml-1 h-4 w-4" /> :
+        <ChevronDown className="ml-1 h-4 w-4" />;
+    }
+
+    return <ChevronsUpDown className="ml-1 h-4 w-4 opacity-50" />;
+  };
+
+  const handleSort = (column: TableColumn) => {
+    if (!column.sortable || !onSort) return;
+    onSort(column.key);
+  };
+  const hasAnyActionPermission = actions.some((action) => {
+    const permissionKey =
+      action.requiredPermission ||
+      (entityPermissions &&
+        (action.action === 'view'
+          ? entityPermissions.view
+          : action.action === 'edit'
+            ? entityPermissions.edit
+            : action.action === 'delete'
+              ? entityPermissions.delete
+              : action.permission));
+
+    return !permissionKey || hasPermission(permissions, permissionKey);
+  });
+  const cellPy = dense ? 'py-1.5' : 'py-2.5';
+  const headPy = dense ? 'py-1.5' : 'py-2.5';
+
+  const actionBtnSize = compactActions ? 'h-7 w-7' : 'h-8 w-8';
+  const actionIconSize = compactActions ? 14 : 16;
+  const actionGap = compactActions ? 'gap-0.5' : 'space-x-2';
+
+  const stickyActionClass = stickyActions
+    ? 'sticky right-0 z-10 bg-gray-50 dark:bg-gray-800 shadow-[-6px_0_10px_-6px_rgba(0,0,0,0.12)]'
+    : '';
+  const stickyActionCellClass = stickyActions
+    ? 'sticky right-0 z-10 bg-white dark:bg-gray-900 shadow-[-6px_0_10px_-6px_rgba(0,0,0,0.12)]'
+    : '';
+
+  const renderActionButtons = (row: any) => {
+    return (
+      <div className={cn('flex items-center justify-end', actionGap)}>
+        {actions.map((action, index) => {
+          // Skip if user doesn't have permission
+          const permissionKey = action.requiredPermission || (
+            entityPermissions && (
+              action.action === 'view'
+                ? entityPermissions.view
+                : action.action === 'edit'
+                  ? entityPermissions.edit
+                  : action.action === 'delete'
+                    ? entityPermissions.delete
+                    : action.permission
+            )
+          );
+
+          if (permissionKey && !hasPermission(permissions, permissionKey)) {
+            return null;
+          }
+
+          // Skip if condition function returns false
+          if (action.condition && !action.condition(row)) {
+            return null;
+          }
+
+          const label = action.renderLabel ? action.renderLabel(row) : action.label;
+          const iconName = action.renderIcon ? action.renderIcon(row) : action.icon;
+          const IconComponent = (LucidIcons as any)[iconName] as React.ElementType;
+          const actionClassName = action.renderClassName ? action.renderClassName(row) : action.className;
+
+          // Handle link actions
+          if (action.href) {
+            const href = typeof action.href === 'function'
+              ? action.href(row)
+              : action.href.replace(':id', row.id);
+
+            return (
+              <TooltipProvider key={index}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Link href={href} target={action.openInNewTab ? '_blank' : undefined}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn(actionBtnSize, actionClassName)}
+                      >
+                        <IconComponent size={actionIconSize} />
+                      </Button>
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{label}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            );
+          }
+
+          // Handle regular action buttons
+          const isDisabled = action.isDisabled ? action.isDisabled(row) : false;
+          const disabledTitle = typeof action.disabledTitle === 'function'
+            ? action.disabledTitle(row)
+            : (action.disabledTitle || t('Action disabled'));
+
+          return (
+            <TooltipProvider key={index}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={cn(actionBtnSize, actionClassName, isDisabled && "opacity-50 cursor-not-allowed")}
+                      onClick={() => !isDisabled && onAction(action.action, row)}
+                      disabled={isDisabled}
+                    >
+                      <IconComponent size={actionIconSize} />
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{isDisabled ? disabledTitle : label}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // Helper function to get nested property value using dot notation
+  const getNestedValue = (obj: any, path: string) => {
+    if (!obj || !path) return null;
+
+    const keys = path.split('.');
+    return keys.reduce((acc, key) => {
+      return acc && acc[key] !== undefined ? acc[key] : null;
+    }, obj);
+  };
+
+  const renderCellContent = (row: any, col: TableColumn) => {
+    // Get value using dot notation for nested properties
+    const value = getNestedValue(row, col.key);
+
+    // If column has custom render function, use it
+    if (col.render) {
+      return col.render(value, row);
+    }
+
+    // Handle different column types
+    switch (col.type) {
+      case 'badge':
+        return (
+          <Badge className={cn("capitalize", statusColors[value])}>
+            {value}
+          </Badge>
+        );
+
+      case 'image':
+        if (!value) {
+          return <div className="text-center text-gray-400">{t("No image")}</div>;
+        }
+        return (
+          <div className="flex justify-center">
+            <img
+              src={value.startsWith && value.startsWith('http')
+                ? value
+                : `/storage/${value}`}
+              alt={row.name || 'Image'}
+              className={col.className || "h-16 w-20 rounded-md object-cover shadow-sm"}
+              onError={(e) => {
+                e.currentTarget.src = 'https://placehold.co/200x150?text=Image+Not+Found';
+              }}
+            />
+          </div>
+        );
+
+      case 'date':
+        return value ? <span className="text-sm">{new Date(value).toLocaleDateString()}</span> : <span>-</span>;
+
+      case 'currency':
+        return <span className="text-sm">{typeof value === 'number' ?
+          value.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) :
+          value}</span>;
+
+      case 'boolean':
+        return <span className="text-sm">{value ? 'Yes' : 'No'}</span>;
+
+      case 'link':
+        if (!value) return <span>-</span>;
+
+        const href = col.href
+          ? (typeof col.href === 'function' ? col.href(row) : col.href.replace(':id', row.id))
+          : '#';
+
+        return (
+          <Link
+            href={href}
+            className={col.linkClassName || "text-blue-600 hover:underline"}
+            target={col.openInNewTab ? '_blank' : undefined}
+          >
+            {value}
+          </Link>
+        );
+
+      default:
+        return <span className="text-sm font-medium">{(value !== undefined && value !== null && value !== '') ? value : '-'}</span>;
+    }
+  };
+
+  return (
+    <div className="border-collapse dark:bg-gray-900">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-gray-50 dark:bg-gray-800 border-b">
+            <TableHead className={cn('w-12 font-semibold', headPy)}>#</TableHead>
+            {columns.map((column) => (
+              <TableHead
+                key={column.key}
+                className={cn(
+                  headPy,
+                  'font-semibold',
+                  column.sortable && 'cursor-pointer select-none',
+                  column.className
+                )}
+                onClick={() => handleSort(column)}
+              >
+                <div className="flex items-center">
+                  {column.label}
+                  {renderSortIcon(column)}
+                </div>
+              </TableHead>
+            ))}
+            {/* <TableHead className="w-24 py-2.5 font-semibold text-right">{t("Actions")}</TableHead> */}
+            {showActions && hasAnyActionPermission && (
+              <TableHead className={cn(headPy, 'text-right font-semibold w-[7.25rem] px-1', stickyActionClass)}>
+                {t('Actions')}
+              </TableHead>
+            )}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {data.length > 0 ? (
+            data.map((row, index) => (
+              <TableRow key={row.id || index} className="hover:bg-gray-50 dark:hover:bg-gray-700 dark:bg-gray-900 border-b">
+                <TableCell className={cn('font-medium', cellPy)}>{from + index}</TableCell>
+                {columns.map((col) => (
+                  <TableCell
+                    key={col.key}
+                    className={cn(cellPy, col.className)}
+                  >
+                    {renderCellContent(row, col)}
+                  </TableCell>
+                ))}
+                {/* <TableCell className="py-2.5 text-right">
+                  {renderActionButtons(row)}
+                </TableCell> */}
+                {showActions && hasAnyActionPermission && (
+                  <TableCell className={cn(cellPy, 'text-right px-1', stickyActionCellClass)}>
+                    {renderActionButtons(row)}
+                  </TableCell>
+                )}
+              </TableRow>
+            ))
+          ) : (
+            <TableRow>
+              {/* <TableCell 
+                colSpan={columns.length + 2} 
+                className="h-24 text-center text-muted-foreground dark:text-gray-400"
+              >
+                {t("No results found.")}
+              </TableCell> */}
+              <TableCell
+                colSpan={columns.length + (showActions && hasAnyActionPermission ? 2 : 1)}
+                className="text-muted-foreground h-24 text-center dark:text-gray-400"
+              >
+                {t('No results found.')}
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
