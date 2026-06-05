@@ -25,6 +25,7 @@ export type NavGroupId =
     | 'workforce'
     | 'attendance'
     | 'payroll'
+    | 'salary-payroll'
     | 'leave'
     | 'reports'
     | 'admin'

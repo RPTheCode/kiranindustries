@@ -11,6 +11,7 @@ class EmployeeSalary extends BaseModel
 
     protected $fillable = [
         'employee_id',
+        'monthly_gross',
         'basic_salary',
         'per_day_salary',
         'minimum_wages',
@@ -24,6 +25,7 @@ class EmployeeSalary extends BaseModel
 
     protected $casts = [
         'basic_salary' => 'decimal:2',
+        'monthly_gross' => 'decimal:2',
         'per_day_salary' => 'decimal:2',
         'minimum_wages' => 'decimal:2',
         'min_wage_per_day' => 'decimal:2',

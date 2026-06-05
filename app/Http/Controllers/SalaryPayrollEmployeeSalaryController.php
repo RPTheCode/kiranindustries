@@ -1,0 +1,406 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Category;
+use App\Models\Department;
+use App\Models\EmployeeSalary;
+use App\Models\SalaryComponent;
+use App\Models\Shift;
+use App\Models\User;
+use App\Services\SalaryPayroll\EmployeeSalaryRevisionService;
+use App\Services\SalaryPayroll\SalaryStructureCalculator;
+use Carbon\Carbon;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Inertia\Inertia;
+
+class SalaryPayrollEmployeeSalaryController extends Controller
+{
+    public function __construct(
+        private SalaryStructureCalculator $calculator,
+        private EmployeeSalaryRevisionService $revisionService
+    ) {}
+
+    public function index(Request $request)
+    {
+        $branchId = session('active_branch_id');
+        $branchName = $branchId ? \App\Models\Branch::find($branchId)?->name : null;
+
+        $query = User::query()
+            ->where('type', 'employee')
+            ->whereIn('created_by', getCompanyAndUsersId())
+            ->whereHas('employee', function ($q) use ($branchId, $request) {
+                if ($branchId) {
+                    $q->where('branch_id', $branchId);
+                }
+                if ($request->filled('category_id') && $request->category_id !== 'all') {
+                    $q->where('category_id', $request->category_id);
+                }
+                if ($request->filled('department_id') && $request->department_id !== 'all') {
+                    $q->where('department_id', $request->department_id);
+                }
+                if ($request->filled('shift_id') && $request->shift_id !== 'all') {
+                    $q->where('shift_id', $request->shift_id);
+                }
+            })
+            ->with([
+                'employee.department:id,name',
+                'employee.category:id,name',
+                'employee.shift:id,name',
+            ]);
+
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhereHas('employee', fn ($eq) => $eq->where('employee_id', 'like', "%{$search}%"));
+            });
+        }
+
+        $employees = $query
+            ->orderBy('name')
+            ->paginate($request->integer('per_page', 50))
+            ->withQueryString();
+
+        $userIds = $employees->getCollection()->pluck('id');
+        $salaries = EmployeeSalary::whereIn('employee_id', $userIds)
+            ->get()
+            ->keyBy('employee_id');
+
+        $employees->getCollection()->transform(function ($user) use ($salaries) {
+            $salary = $salaries->get($user->id);
+            $emp = $user->employee;
+            $user->salary_record = $salary ? [
+                'id' => $salary->id,
+                'monthly_gross' => (float) ($salary->monthly_gross ?? $salary->basic_salary ?? 0),
+                'net_salary' => $this->netFromRecord($salary),
+                'is_active' => (bool) $salary->is_active,
+            ] : null;
+            $user->pf_applicable = (bool) ($emp?->pf_flag ?? false);
+            $user->esi_applicable = (bool) ($emp?->esic_flag ?? false);
+
+            return $user;
+        });
+
+        $salaryComponents = $this->branchSalaryComponents($branchId);
+
+        return Inertia::render('hr/salary-payroll/employee-salaries/index', [
+            'employees' => $employees,
+            'salaryComponents' => $salaryComponents,
+            'categories' => $this->branchCategories($branchId),
+            'departments' => $this->branchDepartments($branchId),
+            'shifts' => $this->branchShifts($branchId),
+            'activeBranchId' => $branchId,
+            'activeBranchName' => $branchName,
+            'filters' => $request->all(['search', 'category_id', 'department_id', 'shift_id', 'per_page']),
+            'defaultEffectiveFrom' => now()->toDateString(),
+        ]);
+    }
+
+    public function history(Request $request, $employeeId)
+    {
+        $employee = User::with('employee')->where('id', $employeeId)
+            ->where('type', 'employee')
+            ->whereIn('created_by', getCompanyAndUsersId())
+            ->firstOrFail();
+
+        return response()->json([
+            'employee' => [
+                'id' => $employee->id,
+                'name' => $employee->name,
+                'employee_code' => $employee->employee?->employee_id,
+                'date_of_joining' => $employee->employee?->date_of_joining
+                    ? Carbon::parse($employee->employee->date_of_joining)->format('d M Y')
+                    : null,
+            ],
+            'history' => $this->revisionService->historyForEmployee((int) $employeeId),
+        ]);
+    }
+
+    public function increment(Request $request, $employeeId)
+    {
+        $branchId = session('active_branch_id');
+
+        $validated = $request->validate([
+            'increment_mode' => 'required|in:percentage,fixed,set_gross',
+            'increment_value' => 'required|numeric|min:0.01',
+            'effective_from' => 'required|date',
+            'notes' => 'nullable|string|max:1000',
+        ]);
+
+        $employee = User::with('employee')->where('id', $employeeId)
+            ->where('type', 'employee')
+            ->whereIn('created_by', getCompanyAndUsersId())
+            ->firstOrFail();
+
+        if ($branchId && $employee->employee?->branch_id != $branchId) {
+            return redirect()->back()->with('error', __('Employee does not belong to the active branch.'));
+        }
+
+        $components = $this->branchSalaryComponents($branchId);
+        if ($components->isEmpty()) {
+            return redirect()->back()->with('error', __('No active salary components for this branch.'));
+        }
+
+        try {
+            $this->revisionService->validateEffectiveFrom(
+                (int) $employeeId,
+                Carbon::parse($validated['effective_from'])
+            );
+        } catch (\InvalidArgumentException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
+
+        $existing = EmployeeSalary::where('employee_id', $employeeId)->first();
+        $currentGross = (float) ($existing?->monthly_gross ?? $existing?->basic_salary ?? 0);
+
+        if ($currentGross <= 0 && $validated['increment_mode'] !== 'set_gross') {
+            return redirect()->back()->with('error', __('Employee has no existing salary. Set gross salary first.'));
+        }
+
+        $newGross = $this->revisionService->calculateNewGross(
+            $currentGross,
+            $validated['increment_mode'],
+            (float) $validated['increment_value']
+        );
+
+        if ($newGross <= 0) {
+            return redirect()->back()->with('error', __('Invalid new salary amount.'));
+        }
+
+        $split = $this->calculator->splitFromGross(
+            $newGross,
+            $components,
+            $this->statutoryOptionsForEmployee((int) $employeeId)
+        );
+
+        $incrementPct = $validated['increment_mode'] === 'percentage'
+            ? (float) $validated['increment_value']
+            : ($currentGross > 0 ? round((($newGross - $currentGross) / $currentGross) * 100, 2) : null);
+
+        $this->revisionService->applySalary((int) $employeeId, $split, [
+            'revision_type' => 'increment',
+            'effective_from' => $validated['effective_from'],
+            'notes' => $validated['notes'] ?? __('Salary increment'),
+            'previous_gross' => $currentGross > 0 ? $currentGross : null,
+            'increment_percentage' => $incrementPct,
+            'increment_amount' => $currentGross > 0 ? round($newGross - $currentGross, 2) : null,
+        ], $existing?->id);
+
+        return redirect()->back()->with('success', __('Salary increment saved successfully.'));
+    }
+
+    public function calculate(Request $request)
+    {
+        $validated = $request->validate([
+            'monthly_gross' => 'required|numeric|min:0',
+            'employee_id' => 'nullable|exists:users,id',
+        ]);
+
+        $branchId = session('active_branch_id');
+        $components = $this->branchSalaryComponents($branchId);
+
+        if ($components->isEmpty()) {
+            return response()->json(['error' => __('No active salary components for this branch.')], 422);
+        }
+
+        $options = $this->statutoryOptionsForEmployee($validated['employee_id'] ?? null);
+
+        return response()->json(
+            $this->calculator->splitFromGross((float) $validated['monthly_gross'], $components, $options)
+        );
+    }
+
+    public function store(Request $request)
+    {
+        return $this->saveSalary($request);
+    }
+
+    public function update(Request $request, $employeeSalaryId)
+    {
+        return $this->saveSalary($request, (int) $employeeSalaryId);
+    }
+
+    public function bulkStore(Request $request)
+    {
+        $branchId = session('active_branch_id');
+        $validated = $request->validate([
+            'monthly_gross' => 'required|numeric|min:0',
+            'employee_ids' => 'required|array|min:1',
+            'employee_ids.*' => 'integer|exists:users,id',
+            'category_id' => 'nullable',
+            'department_id' => 'nullable',
+            'shift_id' => 'nullable',
+        ]);
+
+        $components = $this->branchSalaryComponents($branchId);
+        if ($components->isEmpty()) {
+            return redirect()->back()->with('error', __('No active salary components for this branch.'));
+        }
+
+        $split = $this->calculator->splitFromGross((float) $validated['monthly_gross'], $components);
+
+        $employees = User::whereIn('id', $validated['employee_ids'])
+            ->where('type', 'employee')
+            ->whereHas('employee', function ($q) use ($branchId) {
+                if ($branchId) {
+                    $q->where('branch_id', $branchId);
+                }
+            })
+            ->pluck('id');
+
+        $saved = 0;
+        DB::transaction(function () use ($employees, $split, &$saved) {
+            foreach ($employees as $employeeId) {
+                $this->revisionService->applySalary((int) $employeeId, $split, [
+                    'revision_type' => 'joining',
+                    'effective_from' => now()->toDateString(),
+                    'notes' => __('Bulk salary assignment'),
+                ]);
+                $saved++;
+            }
+        });
+
+        return redirect()->back()->with('success', __('Salary applied to :count employee(s).', ['count' => $saved]));
+    }
+
+    private function saveSalary(Request $request, ?int $salaryId = null)
+    {
+        $branchId = session('active_branch_id');
+
+        $validated = $request->validate([
+            'employee_id' => 'required|exists:users,id',
+            'monthly_gross' => 'required|numeric|min:0',
+            'notes' => 'nullable|string|max:1000',
+        ]);
+
+        $employee = User::with('employee')->findOrFail($validated['employee_id']);
+        if ($branchId && $employee->employee?->branch_id != $branchId) {
+            return redirect()->back()->with('error', __('Employee does not belong to the active branch.'));
+        }
+
+        $components = $this->branchSalaryComponents($branchId);
+        if ($components->isEmpty()) {
+            return redirect()->back()->with('error', __('No active salary components for this branch.'));
+        }
+
+        $split = $this->calculator->splitFromGross(
+            (float) $validated['monthly_gross'],
+            $components,
+            $this->statutoryOptionsForEmployee($validated['employee_id'])
+        );
+
+        $hasExisting = EmployeeSalary::where('employee_id', $validated['employee_id'])->exists();
+        $revisionType = $hasExisting ? 'correction' : 'joining';
+        $effectiveFrom = $hasExisting
+            ? now()->toDateString()
+            : $this->revisionService->joiningDateForEmployee((int) $validated['employee_id'])->toDateString();
+
+        $this->revisionService->applySalary((int) $validated['employee_id'], $split, [
+            'revision_type' => $revisionType,
+            'effective_from' => $effectiveFrom,
+            'notes' => $validated['notes'] ?? ($revisionType === 'joining' ? __('Initial salary from joining date') : null),
+        ], $salaryId);
+
+        return redirect()->back()->with('success', __('Employee salary saved successfully.'));
+    }
+
+    private function statutoryOptionsForEmployee(?int $userId): array
+    {
+        if (! $userId) {
+            return ['apply_pf' => true, 'apply_esi' => true];
+        }
+
+        $employee = User::with('employee')->find($userId);
+        $profile = $employee?->employee;
+
+        return [
+            'apply_pf' => (bool) ($profile?->pf_flag ?? false),
+            'apply_esi' => (bool) ($profile?->esic_flag ?? false),
+        ];
+    }
+
+    private function branchSalaryComponents(?int $branchId)
+    {
+        $query = SalaryComponent::withoutGlobalScopes()
+            ->where('status', 'active')
+            ->whereIn('created_by', getCompanyAndUsersId())
+            ->orderBy('type')
+            ->orderBy('name');
+
+        if ($branchId) {
+            $query->where('branch_id', $branchId);
+        }
+
+        return $query->get();
+    }
+
+    private function branchCategories(?int $branchId)
+    {
+        if (! $branchId) {
+            return Category::orderBy('name')->get(['id', 'name']);
+        }
+
+        return Category::withoutGlobalScopes()
+            ->where('branch_id', $branchId)
+            ->where('status', 'active')
+            ->orderBy('name')
+            ->get(['id', 'name']);
+    }
+
+    private function branchDepartments(?int $branchId)
+    {
+        $query = Department::withoutGlobalScopes()
+            ->whereIn('created_by', getCompanyAndUsersId())
+            ->where('status', 'active')
+            ->orderBy('name');
+
+        if ($branchId) {
+            $query->where('branch_id', $branchId);
+        }
+
+        return $query->get(['id', 'name']);
+    }
+
+    private function branchShifts(?int $branchId)
+    {
+        $query = Shift::whereIn('created_by', getCompanyAndUsersId())
+            ->where('status', 'active')
+            ->orderBy('name');
+
+        if ($branchId) {
+            $query->where('branch_id', $branchId);
+        }
+
+        return $query->get(['id', 'name']);
+    }
+
+    private function netFromRecord(EmployeeSalary $salary): float
+    {
+        if (! $salary->components || ! is_array($salary->components)) {
+            return (float) ($salary->monthly_gross ?? $salary->basic_salary ?? 0);
+        }
+
+        $ids = array_keys($salary->components);
+        $components = SalaryComponent::withoutGlobalScopes()
+            ->whereIn('id', $ids)
+            ->get(['id', 'type']);
+
+        $earnings = 0;
+        $deductions = 0;
+        foreach ($salary->components as $id => $amount) {
+            $comp = $components->firstWhere('id', (int) $id);
+            if (! $comp) {
+                continue;
+            }
+            if ($comp->type === 'earning') {
+                $earnings += (float) $amount;
+            } else {
+                $deductions += (float) $amount;
+            }
+        }
+
+        return round($earnings - $deductions, 2);
+    }
+}

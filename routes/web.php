@@ -338,10 +338,23 @@ Route::middleware(['auth', 'verified', 'setting'])->group(function () {
     Route::post('attendance-sync/bulk-update', [\App\Http\Controllers\BiometricAttendanceSyncController::class, 'bulkUpdate']);
     Route::post('attendance-sync-engine/bulk-update', [\App\Http\Controllers\BiometricAttendanceSyncController::class, 'bulkUpdate']);
     Route::post('payslips/{payslip}/regenerate', [\App\Http\Controllers\PayslipController::class, 'regenerate'])->name('hr.payslips.regenerate');
-    Route::get('monthly-incentives-entry', [\App\Http\Controllers\MonthlyIncentiveController::class, 'index'])->name('hr.monthly-incentives.index');
-    Route::get('monthly-incentives-entry/employee-details/{id}', [\App\Http\Controllers\MonthlyIncentiveController::class, 'getEmployeeDetails'])->name('hr.monthly-incentives.employee-details');
-    Route::get('monthly-incentives-entry/employee-history/{id}', [\App\Http\Controllers\MonthlyIncentiveController::class, 'getEmployeeHistory'])->name('hr.monthly-incentives.employee-history');
-    Route::post('monthly-incentives-entry/store', [\App\Http\Controllers\MonthlyIncentiveController::class, 'store'])->name('hr.monthly-incentives.store');
+    Route::get('payroll/earning-deduction-entry', [\App\Http\Controllers\MonthlyIncentiveController::class, 'index'])->name('hr.earning-deduction.index');
+    Route::get('payroll/earning-deduction-entry/employee-details/{id}', [\App\Http\Controllers\MonthlyIncentiveController::class, 'getEmployeeDetails'])->name('hr.earning-deduction.employee-details');
+    Route::get('payroll/earning-deduction-entry/employee-history/{id}', [\App\Http\Controllers\MonthlyIncentiveController::class, 'getEmployeeHistory'])->name('hr.earning-deduction.employee-history');
+    Route::post('payroll/earning-deduction-entry/store', [\App\Http\Controllers\MonthlyIncentiveController::class, 'store'])->name('hr.earning-deduction.store');
+    Route::get('payroll/employee-salary', [\App\Http\Controllers\SalaryPayrollEmployeeSalaryController::class, 'index'])->middleware('permission:view-employee-salaries|manage-employee-salaries|manage-any-employee-salaries|manage-own-employee-salaries')->name('hr.salary-payroll.employee-salary.index');
+    Route::post('payroll/employee-salary/calculate', [\App\Http\Controllers\SalaryPayrollEmployeeSalaryController::class, 'calculate'])->middleware('permission:view-employee-salaries|manage-employee-salaries|create-employee-salaries|edit-employee-salaries')->name('hr.salary-payroll.employee-salary.calculate');
+    Route::post('payroll/employee-salary', [\App\Http\Controllers\SalaryPayrollEmployeeSalaryController::class, 'store'])->middleware('permission:create-employee-salaries|edit-employee-salaries|manage-employee-salaries')->name('hr.salary-payroll.employee-salary.store');
+    Route::put('payroll/employee-salary/{employeeSalary}', [\App\Http\Controllers\SalaryPayrollEmployeeSalaryController::class, 'update'])->middleware('permission:edit-employee-salaries|manage-employee-salaries')->name('hr.salary-payroll.employee-salary.update');
+    Route::post('payroll/employee-salary/bulk', [\App\Http\Controllers\SalaryPayrollEmployeeSalaryController::class, 'bulkStore'])->middleware('permission:create-employee-salaries|edit-employee-salaries|manage-employee-salaries')->name('hr.salary-payroll.employee-salary.bulk');
+    Route::get('payroll/employee-salary/{employee}/history', [\App\Http\Controllers\SalaryPayrollEmployeeSalaryController::class, 'history'])->middleware('permission:view-employee-salaries|manage-employee-salaries|manage-any-employee-salaries|manage-own-employee-salaries')->name('hr.salary-payroll.employee-salary.history');
+    Route::post('payroll/employee-salary/{employee}/increment', [\App\Http\Controllers\SalaryPayrollEmployeeSalaryController::class, 'increment'])->middleware('permission:create-employee-salaries|edit-employee-salaries|manage-employee-salaries')->name('hr.salary-payroll.employee-salary.increment');
+    Route::get('payroll/salary-increment', [\App\Http\Controllers\SalaryPayrollIncrementController::class, 'index'])->middleware('permission:view-employee-salaries|manage-employee-salaries|manage-any-employee-salaries|manage-own-employee-salaries')->name('hr.salary-payroll.salary-increment.index');
+    Route::post('payroll/salary-increment/preview', [\App\Http\Controllers\SalaryPayrollIncrementController::class, 'preview'])->middleware('permission:view-employee-salaries|create-employee-salaries|edit-employee-salaries|manage-employee-salaries')->name('hr.salary-payroll.salary-increment.preview');
+    Route::post('payroll/salary-increment/apply', [\App\Http\Controllers\SalaryPayrollIncrementController::class, 'apply'])->middleware('permission:create-employee-salaries|edit-employee-salaries|manage-employee-salaries')->name('hr.salary-payroll.salary-increment.apply');
+    Route::redirect('monthly-incentives-entry', '/payroll/earning-deduction-entry');
+    Route::get('monthly-incentives-entry/employee-details/{id}', fn ($id) => redirect()->route('hr.earning-deduction.employee-details', $id));
+    Route::get('monthly-incentives-entry/employee-history/{id}', fn ($id) => redirect()->route('hr.earning-deduction.employee-history', $id));
     Route::get('daily-production-attendance-entry', [\App\Http\Controllers\DailyProductionAttendanceEntryController::class, 'index'])->name('hr.daily-production-attendance-entry.index');
     Route::get('daily-production-attendance-entry/employee-details/{id}', [\App\Http\Controllers\DailyProductionAttendanceEntryController::class, 'getEmployeeDetails'])->name('hr.daily-production-attendance-entry.employee-details');
     Route::post('daily-production-attendance-entry/store', [\App\Http\Controllers\DailyProductionAttendanceEntryController::class, 'store'])->name('hr.daily-production-attendance-entry.store');
@@ -486,6 +499,13 @@ Route::middleware(['auth', 'verified', 'setting'])->group(function () {
         Route::resource('material-items', MaterialItemController::class)->names('hr.material-items');
         Route::resource('incentive-types', \App\Http\Controllers\IncentiveDeductionTypeController::class)->names('hr.incentive-types');
         Route::put('incentive-types/{incentiveType}/toggle-status', [\App\Http\Controllers\IncentiveDeductionTypeController::class, 'toggleStatus'])->name('hr.incentive-types.toggle-status');
+        Route::post('deduction-types/reorder', [\App\Http\Controllers\DeductionTypeController::class, 'reorder'])->middleware('permission:edit-deduction-types')->name('hr.deduction-types.reorder');
+        Route::put('deduction-types/{deduction_type}/toggle-status', [\App\Http\Controllers\DeductionTypeController::class, 'toggleStatus'])->middleware('permission:edit-deduction-types')->name('hr.deduction-types.toggle-status');
+        Route::get('deduction-types/active/list', [\App\Http\Controllers\DeductionTypeController::class, 'activeList'])->name('hr.deduction-types.active-list');
+        Route::get('deduction-types', [\App\Http\Controllers\DeductionTypeController::class, 'index'])->middleware('permission:view-deduction-types|manage-deduction-types|manage-any-deduction-types|manage-own-deduction-types')->name('hr.deduction-types.index');
+        Route::post('deduction-types', [\App\Http\Controllers\DeductionTypeController::class, 'store'])->middleware('permission:create-deduction-types')->name('hr.deduction-types.store');
+        Route::put('deduction-types/{deduction_type}', [\App\Http\Controllers\DeductionTypeController::class, 'update'])->middleware('permission:edit-deduction-types')->name('hr.deduction-types.update');
+        Route::delete('deduction-types/{deduction_type}', [\App\Http\Controllers\DeductionTypeController::class, 'destroy'])->middleware('permission:delete-deduction-types')->name('hr.deduction-types.destroy');
 
         // NEW GLOBAL REPORTS ROUTES
         Route::get('reports/daily', [\App\Http\Controllers\ReportController::class, 'dailyReports'])->name('hr.reports.daily');

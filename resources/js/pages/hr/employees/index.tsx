@@ -131,7 +131,7 @@ export default function Employees() {
         setIsPasswordModalOpen(true);
         break;
       case 'monthly-incentive':
-        router.get(route('hr.monthly-incentives.index', { employee_id: item.employee?.id || item.id }));
+        router.get(route('hr.earning-deduction.index', { employee_id: item.employee?.id || item.id }));
         break;
       case 'export':
         window.open(route('hr.employees.export', item.employee?.user_id || item.id), '_blank');
@@ -491,7 +491,7 @@ export default function Employees() {
       requiredPermission: 'delete-employees'
     },
     {
-      label: t('Monthly Incentive'),
+      label: t('Earning / Deduction'),
       icon: 'Calculator',
       action: 'monthly-incentive',
       className: 'text-green-500',

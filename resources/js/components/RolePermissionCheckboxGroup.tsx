@@ -366,6 +366,9 @@ export function RolePermissionCheckboxGroup({
                       <tbody>
                         {(() => {
                           const groupedByEntity: Record<string, any[]> = {};
+                          const entityDisplayNames: Record<string, string> = {
+                            'deduction-types': 'Deduction Master',
+                          };
                           
                           modulePermissions.forEach(permission => {
                             let entityName = (permission.name as string);
@@ -452,12 +455,14 @@ export function RolePermissionCheckboxGroup({
                               );
                             };
 
+                            const displayName = entityDisplayNames[entity] || entity.replace(/-/g, ' ');
+
                             return (
                               <tr key={entity} className={`hover:bg-gray-50/70 transition-colors ${!isLast ? 'border-b border-gray-100' : ''}`}>
                                 {/* Entity Name */}
                                 <td className="py-3.5 px-6 font-medium text-gray-800 capitalize flex items-center">
                                   <div className="w-1.5 h-1.5 rounded-full bg-primary-400 mr-2.5"></div>
-                                  {entity.replace(/-/g, ' ')}
+                                  {displayName}
                                 </td>
                                 
                                 {/* Select All for Row */}

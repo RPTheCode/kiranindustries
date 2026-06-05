@@ -8,6 +8,7 @@ import { useBrand } from '@/contexts/BrandContext';
 import { type NavItem } from '@/types';
 import { Link, usePage, router } from '@inertiajs/react';
 import {
+    Banknote,
     Building2,
     CalendarOff,
     CreditCard,
@@ -219,6 +220,14 @@ export function AppSidebar() {
         if ((hasPermission(permissions, 'manage-material-items') || hasPermission(permissions, 'view-material-items'))) {
             masterChildren.push({ title: t('Material Items'), href: route('hr.material-items.index') });
         }
+        if (
+            hasPermission(permissions, 'manage-deduction-types')
+            || hasPermission(permissions, 'manage-any-deduction-types')
+            || hasPermission(permissions, 'manage-own-deduction-types')
+            || hasPermission(permissions, 'view-deduction-types')
+        ) {
+            masterChildren.push({ title: t('Deduction Master'), href: route('hr.deduction-types.index') });
+        }
 
         if ((hasPermission(permissions, 'manage-document-types') || hasPermission(permissions, 'view-document-types'))) {
             masterChildren.push({
@@ -229,7 +238,7 @@ export function AppSidebar() {
 
         if ((hasPermission(permissions, 'manage-salary-components') || hasPermission(permissions, 'view-salary-components'))) {
             masterChildren.push({
-                title: t('Salary Components'),
+                title: t('Salary Component Master'),
                 href: route('hr.salary-components.index')
             });
         }
@@ -295,7 +304,7 @@ export function AppSidebar() {
             });
         }
 
-        // Payroll Management as separate menu
+        // Legacy payroll (runs, payslips, salaries, etc.)
         const payrollChildren = [];
 
         if ((hasPermission(permissions, 'manage-employee-salaries') || hasPermission(permissions, 'view-employee-salaries'))) {
@@ -304,11 +313,6 @@ export function AppSidebar() {
                 href: route('hr.employee-salaries.index')
             });
         }
-
-        payrollChildren.push({
-            title: t('Earnings / Deductions Entry'),
-            href: route('hr.monthly-incentives.index')
-        });
 
         if ((hasPermission(permissions, 'manage-payroll-runs') || hasPermission(permissions, 'view-payroll-runs'))) {
             payrollChildren.push({
@@ -344,6 +348,36 @@ export function AppSidebar() {
                 icon: Wallet,
                 children: payrollChildren,
                 group: 'payroll',
+            });
+        }
+
+        // New salary payroll module (separate from legacy payroll)
+        const salaryPayrollChildren = [];
+        if (
+            hasPermission(permissions, 'manage-employee-salaries')
+            || hasPermission(permissions, 'manage-any-employee-salaries')
+            || hasPermission(permissions, 'manage-own-employee-salaries')
+            || hasPermission(permissions, 'view-employee-salaries')
+        ) {
+            salaryPayrollChildren.push({
+                title: t('Employee Salary'),
+                href: route('hr.salary-payroll.employee-salary.index'),
+            });
+            salaryPayrollChildren.push({
+                title: t('Bulk Salary Increment'),
+                href: route('hr.salary-payroll.salary-increment.index'),
+            });
+        }
+        salaryPayrollChildren.push({
+            title: t('Earning / Deduction'),
+            href: route('hr.earning-deduction.index'),
+        });
+        if (salaryPayrollChildren.length > 0) {
+            items.push({
+                title: t('Salary Payroll'),
+                icon: Banknote,
+                children: salaryPayrollChildren,
+                group: 'salary-payroll',
             });
         }
 

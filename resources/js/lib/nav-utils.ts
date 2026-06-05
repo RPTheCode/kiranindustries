@@ -6,6 +6,7 @@ export type NavGroupId =
     | 'workforce'
     | 'attendance'
     | 'payroll'
+    | 'salary-payroll'
     | 'leave'
     | 'reports'
     | 'admin'
@@ -17,6 +18,7 @@ export const NAV_GROUP_ORDER: NavGroupId[] = [
     'workforce',
     'attendance',
     'payroll',
+    'salary-payroll',
     'leave',
     'reports',
     'admin',
@@ -29,6 +31,7 @@ export const NAV_GROUP_LABELS: Record<NavGroupId, string> = {
     workforce: 'Workforce',
     attendance: 'Attendance',
     payroll: 'Payroll',
+    'salary-payroll': 'Salary Payroll',
     leave: 'Leave',
     reports: 'Reports',
     admin: 'Administration',
