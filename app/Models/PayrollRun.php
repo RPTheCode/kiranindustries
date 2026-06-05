@@ -654,7 +654,8 @@ class PayrollRun extends BaseModel
 
         // --- 3. Monthly Manual Adjustments (Incentives/Earnings) ---
         $monthYear = $this->pay_period_start->format('Y-m');
-        $incentiveEntry = \App\Models\MonthlyIncentiveEntry::where('employee_id', $emp->id)
+        $incentiveEntry = \App\Models\MonthlyIncentiveEntry::with(['details.deductionType.categoryAmounts'])
+            ->where('employee_id', $emp->id)
             ->where('month_year', $monthYear)
             ->first();
 
@@ -666,7 +667,7 @@ class PayrollRun extends BaseModel
 
         if ($incentiveEntry) {
             foreach ($incentiveEntry->details as $detail) {
-                $detailAmount = $this->resolveIncentiveDetailAmount($detail, $perDaySalary);
+                $detailAmount = $this->resolveIncentiveDetailAmount($detail, $perDaySalary, $emp->category_id ?? null);
                 \Log::info("[Payroll] Adding Detail: {$detail->name}", ['type' => $detail->type, 'mode' => $detail->mode, 'val' => $detailAmount]);
                 if ($detail->type === 'earning' || $detail->type === 'Incentive') {
                     $earningsBreakdown[$detail->name] = $detailAmount;
@@ -775,7 +776,7 @@ class PayrollRun extends BaseModel
         if ($incentiveEntry) {
             foreach ($incentiveEntry->details as $detail) {
                 if ($detail->type === 'deduction' || $detail->type === 'Penalty') {
-                    $deductionsBreakdown[$detail->name] = $this->resolveIncentiveDetailAmount($detail, $perDaySalary);
+                    $deductionsBreakdown[$detail->name] = $this->resolveIncentiveDetailAmount($detail, $perDaySalary, $emp->category_id ?? null);
                 }
             }
         }
@@ -1144,9 +1145,19 @@ class PayrollRun extends BaseModel
     /**
      * Convert monthly incentive detail value based on amount/day mode.
      */
-    private function resolveIncentiveDetailAmount($detail, float $perDaySalary): float
+    private function resolveIncentiveDetailAmount($detail, float $perDaySalary, ?int $categoryId = null): float
     {
         $value = (float) ($detail->value ?? 0);
+
+        $deductionType = $detail->deductionType;
+        if (! $deductionType && ! empty($detail->deduction_type_id)) {
+            $deductionType = \App\Models\DeductionType::with('categoryAmounts')
+                ->find($detail->deduction_type_id);
+        }
+        if ($deductionType) {
+            return $deductionType->resolveAmount($value, $categoryId);
+        }
+
         if (($detail->mode ?? 'amount') === 'day') {
             return round($value * $perDaySalary, 2);
         }

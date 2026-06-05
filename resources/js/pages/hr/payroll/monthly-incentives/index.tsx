@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { PageTemplate } from '@/components/page-template';
 import { Head, useForm, usePage } from '@inertiajs/react';
 import { 
@@ -27,17 +27,71 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import axios from 'axios';
-import { toast } from 'sonner';
 
 import { Combobox, ComboboxOption } from '@/components/ui/combobox';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
+import { toast } from '@/components/custom-toast';
 
 interface EntryDetail {
     type_id: number | null;
+    deduction_type_id: number | null;
     name: string;
     type: 'earning' | 'deduction';
     mode: 'amount' | 'day';
     value: string;
     temp_id: number;
+}
+
+interface DeductionTypeOption {
+    id: number;
+    name: string;
+    default_amount: number;
+    amount_type?: 'fixed' | 'category_wise';
+    calculation_mode: 'day' | 'month';
+    category_amounts_list?: { category_id: number; category_name?: string; amount: number }[];
+}
+
+function resolveDeductionRate(master: DeductionTypeOption, categoryId?: number | null): number {
+    if (master.amount_type === 'category_wise' && categoryId) {
+        const match = master.category_amounts_list?.find((row) => row.category_id === categoryId);
+        if (match) return Number(match.amount);
+    }
+    return Number(master.default_amount);
+}
+
+function masterDeductionLabel(master: DeductionTypeOption, categoryId?: number | null): string {
+    const mode = master.calculation_mode === 'day' ? 'Per Day' : 'Per Month';
+    const rate = resolveDeductionRate(master, categoryId);
+    const categoryHint =
+        master.amount_type === 'category_wise' && categoryId
+            ? ` · ${master.category_amounts_list?.find((r) => r.category_id === categoryId)?.category_name || 'Category rate'}`
+            : '';
+    return `${master.name} · ${mode} · ₹${rate.toLocaleString('en-IN')}${categoryHint}`;
+}
+
+function recalcMasterDeductionDetails(
+    details: EntryDetail[],
+    masters: DeductionTypeOption[],
+    categoryId?: number | null,
+): EntryDetail[] {
+    return details.map((d) => {
+        if (d.type !== 'deduction' || !d.deduction_type_id) {
+            return d;
+        }
+        const master = masters.find((m) => m.id === d.deduction_type_id);
+        if (!master) {
+            return d;
+        }
+        const rate = resolveDeductionRate(master, categoryId);
+        const isDay = master.calculation_mode === 'day';
+        return {
+            ...d,
+            name: master.name,
+            mode: isDay ? 'day' : 'amount',
+            value: isDay ? d.value : String(rate),
+        };
+    });
 }
 
 interface HistoryEntry {
@@ -51,7 +105,7 @@ interface HistoryEntry {
 }
 
 export default function MonthlyIncentiveIndex() {
-    const { employees, selected_employee_id } = usePage<PageProps>().props;
+    const { employees, selected_employee_id, deductionTypes = [], activeBranchName } = usePage<PageProps>().props as any;
     const { t } = useTranslation();
 
     const [loading, setLoading] = useState(false);
@@ -79,7 +133,7 @@ export default function MonthlyIncentiveIndex() {
         setHistoryLoading(true);
         try {
             // Use direct URL to avoid Ziggy cache issues with newly registered routes
-            const resp = await axios.get(`/monthly-incentives-entry/employee-history/${employeeId}`);
+            const resp = await axios.get(route('hr.earning-deduction.employee-history', employeeId));
             setHistory(resp.data.entries || []);
         } catch (err) {
             console.error('History fetch failed:', err);
@@ -98,27 +152,32 @@ export default function MonthlyIncentiveIndex() {
         setData('employee_id', val);
         setLoading(true);
         try {
-            const response = await axios.get(route('hr.monthly-incentives.employee-details', val), {
+            const response = await axios.get(route('hr.earning-deduction.employee-details', val), {
                 params: { month: targetMonth, date: targetDate }
             });
             const { employee, existing_entry } = response.data;
             setEmployeeDetails(employee);
             
             if (existing_entry) {
-                const entryDetails = existing_entry.details.map((d: any) => ({
-                    type_id: d.type_id,
-                    name: d.name || '',
-                    type: d.type,
-                    mode: d.mode,
-                    value: d.value.toString(),
-                    temp_id: Math.random()
-                }));
+                const entryDetails = recalcMasterDeductionDetails(
+                    existing_entry.details.map((d: any) => ({
+                        type_id: d.type_id,
+                        deduction_type_id: d.deduction_type_id ?? null,
+                        name: d.name || '',
+                        type: d.type,
+                        mode: d.mode,
+                        value: d.value.toString(),
+                        temp_id: Math.random(),
+                    })),
+                    deductionTypes as DeductionTypeOption[],
+                    employee.category_id,
+                );
                 setData((prevData) => ({
                     ...prevData,
                     employee_id: val,
                     remark: existing_entry.remark || '',
                     date: existing_entry.date || prevData.date,
-                    details: entryDetails
+                    details: entryDetails,
                 }));
                 setIsExistingRecord(true);
                 toast.info(t('Existing record loaded'));
@@ -142,14 +201,19 @@ export default function MonthlyIncentiveIndex() {
     };
 
     const loadHistoryEntry = (entry: HistoryEntry) => {
-        const entryDetails = entry.details.map((d) => ({
-            type_id: d.type_id,
-            name: d.name || '',
-            type: d.type as 'earning' | 'deduction',
-            mode: d.mode as 'amount' | 'day',
-            value: d.value.toString(),
-            temp_id: Math.random()
-        }));
+        const entryDetails = recalcMasterDeductionDetails(
+            entry.details.map((d) => ({
+                type_id: d.type_id,
+                deduction_type_id: d.deduction_type_id ?? null,
+                name: d.name || '',
+                type: d.type as 'earning' | 'deduction',
+                mode: d.mode as 'amount' | 'day',
+                value: d.value.toString(),
+                temp_id: Math.random(),
+            })),
+            deductionTypes as DeductionTypeOption[],
+            employeeDetails?.category_id,
+        );
         setData((prev) => ({
             ...prev,
             month_year: entry.month_year,
@@ -180,10 +244,44 @@ export default function MonthlyIncentiveIndex() {
         }
     };
 
+    const applyDeductionMaster = (tempId: number, typeId: string) => {
+        if (!typeId || typeId === 'custom') {
+            handleDetailUpdate(tempId, 'deduction_type_id', null);
+            return;
+        }
+        const master = (deductionTypes as DeductionTypeOption[]).find((d) => d.id === Number(typeId));
+        if (!master) return;
+
+        const newDetails = [...data.details];
+        const index = newDetails.findIndex(d => d.temp_id === tempId);
+        if (index === -1) return;
+
+        const rate = resolveDeductionRate(master, employeeDetails?.category_id);
+        const isDay = master.calculation_mode === 'day';
+
+        newDetails[index] = {
+            ...newDetails[index],
+            deduction_type_id: master.id,
+            name: master.name,
+            type: 'deduction',
+            mode: isDay ? 'day' : 'amount',
+            value: isDay ? '1' : String(rate),
+        };
+        setData('details', newDetails);
+    };
+
     const addRow = (type: 'earning' | 'deduction') => {
         setData('details', [
             ...data.details,
-            { type_id: null, name: '', type, mode: 'amount', value: '0', temp_id: Math.random() }
+            {
+                type_id: null,
+                deduction_type_id: null,
+                name: '',
+                type,
+                mode: 'amount',
+                value: '0',
+                temp_id: Math.random(),
+            }
         ]);
     };
 
@@ -209,7 +307,7 @@ export default function MonthlyIncentiveIndex() {
             return;
         }
 
-        post(route('hr.monthly-incentives.store'), {
+        post(route('hr.earning-deduction.store'), {
             onSuccess: (page) => {
                 const flash = page.props.flash as any;
                 if (flash && flash.error) {
@@ -238,16 +336,27 @@ export default function MonthlyIncentiveIndex() {
 
     const breadcrumbs = [
         { title: t('Dashboard'), href: route('dashboard') },
-        { title: t('Earnings / Deductions') }
+        { title: t('Salary Payroll') },
+        { title: t('Earning / Deduction') },
     ];
 
-    const employeeOptions: ComboboxOption[] = employees.map(emp => ({
-        label: `[${emp.scroll_no}] ${emp.name}`,
-        value: emp.id.toString()
+    const employeeOptions: ComboboxOption[] = employees.map((emp: any) => ({
+        label: emp.category_name
+            ? `${emp.scroll_no} · ${emp.name} · ${emp.category_name}`
+            : `${emp.scroll_no} · ${emp.name}`,
+        value: emp.id.toString(),
     }));
 
     const formEarnings = data.details.filter(d => d.type === 'earning');
     const formDeductions = data.details.filter(d => d.type === 'deduction');
+
+    const deductionComboboxOptions: ComboboxOption[] = useMemo(() => [
+        { value: 'custom', label: t('Custom / Manual') },
+        ...(deductionTypes as DeductionTypeOption[]).map((dt) => ({
+            value: String(dt.id),
+            label: masterDeductionLabel(dt, employeeDetails?.category_id),
+        })),
+    ], [deductionTypes, employeeDetails?.category_id, t]);
 
     // Group history by month_year
     const groupedHistory = history.reduce((acc, entry) => {
@@ -269,8 +378,13 @@ export default function MonthlyIncentiveIndex() {
 
     return (
         <PageTemplate 
-            title={t('Earnings / Deductions Entry')} 
-            url={route('hr.monthly-incentives.index')}
+            title={t('Earning / Deduction Entry')} 
+            description={
+                activeBranchName
+                    ? `${activeBranchName} · ${t('Monthly earning & deduction entry for payroll')}`
+                    : t('Monthly earning & deduction entry for payroll')
+            }
+            url={route('hr.earning-deduction.index')}
             breadcrumbs={breadcrumbs}
             noPadding
         >
@@ -346,25 +460,35 @@ export default function MonthlyIncentiveIndex() {
 
                         {employeeDetails && (
                             <CardContent className="p-0 border-b border-slate-100">
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-0 divide-x divide-slate-100 bg-slate-50/20">
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-0 divide-x divide-y md:divide-y-0 divide-slate-100 bg-slate-50/20">
                                     <div className="p-4">
                                         <div className="text-[10px] text-slate-400 uppercase font-bold mb-1">{t('Employee Name')}</div>
                                         <div className="text-sm font-bold text-slate-800">{employeeDetails.name}</div>
                                     </div>
                                     <div className="p-4">
-                                        <div className="text-[10px] text-slate-400 uppercase font-bold mb-1">{t('Scroll No / Code')}</div>
-                                        <div className="text-sm font-bold text-slate-800">[{employeeDetails.scroll_no}]</div>
+                                        <div className="text-[10px] text-slate-400 uppercase font-bold mb-1">{t('Employee Code')}</div>
+                                        <div className="text-sm font-bold tabular-nums text-slate-800">{employeeDetails.scroll_no}</div>
+                                    </div>
+                                    <div className="p-4">
+                                        <div className="text-[10px] text-slate-400 uppercase font-bold mb-1">{t('Category')}</div>
+                                        {employeeDetails.category_name ? (
+                                            <Badge variant="outline" className="border-violet-200 bg-violet-50 text-violet-800 font-semibold">
+                                                {employeeDetails.category_name}
+                                            </Badge>
+                                        ) : (
+                                            <span className="text-xs font-medium text-slate-400">{t('Not set')}</span>
+                                        )}
+                                    </div>
+                                    <div className="p-4">
+                                        <div className="text-[10px] text-slate-400 uppercase font-bold mb-1">{t('Branch')}</div>
+                                        <div className="text-sm font-semibold text-slate-700">
+                                            {employeeDetails.branch_name || activeBranchName || t('N/A')}
+                                        </div>
                                     </div>
                                     <div className="p-4">
                                         <div className="text-[10px] text-slate-400 uppercase font-bold mb-1">{t('Department / Designation')}</div>
                                         <div className="text-xs font-semibold text-slate-600">
-                                            {employeeDetails.department} / {employeeDetails.designation}
-                                        </div>
-                                    </div>
-                                    <div className="p-4">
-                                        <div className="text-[10px] text-slate-400 uppercase font-bold mb-1">{t('ESI / PF Number')}</div>
-                                        <div className="text-xs font-semibold text-slate-600">
-                                            {employeeDetails.esi_no || 'N/A'} / {employeeDetails.pf_no || 'N/A'}
+                                            {employeeDetails.department || '—'} / {employeeDetails.designation || '—'}
                                         </div>
                                     </div>
                                 </div>
@@ -441,7 +565,7 @@ export default function MonthlyIncentiveIndex() {
                                     </div>
                                     <div>
                                         <h3 className="text-sm font-bold text-slate-800 uppercase tracking-tight">{t('Deductions')}</h3>
-                                        <p className="text-[10px] text-slate-500 font-medium">{t('Add custom deduction components')}</p>
+                                        <p className="text-[10px] text-slate-500 font-medium">{t('From Deduction Master or custom entry')}</p>
                                     </div>
                                 </div>
                                 <Button type="button" variant="outline" size="sm" onClick={() => addRow('deduction')}
@@ -455,38 +579,124 @@ export default function MonthlyIncentiveIndex() {
                                         <MinusCircle className="w-8 h-8 text-slate-200 mb-2" />
                                         <p className="text-xs text-slate-400 font-medium italic">{t('No deductions added yet')}</p>
                                     </div>
-                                ) : formDeductions.map((row) => (
-                                    <div key={row.temp_id} className="p-3 border border-slate-100 rounded-xl bg-white shadow-sm hover:border-red-200 transition-all group">
-                                        <div className="grid grid-cols-12 gap-3 items-center">
-                                            <div className="col-span-12 md:col-span-5">
-                                                <Input placeholder={t('Deduction Name (e.g. Canteen)')} value={row.name}
+                                ) : formDeductions.map((row) => {
+                                    const linkedMaster = row.deduction_type_id
+                                        ? (deductionTypes as DeductionTypeOption[]).find((d) => d.id === row.deduction_type_id)
+                                        : null;
+                                    const isFromMaster = Boolean(linkedMaster);
+
+                                    return (
+                                    <div key={row.temp_id} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all hover:border-red-200/80">
+                                        {(deductionTypes as DeductionTypeOption[]).length > 0 && (
+                                            <div className="border-b border-slate-100 bg-slate-50/60 px-3 py-2.5">
+                                                <Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                                    {t('Deduction Type')}
+                                                </Label>
+                                                <Combobox
+                                                    options={deductionComboboxOptions}
+                                                    value={row.deduction_type_id ? String(row.deduction_type_id) : 'custom'}
+                                                    onChange={(v) => applyDeductionMaster(row.temp_id, v || 'custom')}
+                                                    placeholder={t('Select deduction...')}
+                                                    searchPlaceholder={t('Search deduction...')}
+                                                    emptyText={t('No deduction found')}
+                                                    className="h-9 border-slate-200 bg-white text-sm font-medium text-slate-800 shadow-none"
+                                                />
+                                            </div>
+                                        )}
+
+                                        {!isFromMaster && (
+                                            <div className="border-b border-slate-100 px-3 py-2.5">
+                                                <Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                                    {t('Name')}
+                                                </Label>
+                                                <Input
+                                                    placeholder={t('e.g. Special deduction')}
+                                                    value={row.name}
                                                     onChange={(e) => handleDetailUpdate(row.temp_id, 'name', e.target.value)}
-                                                    className="h-9 text-xs font-bold uppercase placeholder:text-slate-300 border-none bg-slate-50 group-hover:bg-red-50/50 transition-colors" />
+                                                    className="h-9 border-slate-200 bg-white text-sm font-medium"
+                                                />
                                             </div>
-                                            <div className="col-span-12 md:col-span-3">
-                                                <div className="flex bg-slate-100 p-1 rounded-lg">
-                                                    <button type="button" onClick={() => handleDetailUpdate(row.temp_id, 'mode', 'amount')}
-                                                        className={`flex-1 text-[9px] font-bold py-1.5 rounded-md transition-all ${row.mode === 'amount' ? 'bg-white text-red-600 shadow-sm' : 'text-slate-400'}`}>AMOUNT</button>
-                                                    <button type="button" onClick={() => handleDetailUpdate(row.temp_id, 'mode', 'day')}
-                                                        className={`flex-1 text-[9px] font-bold py-1.5 rounded-md transition-all ${row.mode === 'day' ? 'bg-white text-red-600 shadow-sm' : 'text-slate-400'}`}>DAYS</button>
+                                        )}
+
+                                        <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+                                            {isFromMaster && (
+                                                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                                                    <span className="text-sm font-semibold text-slate-800">{row.name}</span>
+                                                    <Badge
+                                                        variant="outline"
+                                                        className={cn(
+                                                            'text-[10px] font-semibold',
+                                                            linkedMaster?.calculation_mode === 'day'
+                                                                ? 'border-sky-200 bg-sky-50 text-sky-700'
+                                                                : 'border-violet-200 bg-violet-50 text-violet-700',
+                                                        )}
+                                                    >
+                                                        {linkedMaster?.calculation_mode === 'day' ? t('Per Day') : t('Per Month')}
+                                                    </Badge>
+                                                    {linkedMaster?.amount_type === 'category_wise' && employeeDetails?.category_name && (
+                                                        <Badge variant="outline" className="border-amber-200 bg-amber-50 text-[10px] font-semibold text-amber-800">
+                                                            {employeeDetails.category_name}
+                                                        </Badge>
+                                                    )}
+                                                    {isFromMaster && linkedMaster && (
+                                                        <span className="text-xs font-medium text-slate-400">
+                                                            @ ₹{resolveDeductionRate(linkedMaster, employeeDetails?.category_id).toLocaleString('en-IN')}
+                                                            {row.mode === 'day' ? `/${t('day')}` : ''}
+                                                        </span>
+                                                    )}
                                                 </div>
-                                            </div>
-                                            <div className="col-span-10 md:col-span-3">
-                                                <div className="relative">
-                                                    <Input type="number" step={row.mode === 'day' ? "1" : "0.01"} value={row.value}
+                                            )}
+
+                                            {!isFromMaster && (
+                                                <div className="flex rounded-lg bg-slate-100 p-0.5">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleDetailUpdate(row.temp_id, 'mode', 'amount')}
+                                                        className={`rounded-md px-3 py-1.5 text-[10px] font-bold transition-all ${row.mode === 'amount' ? 'bg-white text-red-600 shadow-sm' : 'text-slate-400'}`}
+                                                    >
+                                                        ₹ {t('Amount')}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleDetailUpdate(row.temp_id, 'mode', 'day')}
+                                                        className={`rounded-md px-3 py-1.5 text-[10px] font-bold transition-all ${row.mode === 'day' ? 'bg-white text-red-600 shadow-sm' : 'text-slate-400'}`}
+                                                    >
+                                                        {t('Days')}
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            <div className={cn('flex items-center gap-2', isFromMaster ? 'ml-auto' : '')}>
+                                                <Label className="sr-only">
+                                                    {row.mode === 'day' ? t('Days') : t('Amount')}
+                                                </Label>
+                                                <div className="relative w-28 sm:w-32">
+                                                    <Input
+                                                        type="number"
+                                                        step={row.mode === 'day' ? '1' : '0.01'}
+                                                        min="0"
+                                                        value={row.value}
                                                         onChange={(e) => handleValueChange(row.temp_id, e.target.value)}
-                                                        className="h-9 text-sm font-bold text-red-600 pr-8" />
-                                                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[9px] font-black text-slate-300">{row.mode === 'day' ? 'D' : '₹'}</span>
+                                                        className="h-9 border-slate-200 pr-8 text-sm font-bold text-red-600"
+                                                    />
+                                                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">
+                                                        {row.mode === 'day' ? t('Days') : '₹'}
+                                                    </span>
                                                 </div>
-                                            </div>
-                                            <div className="col-span-2 md:col-span-1 flex justify-end">
-                                                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-slate-300 hover:text-red-500 hover:bg-red-50" onClick={() => removeRow(row.temp_id)}>
-                                                    <Trash2 className="w-4 h-4" />
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-9 w-9 shrink-0 text-slate-300 hover:bg-red-50 hover:text-red-500"
+                                                    onClick={() => removeRow(row.temp_id)}
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
                                                 </Button>
                                             </div>
                                         </div>
                                     </div>
-                                ))}
+                                    );
+                                })}
                             </CardContent>
                         </Card>
                     </div>

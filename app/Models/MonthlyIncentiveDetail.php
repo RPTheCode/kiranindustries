@@ -12,6 +12,7 @@ class MonthlyIncentiveDetail extends Model
     protected $fillable = [
         'monthly_incentive_entry_id',
         'type_id',
+        'deduction_type_id',
         'name',
         'type',
         'mode',
@@ -30,5 +31,10 @@ class MonthlyIncentiveDetail extends Model
     public function type()
     {
         return $this->belongsTo(IncentiveDeductionType::class, 'type_id');
+    }
+
+    public function deductionType()
+    {
+        return $this->belongsTo(DeductionType::class, 'deduction_type_id');
     }
 }

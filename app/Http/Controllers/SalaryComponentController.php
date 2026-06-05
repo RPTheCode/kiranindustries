@@ -51,16 +51,23 @@ class SalaryComponentController extends Controller
             $query->orderBy('type', 'asc')->orderBy('name', 'asc');
         }
 
-        $salaryComponents = $query->paginate($request->per_page ?? 10);
+        $salaryComponents = $query->paginate($request->per_page ?? 100)->withQueryString();
 
         // Get branches for filter
         $branches = Branch::whereIn('created_by', getCompanyAndUsersId())
             ->where('status', 'active')
             ->get(['id', 'name']);
 
+        $branchId = session('active_branch_id');
+        $activeBranchName = $branchId && $branchId !== 'all'
+            ? Branch::find($branchId)?->name
+            : null;
+
         return Inertia::render('hr/salary-components/index', [
             'salaryComponents' => $salaryComponents,
             'branches' => $branches,
+            'activeBranchId' => $branchId,
+            'activeBranchName' => $activeBranchName,
             'filters' => $request->all(['search', 'type', 'calculation_type', 'status', 'sort_field', 'sort_direction', 'per_page', 'branch_id']),
         ]);
     }
@@ -71,16 +78,16 @@ class SalaryComponentController extends Controller
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
             'type' => 'required|in:earning,deduction',
-            'calculation_type' => 'required|in:fixed,percentage,percentage_of_gross',
-            'default_amount' => 'required_if:calculation_type,fixed|nullable|numeric|min:0',
+            'calculation_type' => 'required|in:percentage,percentage_of_gross',
             'percentage_of_basic' => 'required_if:calculation_type,percentage|nullable|numeric|min:0|max:100',
             'percentage_of_gross_pay' => 'required_if:calculation_type,percentage_of_gross|nullable|numeric|min:0|max:100',
             'rounding_method' => 'nullable|in:none,round,ceil,floor',
             'is_taxable' => 'boolean',
             'is_mandatory' => 'boolean',
             'status' => 'nullable|in:active,inactive',
-            // 'branch_id' => 'required|exists:branches,id',
         ]);
+
+        $validated = $this->normalizePercentagePayload($validated);
 
         $validated['branch_id'] = session('active_branch_id');
         if (!$validated['branch_id']) {
@@ -88,23 +95,7 @@ class SalaryComponentController extends Controller
         }
 
         $validated['created_by'] = creatorId();
-        $validated['status'] = $validated['status'] ?? 'active';
-        $validated['is_taxable'] = $validated['is_taxable'] ?? true;
-        $validated['is_mandatory'] = $validated['is_mandatory'] ?? false;
 
-        // Set default values based on calculation type
-        if ($validated['calculation_type'] === 'fixed') {
-            $validated['percentage_of_basic'] = null;
-            $validated['percentage_of_gross_pay'] = null;
-        } elseif ($validated['calculation_type'] === 'percentage') {
-            $validated['default_amount'] = 0;
-            $validated['percentage_of_gross_pay'] = null;
-        } else { // percentage_of_gross
-            $validated['default_amount'] = 0;
-            $validated['percentage_of_basic'] = null;
-        }
-
-        // Check if component with same name already exists in the SAME BRANCH
         $exists = SalaryComponent::where('name', $validated['name'])
             ->where('branch_id', $validated['branch_id'])
             ->whereIn('created_by', getCompanyAndUsersId())
@@ -117,7 +108,7 @@ class SalaryComponentController extends Controller
         $salaryComponent = SalaryComponent::create($validated);
         $this->logMasterCreated($salaryComponent);
 
-            return redirect()->back()->with('success', __('Salary component created successfully.'));
+        return redirect()->back()->with('success', __('Salary component created successfully.'));
     }
 
     public function update(Request $request, $salaryComponentId)
@@ -132,35 +123,22 @@ class SalaryComponentController extends Controller
                     'name' => 'required|string|max:255',
                     'description' => 'nullable|string',
                     'type' => 'required|in:earning,deduction',
-                    'calculation_type' => 'required|in:fixed,percentage,percentage_of_gross',
-                    'default_amount' => 'required_if:calculation_type,fixed|nullable|numeric|min:0',
+                    'calculation_type' => 'required|in:percentage,percentage_of_gross',
                     'percentage_of_basic' => 'required_if:calculation_type,percentage|nullable|numeric|min:0|max:100',
                     'percentage_of_gross_pay' => 'required_if:calculation_type,percentage_of_gross|nullable|numeric|min:0|max:100',
                     'rounding_method' => 'nullable|in:none,round,ceil,floor',
                     'is_taxable' => 'boolean',
                     'is_mandatory' => 'boolean',
                     'status' => 'nullable|in:active,inactive',
-                    // 'branch_id' => 'required|exists:branches,id',
                 ]);
+
+                $validated = $this->normalizePercentagePayload($validated);
 
                 $validated['branch_id'] = session('active_branch_id');
                 if (!$validated['branch_id']) {
                     return redirect()->back()->with('error', __('No active branch selected.'));
                 }
 
-                // Set default values based on calculation type
-                if ($validated['calculation_type'] === 'fixed') {
-                    $validated['percentage_of_basic'] = null;
-                    $validated['percentage_of_gross_pay'] = null;
-                } elseif ($validated['calculation_type'] === 'percentage') {
-                    $validated['default_amount'] = 0;
-                    $validated['percentage_of_gross_pay'] = null;
-                } else { // percentage_of_gross
-                    $validated['default_amount'] = 0;
-                    $validated['percentage_of_basic'] = null;
-                }
-
-                // Check if component with same name already exists (excluding current) in the SAME BRANCH
                 $exists = SalaryComponent::where('name', $validated['name'])
                     ->where('branch_id', $validated['branch_id'])
                     ->whereIn('created_by', getCompanyAndUsersId())
@@ -174,13 +152,53 @@ class SalaryComponentController extends Controller
                 $salaryComponent->update($validated);
                 $this->logMasterUpdated($salaryComponent);
 
-            return redirect()->back()->with('success', __('Salary component updated successfully'));
+                return redirect()->back()->with('success', __('Salary component updated successfully'));
             } catch (\Exception $e) {
                 return redirect()->back()->with('error', $e->getMessage() ?: __('Failed to update salary component'));
             }
         } else {
             return redirect()->back()->with('error', __('Salary component Not Found.'));
         }
+    }
+
+    private function normalizePercentagePayload(array $validated): array
+    {
+        $validated['default_amount'] = 0;
+
+        if ($validated['calculation_type'] === 'percentage') {
+            $validated['percentage_of_gross_pay'] = null;
+        } else {
+            $validated['percentage_of_basic'] = null;
+        }
+
+        $validated['status'] = $validated['status'] ?? 'active';
+        $validated['is_taxable'] = $validated['is_taxable'] ?? true;
+        $validated['is_mandatory'] = $validated['is_mandatory'] ?? false;
+        $validated['rounding_method'] = $validated['rounding_method'] ?? 'round';
+        $validated['description'] = $this->buildDescription($validated);
+
+        return $validated;
+    }
+
+    private function buildDescription(array $validated): string
+    {
+        $labels = [
+            'BASIC' => 'Basic Salary',
+            'HRA' => 'House Rent Allowance',
+            'LTA' => 'Leave Travel Allowance',
+        ];
+
+        $label = $labels[strtoupper($validated['name'])] ?? $validated['name'];
+
+        if ($validated['calculation_type'] === 'percentage_of_gross') {
+            $pct = rtrim(rtrim(number_format((float) $validated['percentage_of_gross_pay'], 2, '.', ''), '0'), '.');
+
+            return "{$label} — {$pct}% of gross";
+        }
+
+        $pct = rtrim(rtrim(number_format((float) $validated['percentage_of_basic'], 2, '.', ''), '0'), '.');
+
+        return "{$label} — {$pct}% of basic";
     }
 
     public function destroy($salaryComponentId)

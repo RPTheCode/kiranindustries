@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use App\Models\MonthlyIncentiveDetail;
 use Illuminate\Support\Facades\DB;
 use App\Models\Employee;
+use App\Models\Branch;
 use App\Models\MonthlyIncentiveEntry;
 use Inertia\Inertia;
 
@@ -18,20 +19,49 @@ class MonthlyIncentiveController extends Controller
     {
         $selected_employee_id = $request->query('employee_id');
 
-        $employees = Employee::active()
+        $branchId = session('active_branch_id');
+
+        $employeesQuery = Employee::active()
             ->join('users', 'employees.user_id', '=', 'users.id')
-            ->select('employees.id', 'users.name', 'employees.employee_id as scroll_no')
-            ->get();
+            ->leftJoin('categories', 'employees.category_id', '=', 'categories.id')
+            ->select(
+                'employees.id',
+                'users.name',
+                'employees.employee_id as scroll_no',
+                'categories.name as category_name'
+            );
+
+        if ($branchId && $branchId !== 'all') {
+            $employeesQuery->where('employees.branch_id', $branchId);
+        }
+
+        $employees = $employeesQuery->orderBy('users.name')->get();
 
         $incentiveDeductionTypes = \App\Models\IncentiveDeductionType::active()
             ->orderBy('type')
             ->orderBy('name')
             ->get();
 
+        $deductionTypes = \App\Models\DeductionType::withoutGlobalScope(\App\Models\Scopes\BranchScope::class)
+            ->with(['categoryAmounts.category'])
+            ->active()
+            ->whereIn('created_by', getCompanyAndUsersId())
+            ->when($branchId && $branchId !== 'all', fn ($q) => $q->where('branch_id', $branchId))
+            ->orderBy('sort_order')
+            ->orderBy('name')
+            ->get(['id', 'name', 'default_amount', 'amount_type', 'calculation_mode']);
+
+        $activeBranchName = ($branchId && $branchId !== 'all')
+            ? Branch::find($branchId)?->name
+            : null;
+
         return Inertia::render('hr/payroll/monthly-incentives/index', [
             'employees' => $employees,
             'selected_employee_id' => $selected_employee_id,
             'incentiveDeductionTypes' => $incentiveDeductionTypes,
+            'deductionTypes' => $deductionTypes,
+            'activeBranchId' => $branchId,
+            'activeBranchName' => $activeBranchName,
         ]);
     }
 
@@ -41,10 +71,10 @@ class MonthlyIncentiveController extends Controller
         $month = $request->query('month', date('Y-m'));
 
         // Try finding by Employee ID first, then by User ID
-        $employee = Employee::with(['user', 'department', 'designation'])->find($id);
+        $employee = Employee::with(['user', 'department', 'designation', 'category', 'branch'])->find($id);
 
         if (!$employee) {
-            $employee = Employee::with(['user', 'department', 'designation'])
+            $employee = Employee::with(['user', 'department', 'designation', 'category', 'branch'])
                 ->where('user_id', $id)
                 ->first();
         }
@@ -74,6 +104,10 @@ class MonthlyIncentiveController extends Controller
                 'pf_no' => $employee->pf_number,
                 'esi_no' => $employee->esic_number,
                 'scroll_no' => $employee->employee_id,
+                'category_id' => $employee->category_id,
+                'category_name' => $employee->category?->name,
+                'branch_id' => $employee->branch_id,
+                'branch_name' => $employee->branch?->name,
             ],
             'existing_entry' => $existingEntry ? [
                 'id' => $existingEntry->id,
@@ -82,6 +116,7 @@ class MonthlyIncentiveController extends Controller
                 'details' => $existingEntry->details->map(function ($d) {
                     return [
                         'type_id' => $d->type_id,
+                        'deduction_type_id' => $d->deduction_type_id,
                         'name' => $d->name,
                         'type' => $d->type,
                         'mode' => $d->mode,
@@ -101,6 +136,7 @@ class MonthlyIncentiveController extends Controller
             'remark' => 'nullable|string',
             'details' => 'nullable|array',
             'details.*.type_id' => 'nullable|exists:incentive_deduction_types,id',
+            'details.*.deduction_type_id' => 'nullable|exists:deduction_types,id',
             'details.*.name' => 'nullable|string',
             'details.*.type' => 'nullable|in:earning,deduction',
             'details.*.mode' => 'nullable|in:amount,day',
@@ -118,7 +154,7 @@ class MonthlyIncentiveController extends Controller
             if ($existing) {
                 $existing->details()->delete();
                 $existing->delete();
-                return redirect()->route('hr.monthly-incentives.index', ['employee_id' => $validated['employee_id']])
+                return redirect()->route('hr.earning-deduction.index', ['employee_id' => $validated['employee_id']])
                     ->with('success', 'Earnings/Deductions record cleared.');
             }
 
@@ -144,6 +180,7 @@ class MonthlyIncentiveController extends Controller
                 foreach ($validated['details'] as $detail) {
                     $entry->details()->create([
                         'type_id' => $detail['type_id'] ?? null,
+                        'deduction_type_id' => $detail['deduction_type_id'] ?? null,
                         'name' => $detail['name'] ?? null,
                         'type' => $detail['type'] ?? 'earning',
                         'mode' => $detail['mode'] ?? 'amount',
@@ -152,17 +189,17 @@ class MonthlyIncentiveController extends Controller
                 }
             }
 
-            return redirect()->route('hr.monthly-incentives.index', ['employee_id' => $validated['employee_id']])
+            return redirect()->route('hr.earning-deduction.index', ['employee_id' => $validated['employee_id']])
                 ->with('success', 'Earnings/Deductions record saved successfully.');
         });
     }
 
     public function getEmployeeHistory(Request $request, $id)
     {
-        $employee = Employee::with(['user', 'department', 'designation'])->find($id);
+        $employee = Employee::with(['user', 'department', 'designation', 'category', 'branch'])->find($id);
 
         if (!$employee) {
-            $employee = Employee::with(['user', 'department', 'designation'])
+            $employee = Employee::with(['user', 'department', 'designation', 'category', 'branch'])
                 ->where('user_id', $id)
                 ->first();
         }
@@ -188,6 +225,7 @@ class MonthlyIncentiveController extends Controller
                     'total_deductions' => $deductions->sum('value'),
                     'details' => $entry->details->map(fn($d) => [
                         'type_id' => $d->type_id,
+                        'deduction_type_id' => $d->deduction_type_id,
                         'name' => $d->name,
                         'type' => $d->type,
                         'mode' => $d->mode,
