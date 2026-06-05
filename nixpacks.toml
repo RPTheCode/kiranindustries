@@ -68,6 +68,9 @@ touch /app/storage/installed
 # public/storage -> storage/app/public (avatars, media, reports, etc.)
 php /app/artisan storage:link --force 2>/dev/null || php /app/artisan storage:link || true
 
+# Run pending migrations on deploy (production requires --force)
+php /app/artisan migrate --force
+
 # Setup MS SQL Server ODBC driver configuration dynamically at runtime
 printf '[essl]\nDriver=ODBC Driver 17 for SQL Server\nServer=%s,%s\nDatabase=%s\nEncrypt=no\nTrustServerCertificate=yes\n' "$ESSL_DB_HOST" "${ESSL_DB_PORT:-1433}" "$ESSL_DB_DATABASE" > /etc/odbc.ini
 
