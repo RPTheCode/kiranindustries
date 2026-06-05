@@ -11,6 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (! Schema::hasTable('report_downloads') || Schema::hasColumn('report_downloads', 'progress')) {
+            return;
+        }
+
         Schema::table('report_downloads', function (Blueprint $table) {
             $table->integer('progress')->default(0)->after('status');
         });

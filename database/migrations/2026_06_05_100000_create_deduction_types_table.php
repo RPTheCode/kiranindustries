@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (Schema::hasTable('deduction_types')) {
+            return;
+        }
+
         Schema::create('deduction_types', function (Blueprint $table) {
             $table->id();
             $table->string('name');

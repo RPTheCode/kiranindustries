@@ -11,16 +11,18 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('report_downloads', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('user_id')->nullable()->constrained()->onDelete('set null');
-            $table->string('report_name');
-            $table->string('file_path')->nullable();
-            $table->enum('status', ['pending', 'processing', 'completed', 'failed'])->default('pending');
-            $table->text('error_message')->nullable();
-            $table->json('filters')->nullable();
-            $table->timestamps();
-        });
+        if (! Schema::hasTable('report_downloads')) {
+            Schema::create('report_downloads', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('user_id')->nullable()->constrained()->onDelete('set null');
+                $table->string('report_name');
+                $table->string('file_path')->nullable();
+                $table->enum('status', ['pending', 'processing', 'completed', 'failed'])->default('pending');
+                $table->text('error_message')->nullable();
+                $table->json('filters')->nullable();
+                $table->timestamps();
+            });
+        }
     }
 
     /**
