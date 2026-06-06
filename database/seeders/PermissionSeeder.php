@@ -850,6 +850,11 @@ class PermissionSeeder extends Seeder
             ['name' => 'edit-employee-salaries', 'module' => 'employee_salaries', 'label' => 'Edit Employee Salaries', 'description' => 'Can edit employee salaries'],
             ['name' => 'delete-employee-salaries', 'module' => 'employee_salaries', 'label' => 'Delete Employee Salaries', 'description' => 'Can delete employee salaries'],
 
+            // Salary Payroll Generate (new module)
+            ['name' => 'view-salary-payroll-runs', 'module' => 'salary_payroll_runs', 'label' => 'View Salary Payroll Runs', 'description' => 'View generated salary payroll runs'],
+            ['name' => 'create-salary-payroll-runs', 'module' => 'salary_payroll_runs', 'label' => 'Create Salary Payroll Runs', 'description' => 'Generate salary payroll runs'],
+            ['name' => 'finalize-salary-payroll-runs', 'module' => 'salary_payroll_runs', 'label' => 'Finalize Salary Payroll Runs', 'description' => 'Finalize salary payroll runs'],
+
             // Payroll Runs management
             ['name' => 'manage-payroll-runs', 'module' => 'payroll_runs', 'label' => 'Manage Payroll Runs', 'description' => 'Can manage payroll runs'],
             ['name' => 'manage-any-payroll-runs', 'module' => 'payroll_runs', 'label' => 'Manage All Payroll Runs', 'description' => 'Manage Any Payroll Runs'],

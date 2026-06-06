@@ -367,6 +367,11 @@ class DefaultCompanyUserSeeder extends Seeder
             'manage-employee-salaries',
             'view-employee-salaries',
 
+            // Salary Payroll Generate
+            'view-salary-payroll-runs',
+            'create-salary-payroll-runs',
+            'finalize-salary-payroll-runs',
+
             // Payslips management
             'manage-payslips',
             'download-payslips',
@@ -1009,6 +1014,11 @@ class DefaultCompanyUserSeeder extends Seeder
             'create-employee-salaries',
             'edit-employee-salaries',
             'delete-employee-salaries',
+
+            // Salary Payroll Generate
+            'view-salary-payroll-runs',
+            'create-salary-payroll-runs',
+            'finalize-salary-payroll-runs',
 
             // Payroll Runs management
             'manage-payroll-runs',

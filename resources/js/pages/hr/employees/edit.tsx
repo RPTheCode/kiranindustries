@@ -24,9 +24,11 @@ import { Badge } from '@/components/ui/badge';
 import {
   customComponents,
   hasCustomAssignment,
+  isPrimaryComponent,
   primaryComponents,
   resolveAssignedComponentIds,
   resolveComponentsForEmployee,
+  storedCustomComponentIds,
 } from '@/utils/salary-component-assignment';
 
 export default function EditEmployee() {
@@ -53,7 +55,7 @@ export default function EditEmployee() {
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [customizeSalaryComponents, setCustomizeSalaryComponents] = useState(
-    hasCustomAssignment(employee.employee?.extra_salary_component_ids),
+    hasCustomAssignment(employee.employee?.extra_salary_component_ids, salaryComponents),
   );
   
   const [formData, setFormData] = useState<any>({
@@ -232,7 +234,7 @@ export default function EditEmployee() {
     setCustomizeSalaryComponents(on);
     setFormData((prev: any) => {
       if (on) {
-        const nextIds = resolveAssignedComponentIds(salaryComponents, prev.extra_salary_component_ids);
+        const nextIds = storedCustomComponentIds(prev.extra_salary_component_ids, salaryComponents);
         return {
           ...prev,
           extra_salary_component_ids: nextIds,
@@ -255,8 +257,12 @@ export default function EditEmployee() {
   };
 
   const toggleExtraComponent = (id: number, checked: boolean) => {
+    const comp = salaryComponents.find((c: any) => Number(c.id) === id);
+    if (comp && isPrimaryComponent(comp)) {
+      return;
+    }
     setFormData((prev: any) => {
-      const ids = [...(prev.extra_salary_component_ids || []).map(Number)];
+      const ids = storedCustomComponentIds(prev.extra_salary_component_ids, salaryComponents);
       const nextIds = checked ? [...ids, id] : ids.filter((x) => x !== id);
       const newSalaryComponents = { ...prev.salary_components };
       if (!checked) delete newSalaryComponents[id];
@@ -979,7 +985,7 @@ export default function EditEmployee() {
                           <div>
                             <h3 className="font-bold text-sm tracking-tight">{t('Salary Components')}</h3>
                             <p className="text-[10px] text-amber-700/70 font-medium">
-                              {t('No selection = Primary group default. Customize to pick any combination.')}
+                              {t('Primary group is always applied. Customize to add custom components.')}
                             </p>
                           </div>
                         </div>
@@ -1002,35 +1008,61 @@ export default function EditEmployee() {
                         </div>
                       ) : (
                         <div className="space-y-4">
-                          {[{ label: t('Primary group'), items: primarySalaryComponents }, { label: t('Custom group'), items: customSalaryComponents }].map(({ label, items }) => (
-                            items.length > 0 && (
-                              <div key={label} className="space-y-2">
-                                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
-                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                                  {items.map((comp: any) => {
-                                    const checked = extraComponentIds.includes(Number(comp.id));
-                                    return (
-                                      <label
-                                        key={comp.id}
-                                        className="flex cursor-pointer items-center gap-2 rounded-xl border border-amber-100 bg-white/80 px-3 py-2 hover:bg-amber-50/50"
-                                      >
-                                        <Checkbox
-                                          checked={checked}
-                                          onCheckedChange={(v) => toggleExtraComponent(Number(comp.id), Boolean(v))}
-                                        />
-                                        <span className="text-sm font-medium text-slate-700">{comp.name}</span>
-                                        <span className="ml-auto text-[10px] text-muted-foreground">
-                                          {comp.calculation_type === 'percentage_of_gross'
-                                            ? `${comp.percentage_of_gross_pay}%`
-                                            : `${comp.percentage_of_basic}%`}
-                                        </span>
-                                      </label>
-                                    );
-                                  })}
-                                </div>
+                          {primarySalaryComponents.length > 0 && (
+                            <div className="space-y-2">
+                              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{t('Primary group')}</p>
+                              <p className="text-[10px] text-slate-500">{t('Always applied — cannot be changed per employee.')}</p>
+                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                {primarySalaryComponents.map((comp: any) => (
+                                  <label
+                                    key={comp.id}
+                                    className="flex cursor-not-allowed items-center gap-2 rounded-xl border border-amber-100 bg-muted/30 px-3 py-2 opacity-80"
+                                  >
+                                    <Checkbox checked disabled />
+                                    <span className="text-sm font-medium text-slate-700">{comp.name}</span>
+                                    <span className="ml-auto text-[10px] text-muted-foreground">
+                                      {comp.calculation_type === 'percentage_of_gross'
+                                        ? `${comp.percentage_of_gross_pay}%`
+                                        : `${comp.percentage_of_basic}%`}
+                                    </span>
+                                  </label>
+                                ))}
                               </div>
-                            )
-                          ))}
+                            </div>
+                          )}
+                          {customSalaryComponents.length > 0 && (
+                            <div className="space-y-2">
+                              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{t('Custom group')}</p>
+                              <p className="text-[10px] text-slate-500">{t('Select additional components for this employee.')}</p>
+                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                {customSalaryComponents.map((comp: any) => {
+                                  const checked = extraComponentIds.includes(Number(comp.id));
+                                  return (
+                                    <label
+                                      key={comp.id}
+                                      className="flex cursor-pointer items-center gap-2 rounded-xl border border-amber-100 bg-white/80 px-3 py-2 hover:bg-amber-50/50"
+                                    >
+                                      <Checkbox
+                                        checked={checked}
+                                        onCheckedChange={(v) => toggleExtraComponent(Number(comp.id), Boolean(v))}
+                                      />
+                                      <span className="text-sm font-medium text-slate-700">{comp.name}</span>
+                                      <span className="ml-auto text-[10px] text-muted-foreground">
+                                        {comp.calculation_type === 'percentage_of_gross'
+                                          ? `${comp.percentage_of_gross_pay}%`
+                                          : `${comp.percentage_of_basic}%`}
+                                      </span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                          {customSalaryComponents.length === 0 && (
+                            <p className="rounded-xl border border-dashed border-amber-200 px-3 py-4 text-center text-xs text-slate-500">
+                              {t('No custom components in master yet.')}
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>

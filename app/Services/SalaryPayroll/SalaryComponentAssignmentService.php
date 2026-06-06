@@ -19,8 +19,8 @@ class SalaryComponentAssignmentService
     }
 
     /**
-     * Empty assignment → primary group (master default).
-     * Non-empty → only explicitly selected components.
+     * Empty assignment → primary group only.
+     * Non-empty → primary (always) + selected custom components.
      *
      * @return Collection<int, SalaryComponent>
      */
@@ -30,13 +30,17 @@ class SalaryComponentAssignmentService
             ->map(fn ($id) => (int) $id)
             ->filter(fn ($id) => $id > 0);
 
+        $primary = $this->primaryComponents($branchComponents);
+
         if ($assignedIds->isEmpty()) {
-            return $this->primaryComponents($branchComponents);
+            return $primary;
         }
 
-        return $branchComponents
-            ->filter(fn (SalaryComponent $component) => $assignedIds->contains($component->id))
-            ->values();
+        $customSelected = $branchComponents->filter(
+            fn (SalaryComponent $component) => $assignedIds->contains($component->id) && $this->isCustom($component)
+        );
+
+        return $primary->merge($customSelected)->unique('id')->values();
     }
 
     /**
@@ -65,11 +69,14 @@ class SalaryComponentAssignmentService
      */
     public function validateExtraComponentIds(Collection $branchComponents, array $componentIds): array
     {
-        $validIds = $branchComponents->pluck('id')->map(fn ($id) => (int) $id);
+        $validCustomIds = $branchComponents
+            ->filter(fn (SalaryComponent $component) => $this->isCustom($component))
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id);
 
         return collect($componentIds)
             ->map(fn ($id) => (int) $id)
-            ->filter(fn ($id) => $validIds->contains($id))
+            ->filter(fn ($id) => $validCustomIds->contains($id))
             ->unique()
             ->values()
             ->all();

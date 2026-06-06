@@ -26,6 +26,7 @@ return [
         'Attendance & Bio-Sync',
         'ESSL Sync Log',
         'Payroll Management',
+        'Salary Payroll',
         'Reports',
         'Leave Management',
         'Staff & Security',

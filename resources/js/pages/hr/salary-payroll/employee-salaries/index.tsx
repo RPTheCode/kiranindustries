@@ -41,9 +41,11 @@ import {
   componentAppliesToEmployee,
   customComponents as getCustomGroupComponents,
   hasCustomAssignment,
+  isPrimaryComponent,
   primaryComponents as getPrimaryGroupComponents,
   resolveAssignedComponentIds,
   resolveComponentsForEmployee,
+  storedCustomComponentIds,
 } from '@/utils/salary-component-assignment';
 
 interface SkippedRow {
@@ -437,11 +439,11 @@ export default function SalaryPayrollEmployeeSalaries() {
   const openComponentsDialog = (emp: any) => {
     setComponentsEmployee(emp);
     const assigned = (emp.extra_salary_component_ids || []).map(Number);
-    setComponentsCustomize(hasCustomAssignment(assigned));
+    setComponentsCustomize(hasCustomAssignment(assigned, salaryComponents as any[]));
     setSelectedComponentIds(
-      hasCustomAssignment(assigned)
-        ? assigned
-        : resolveAssignedComponentIds(salaryComponents, []),
+      hasCustomAssignment(assigned, salaryComponents as any[])
+        ? storedCustomComponentIds(assigned, salaryComponents as any[])
+        : [],
     );
     setComponentsOpen(true);
   };
@@ -449,13 +451,17 @@ export default function SalaryPayrollEmployeeSalaries() {
   const handleComponentsCustomizeToggle = (on: boolean) => {
     setComponentsCustomize(on);
     if (on) {
-      setSelectedComponentIds(resolveAssignedComponentIds(salaryComponents, selectedComponentIds));
+      setSelectedComponentIds(storedCustomComponentIds(selectedComponentIds, salaryComponents as any[]));
     } else {
       setSelectedComponentIds([]);
     }
   };
 
   const toggleComponentSelection = (id: number, checked: boolean) => {
+    const comp = (salaryComponents as any[]).find((c) => Number(c.id) === id);
+    if (comp && isPrimaryComponent(comp)) {
+      return;
+    }
     setSelectedComponentIds((prev) => {
       if (checked) return [...prev, id];
       return prev.filter((x) => x !== id);
@@ -542,7 +548,7 @@ export default function SalaryPayrollEmployeeSalaries() {
             <div className="flex items-start gap-2">
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
               <p className="text-xs text-foreground/80">
-                {t('Default = Primary group. Use Customize to assign a different component set per employee.')}
+                {t('Default = Primary group. Customize to add custom components on top of primary.')}
               </p>
             </div>
             {canSave && (
@@ -931,35 +937,61 @@ export default function SalaryPayrollEmployeeSalaries() {
                 </div>
               ) : (
                 <div className="max-h-[280px] space-y-3 overflow-y-auto">
-                  {[{ label: t('Primary group'), items: primaryCols }, { label: t('Custom group'), items: customCols }].map(({ label, items }) => (
-                    items.length > 0 && (
-                      <div key={label} className="space-y-2">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
-                        <div className="space-y-1 rounded-lg border border-border p-3">
-                          {items.map((comp) => {
-                            const checked = selectedComponentIds.includes(Number(comp.id));
-                            return (
-                              <label
-                                key={comp.id}
-                                className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 hover:bg-muted/50"
-                              >
-                                <Checkbox
-                                  checked={checked}
-                                  onCheckedChange={(v) => toggleComponentSelection(Number(comp.id), Boolean(v))}
-                                />
-                                <span className="text-sm">{comp.name}</span>
-                                <span className="ml-auto text-[10px] text-muted-foreground">
-                                  {comp.calculation_type === 'percentage_of_gross'
-                                    ? `${comp.percentage_of_gross_pay}% ${t('on gross')}`
-                                    : `${comp.percentage_of_basic}% ${t('on basic')}`}
-                                </span>
-                              </label>
-                            );
-                          })}
-                        </div>
+                  {primaryCols.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('Primary group')}</p>
+                      <p className="text-[10px] text-muted-foreground">{t('Always applied from master — cannot be changed per employee.')}</p>
+                      <div className="space-y-1 rounded-lg border border-border bg-muted/40 p-3">
+                        {primaryCols.map((comp) => (
+                          <label
+                            key={comp.id}
+                            className="flex cursor-not-allowed items-center gap-2 rounded-md px-1 py-1 opacity-80"
+                          >
+                            <Checkbox checked disabled />
+                            <span className="text-sm">{comp.name}</span>
+                            <span className="ml-auto text-[10px] text-muted-foreground">
+                              {comp.calculation_type === 'percentage_of_gross'
+                                ? `${comp.percentage_of_gross_pay}% ${t('on gross')}`
+                                : `${comp.percentage_of_basic}% ${t('on basic')}`}
+                            </span>
+                          </label>
+                        ))}
                       </div>
-                    )
-                  ))}
+                    </div>
+                  )}
+                  {customCols.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('Custom group')}</p>
+                      <p className="text-[10px] text-muted-foreground">{t('Select additional components for this employee.')}</p>
+                      <div className="space-y-1 rounded-lg border border-border p-3">
+                        {customCols.map((comp) => {
+                          const checked = selectedComponentIds.includes(Number(comp.id));
+                          return (
+                            <label
+                              key={comp.id}
+                              className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 hover:bg-muted/50"
+                            >
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={(v) => toggleComponentSelection(Number(comp.id), Boolean(v))}
+                              />
+                              <span className="text-sm">{comp.name}</span>
+                              <span className="ml-auto text-[10px] text-muted-foreground">
+                                {comp.calculation_type === 'percentage_of_gross'
+                                  ? `${comp.percentage_of_gross_pay}% ${t('on gross')}`
+                                  : `${comp.percentage_of_basic}% ${t('on basic')}`}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {customCols.length === 0 && (
+                    <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+                      {t('No custom components in master. Add custom components in Salary Component Master first.')}
+                    </p>
+                  )}
                 </div>
               )}
             </div>

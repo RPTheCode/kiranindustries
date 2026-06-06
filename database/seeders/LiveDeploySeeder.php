@@ -72,6 +72,18 @@ class LiveDeploySeeder extends Seeder
             ]);
         }
 
+        $salaryPayrollPerms = [
+            ['name' => 'view-salary-payroll-runs', 'label' => 'View Salary Payroll Runs', 'module' => 'salary_payroll_runs'],
+            ['name' => 'create-salary-payroll-runs', 'label' => 'Create Salary Payroll Runs', 'module' => 'salary_payroll_runs'],
+            ['name' => 'finalize-salary-payroll-runs', 'label' => 'Finalize Salary Payroll Runs', 'module' => 'salary_payroll_runs'],
+        ];
+        foreach ($salaryPayrollPerms as $p) {
+            Permission::firstOrCreate(
+                ['name' => $p['name'], 'guard_name' => 'web'],
+                ['label' => $p['label'], 'module' => $p['module']]
+            );
+        }
+
         $this->command->info('2. Formatting all permissions to clean modules...');
         $permissions = Permission::all();
         $customOverrides = [
@@ -115,6 +127,9 @@ class LiveDeploySeeder extends Seeder
             'payroll-runs' => 'Payroll Management',
             'payslips' => 'Payroll Management',
             'payroll-adjustments' => 'Payroll Management',
+
+            // Salary Payroll (new module)
+            'salary-payroll-runs' => 'Salary Payroll',
 
             // Leave Management
             'leave-types' => 'Leave Management',
@@ -258,6 +273,11 @@ class LiveDeploySeeder extends Seeder
                     'view-payroll-runs',
                     'manage-own-payroll-runs',
                     'process-payroll-runs',
+                    'view-salary-payroll-runs',
+                    'create-salary-payroll-runs',
+                    'finalize-salary-payroll-runs',
+                    'view-employee-salaries',
+                    'manage-employee-salaries',
                     'view-leave-applications',
                     'manage-own-leave-applications',
                     'approve-leave-applications',

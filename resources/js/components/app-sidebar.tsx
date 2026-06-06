@@ -360,6 +360,19 @@ export function AppSidebar() {
                 title: t('Bulk Salary Increment'),
                 href: route('hr.salary-payroll.salary-increment.index'),
             });
+            salaryPayrollChildren.push({
+                title: t('Generate Payroll'),
+                href: route('hr.salary-payroll.generate.index'),
+            });
+        } else if (
+            hasPermission(permissions, 'view-salary-payroll-runs')
+            || hasPermission(permissions, 'create-salary-payroll-runs')
+            || hasPermission(permissions, 'finalize-salary-payroll-runs')
+        ) {
+            salaryPayrollChildren.push({
+                title: t('Generate Payroll'),
+                href: route('hr.salary-payroll.generate.index'),
+            });
         }
         salaryPayrollChildren.push({
             title: t('Earning / Deduction'),

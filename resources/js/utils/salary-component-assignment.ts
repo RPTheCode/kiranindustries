@@ -10,35 +10,67 @@ export function customComponents<T extends { id: number | string }>(components: 
   return components.filter((c) => !isPrimaryComponent(c as any));
 }
 
-/** Empty assignment = primary group default. Non-empty = exact selection only. */
-export function resolveAssignedComponentIds(
-  components: { id: number | string }[],
+type ComponentLike = { id: number | string; assign_to_all?: boolean; component_group?: string };
+
+/** Custom-group IDs stored on the employee (primary is always applied from master). */
+export function storedCustomComponentIds(
   assignedIds: number[] | null | undefined,
+  components: ComponentLike[],
 ): number[] {
-  const ids = (assignedIds || []).map(Number).filter((id) => id > 0);
-  if (ids.length === 0) {
-    return primaryComponents(components).map((c) => Number(c.id));
-  }
-  return ids;
+  return (assignedIds || [])
+    .map(Number)
+    .filter((id) => {
+      if (id <= 0) {
+        return false;
+      }
+      const comp = components.find((c) => Number(c.id) === id);
+
+      return comp != null && !isPrimaryComponent(comp);
+    });
 }
 
-export function hasCustomAssignment(assignedIds: number[] | null | undefined): boolean {
-  return (assignedIds || []).map(Number).filter((id) => id > 0).length > 0;
+/** True when employee has at least one custom component assigned. */
+export function hasCustomAssignment(
+  assignedIds: number[] | null | undefined,
+  components: ComponentLike[] = [],
+): boolean {
+  if (components.length === 0) {
+    return storedCustomComponentIds(assignedIds, []).length > 0;
+  }
+
+  return storedCustomComponentIds(assignedIds, components).length > 0;
+}
+
+/** Primary group + any stored custom IDs (for display and gross split). */
+export function resolveAssignedComponentIds(
+  components: ComponentLike[],
+  assignedIds: number[] | null | undefined,
+): number[] {
+  const primaryIds = primaryComponents(components).map((c) => Number(c.id));
+  const customIds = storedCustomComponentIds(assignedIds, components);
+
+  if (customIds.length === 0 && (assignedIds || []).map(Number).filter((id) => id > 0).length === 0) {
+    return primaryIds;
+  }
+
+  return [...primaryIds, ...customIds];
 }
 
 export function componentAppliesToEmployee(
   comp: { id: number | string },
-  components: { id: number | string }[],
+  components: ComponentLike[],
   assignedIds: number[] | null | undefined,
 ): boolean {
   const resolved = resolveAssignedComponentIds(components, assignedIds);
+
   return resolved.includes(Number(comp.id));
 }
 
-export function resolveComponentsForEmployee<T extends { id: number | string }>(
+export function resolveComponentsForEmployee<T extends ComponentLike>(
   all: T[],
   assignedIds: number[] | null | undefined,
 ): T[] {
   const resolved = new Set(resolveAssignedComponentIds(all, assignedIds));
+
   return all.filter((c) => resolved.has(Number(c.id)));
 }
