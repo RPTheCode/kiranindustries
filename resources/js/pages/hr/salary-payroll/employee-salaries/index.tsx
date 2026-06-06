@@ -219,6 +219,16 @@ export default function SalaryPayrollEmployeeSalaries() {
   const [incrementNotes, setIncrementNotes] = useState('');
   const [isIncrementSaving, setIsIncrementSaving] = useState(false);
 
+  const minEffectiveDate = defaultEffectiveFrom || new Date().toISOString().slice(0, 10);
+
+  const handleEffectiveFromChange = (value: string) => {
+    if (value && value < minEffectiveDate) {
+      toast.error(t('Increment date must be today or a future date'));
+      return;
+    }
+    setEffectiveFrom(value);
+  };
+
   useEffect(() => {
     const data = employees?.data || [];
     setItems(data);
@@ -371,7 +381,7 @@ export default function SalaryPayrollEmployeeSalaries() {
     setIncrementEmployee(emp);
     setIncrementMode('percentage');
     setIncrementValue('10');
-    setEffectiveFrom(new Date().toISOString().slice(0, 10));
+    setEffectiveFrom(minEffectiveDate);
     setIncrementNotes('');
     setIncrementOpen(true);
   };
@@ -775,9 +785,15 @@ export default function SalaryPayrollEmployeeSalaries() {
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">{t('Increment Effective Date')}</Label>
-                <Input type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} className="h-9" />
+                <Input
+                  type="date"
+                  min={minEffectiveDate}
+                  value={effectiveFrom}
+                  onChange={(e) => handleEffectiveFromChange(e.target.value)}
+                  className="h-9"
+                />
                 <p className="text-[10px] text-muted-foreground">
-                  {t('Example: old salary till 4 Jun, new salary from 5 Jun if you select 5 Jun as increment date.')}
+                  {t('Only today or future dates. Past dates are not allowed.')}
                 </p>
               </div>
               <div className="space-y-1.5">

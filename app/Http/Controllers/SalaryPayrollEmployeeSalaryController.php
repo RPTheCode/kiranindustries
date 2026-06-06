@@ -125,7 +125,7 @@ class SalaryPayrollEmployeeSalaryController extends Controller
         $validated = $request->validate([
             'increment_mode' => 'required|in:percentage,fixed,set_gross',
             'increment_value' => 'required|numeric|min:0.01',
-            'effective_from' => 'required|date',
+            'effective_from' => 'required|date|after_or_equal:today',
             'notes' => 'nullable|string|max:1000',
         ]);
 

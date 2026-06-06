@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageTemplate } from '@/components/page-template';
 import { usePage, router, Link } from '@inertiajs/react';
 import axios from 'axios';
@@ -10,11 +10,13 @@ import {
   TrendingUp,
   Eye,
   CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 import { toast } from '@/components/custom-toast';
 import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
@@ -26,6 +28,14 @@ import {
 } from '@/components/ui/select';
 import { hasPermission } from '@/utils/authorization';
 import { Combobox } from '@/components/ui/combobox';
+import { Pagination } from '@/components/ui/pagination';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 interface PreviewRow {
   id: number;
@@ -37,7 +47,8 @@ interface PreviewRow {
   current_gross: number;
   new_gross: number;
   increment_amount: number;
-  increment_percentage?: number;
+  increment_percentage?: number | null;
+  actual_increment_percentage?: number | null;
 }
 
 function formatRupee(value: number) {
@@ -72,11 +83,23 @@ export default function SalaryIncrementBulk() {
   const [notes, setNotes] = useState('');
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
   const [previewCount, setPreviewCount] = useState(0);
+  const [previewPage, setPreviewPage] = useState(1);
+  const [previewPerPage, setPreviewPerPage] = useState(50);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const branchLabel = activeBranchName || t('Selected Branch');
+  const minEffectiveDate = defaultEffectiveFrom || new Date().toISOString().slice(0, 10);
+
+  const handleEffectiveFromChange = (value: string) => {
+    if (value && value < minEffectiveDate) {
+      toast.error(t('Increment date must be today or a future date'));
+      return;
+    }
+    setEffectiveFrom(value);
+  };
 
   const filterPayload = useCallback(() => ({
     increment_mode: incrementMode,
@@ -86,6 +109,42 @@ export default function SalaryIncrementBulk() {
     shift_id: shiftId !== 'all' ? shiftId : undefined,
     search: searchTerm || undefined,
   }), [incrementMode, incrementValue, categoryId, departmentId, shiftId, searchTerm]);
+
+  // Clear stale preview when increment settings or filters change
+  useEffect(() => {
+    setShowPreview(false);
+    setPreviewRows([]);
+    setPreviewCount(0);
+    setPreviewPage(1);
+  }, [incrementMode, incrementValue, categoryId, departmentId, shiftId, searchTerm]);
+
+  const previewLastPage = Math.max(1, Math.ceil(previewRows.length / previewPerPage));
+
+  const paginatedPreviewRows = useMemo(() => {
+    const start = (previewPage - 1) * previewPerPage;
+    return previewRows.slice(start, start + previewPerPage);
+  }, [previewRows, previewPage, previewPerPage]);
+
+  const previewFrom = previewRows.length === 0 ? 0 : (previewPage - 1) * previewPerPage + 1;
+  const previewTo = Math.min(previewPage * previewPerPage, previewRows.length);
+
+  useEffect(() => {
+    if (previewPage > previewLastPage) {
+      setPreviewPage(previewLastPage);
+    }
+  }, [previewPage, previewLastPage]);
+
+  const handlePreviewPageChange = (url: string) => {
+    const match = url.match(/page=(\d+)/);
+    if (match) {
+      setPreviewPage(Number(match[1]));
+    }
+  };
+
+  const handlePreviewPerPageChange = (value: string) => {
+    setPreviewPerPage(Number(value));
+    setPreviewPage(1);
+  };
 
   const loadPreview = async () => {
     if (!incrementValue || Number(incrementValue) <= 0) {
@@ -97,6 +156,7 @@ export default function SalaryIncrementBulk() {
       const { data } = await axios.post(route('hr.salary-payroll.salary-increment.preview'), filterPayload());
       setPreviewRows(data.employees || []);
       setPreviewCount(data.count || 0);
+      setPreviewPage(1);
       setShowPreview(true);
       if ((data.count || 0) === 0) {
         toast.info(t('No employees with existing salary match these filters.'));
@@ -114,6 +174,7 @@ export default function SalaryIncrementBulk() {
       toast.error(t('Select effective from date'));
       return;
     }
+    setConfirmOpen(false);
     setIsApplying(true);
     router.post(route('hr.salary-payroll.salary-increment.apply'), {
       ...filterPayload(),
@@ -132,7 +193,25 @@ export default function SalaryIncrementBulk() {
     });
   };
 
-  const hasFilters = categoryId !== 'all' || departmentId !== 'all' || shiftId !== 'all' || searchTerm;
+  const openApplyConfirm = () => {
+    if (!canApply || previewCount === 0) return;
+    if (!effectiveFrom) {
+      toast.error(t('Select effective from date'));
+      return;
+    }
+    setConfirmOpen(true);
+  };
+
+  const incrementSummary = incrementMode === 'percentage'
+    ? `${incrementValue}%`
+    : `₹${formatRupee(Number(incrementValue))}`;
+
+  const hasFilters = categoryId !== 'all' || departmentId !== 'all' || shiftId !== 'all' || searchTerm.trim().length > 0;
+
+  const searchTermCount = useMemo(() => {
+    if (!searchTerm.trim()) return 0;
+    return searchTerm.split(/[\s,;]+/).filter((t) => t.trim()).length;
+  }, [searchTerm]);
 
   const categoryOptions = useMemo(() => [
     { label: t('All Categories'), value: 'all' },
@@ -169,6 +248,11 @@ export default function SalaryIncrementBulk() {
         {flash?.success && (
           <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-2 text-sm text-primary">
             {flash.success}
+          </div>
+        )}
+        {flash?.error && (
+          <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-2 text-sm text-destructive">
+            {flash.error}
           </div>
         )}
 
@@ -221,11 +305,12 @@ export default function SalaryIncrementBulk() {
                 <Label className="text-xs">{t('Increment Effective Date')}</Label>
                 <Input
                   type="date"
+                  min={minEffectiveDate}
                   value={effectiveFrom}
-                  onChange={(e) => setEffectiveFrom(e.target.value)}
+                  onChange={(e) => handleEffectiveFromChange(e.target.value)}
                   className="h-9"
                 />
-                <p className="text-[10px] text-muted-foreground">{t('Actual date from which incremented salary applies for selected employees.')}</p>
+                <p className="text-[10px] text-muted-foreground">{t('Only today or future dates. Past dates are not allowed.')}</p>
               </div>
               <div className="space-y-1.5 sm:col-span-2 lg:col-span-3">
                 <Label className="text-xs">{t('Notes (optional)')}</Label>
@@ -241,21 +326,32 @@ export default function SalaryIncrementBulk() {
 
           <div className="border-b border-border px-4 py-3">
             <h3 className="mb-2 text-sm font-semibold text-foreground">{t('Filter Employees')}</h3>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative min-w-[180px] flex-1 sm:max-w-xs">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input
+            <div className="space-y-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                <Textarea
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder={t('Search name or code...')}
-                  className="h-8 border-input bg-background pl-8 pr-8 text-sm shadow-none"
+                  placeholder={t('Name or employee code — one or many (comma, space, or new line)\ne.g. 83024, 83025, 83026')}
+                  rows={2}
+                  className="min-h-[60px] resize-y border-input bg-background pl-8 pr-8 text-sm shadow-none"
                 />
                 {searchTerm && (
-                  <button type="button" onClick={() => setSearchTerm('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground">
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm('')}
+                    className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
+                  >
                     <X className="h-3.5 w-3.5" />
                   </button>
                 )}
               </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {searchTermCount > 1 && (
+                  <Badge variant="secondary" className="text-[10px]">
+                    {searchTermCount} {t('entries')}
+                  </Badge>
+                )}
               <Combobox
                 value={categoryId}
                 onChange={(v) => setCategoryId(v || 'all')}
@@ -284,6 +380,10 @@ export default function SalaryIncrementBulk() {
                 className="h-8 w-[130px] text-xs"
               />
               {hasFilters && <Badge variant="outline" className="text-[10px]">{t('Filtered')}</Badge>}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                {t('Paste multiple employee codes or names to increment only selected employees. Leave empty for all (with category/dept/shift filters).')}
+              </p>
             </div>
           </div>
 
@@ -300,8 +400,30 @@ export default function SalaryIncrementBulk() {
             )}
           </div>
 
+          {showPreview && previewRows.length === 0 && (
+            <div className="border-t border-border bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
+              {t('No employees with existing salary match these filters. Set gross salary on Employee Salary page first, then preview again.')}
+            </div>
+          )}
+
           {showPreview && previewRows.length > 0 && (
             <div className="border-t border-border">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-2">
+                <span className="text-xs text-muted-foreground">
+                  {t('Preview results')} · {previewCount} {t('employees')}
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">{t('Per page')}</span>
+                  <Select value={String(previewPerPage)} onValueChange={handlePreviewPerPageChange}>
+                    <SelectTrigger className="h-8 w-[72px] text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {[25, 50, 100].map((n) => (
+                        <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -314,13 +436,16 @@ export default function SalaryIncrementBulk() {
                       <th className="px-3 py-2 text-right">{t('Current Gross')}</th>
                       <th className="px-3 py-2 text-right">{t('New Gross')}</th>
                       <th className="px-3 py-2 text-right">{t('Increase')}</th>
-                      <th className="px-3 py-2 text-right">%</th>
+                      {incrementMode === 'percentage' && (
+                        <th className="px-3 py-2 text-right">{t('Given %')}</th>
+                      )}
+                      <th className="px-3 py-2 text-right">{t('Actual %')}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {previewRows.map((row, index) => (
+                    {paginatedPreviewRows.map((row, index) => (
                       <tr key={row.id} className="border-b border-border/60 hover:bg-muted/40">
-                        <td className="px-3 py-2 text-xs text-muted-foreground">{index + 1}</td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground">{previewFrom + index}</td>
                         <td className="px-3 py-2">
                           <div className="font-medium text-foreground">{row.name}</div>
                           <div className="text-[11px] text-muted-foreground">{row.employee_code || '—'}</div>
@@ -331,19 +456,36 @@ export default function SalaryIncrementBulk() {
                         <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">₹{formatRupee(row.current_gross)}</td>
                         <td className="px-3 py-2 text-right font-semibold tabular-nums text-primary">₹{formatRupee(row.new_gross)}</td>
                         <td className="px-3 py-2 text-right font-semibold tabular-nums text-primary">+₹{formatRupee(row.increment_amount)}</td>
-                        <td className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground">
-                          {row.increment_percentage != null ? `${row.increment_percentage}%` : '—'}
+                        {incrementMode === 'percentage' && (
+                          <td className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground">
+                            {row.increment_percentage != null ? `${row.increment_percentage}%` : '—'}
+                          </td>
+                        )}
+                        <td className="px-3 py-2 text-right text-xs tabular-nums text-foreground">
+                          {row.actual_increment_percentage != null ? `${row.actual_increment_percentage}%` : '—'}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+              {previewRows.length > previewPerPage && (
+                <Pagination
+                  from={previewFrom}
+                  to={previewTo}
+                  total={previewRows.length}
+                  currentPage={previewPage}
+                  lastPage={previewLastPage}
+                  entityName={t('employees')}
+                  onPageChange={handlePreviewPageChange}
+                  className="border-t border-border bg-muted/40 px-3 py-2"
+                />
+              )}
               {canApply && (
                 <div className="border-t border-border bg-muted/40 px-4 py-3">
-                  <Button type="button" disabled={isApplying || previewCount === 0} onClick={applyIncrement}>
+                  <Button type="button" disabled={isApplying || previewCount === 0} onClick={openApplyConfirm}>
                     {isApplying ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-4 w-4" />}
-                    {isApplying ? t('Applying...') : t('Apply Increment to :count employees', { count: previewCount })}
+                    {isApplying ? t('Applying...') : t('Apply Increment to {{count}} employees', { count: previewCount })}
                   </Button>
                 </div>
               )}
@@ -351,6 +493,40 @@ export default function SalaryIncrementBulk() {
           )}
         </div>
       </div>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              {t('Confirm Salary Increment')}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">
+              {t('Are you sure you want to apply this increment to {{count}} employees?', { count: previewCount })}
+            </p>
+            <ul className="space-y-1.5 rounded-lg border border-border bg-muted/40 p-3 text-xs">
+              <li><span className="text-muted-foreground">{t('Branch')}:</span> <span className="font-medium text-foreground">{branchLabel}</span></li>
+              <li><span className="text-muted-foreground">{t('Increment')}:</span> <span className="font-medium text-foreground">{incrementSummary}</span></li>
+              <li><span className="text-muted-foreground">{t('Effective from')}:</span> <span className="font-medium text-foreground">{effectiveFrom}</span></li>
+              {notes && (
+                <li><span className="text-muted-foreground">{t('Notes')}:</span> <span className="font-medium text-foreground">{notes}</span></li>
+              )}
+            </ul>
+            <p className="text-xs">{t('This will update gross salary and salary history for all matched employees. This action cannot be undone easily.')}</p>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" disabled={isApplying} onClick={() => setConfirmOpen(false)}>
+              {t('Cancel')}
+            </Button>
+            <Button type="button" disabled={isApplying} onClick={applyIncrement}>
+              {isApplying ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+              {isApplying ? t('Applying...') : t('Yes, Apply to {{count}} employees', { count: previewCount })}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageTemplate>
   );
 }

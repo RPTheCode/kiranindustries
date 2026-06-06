@@ -134,7 +134,7 @@ class EmployeeSalaryRevisionService
 
         $preview = [];
         foreach ($employees as $user) {
-            $currentGross = (float) ($user->salary_record?->monthly_gross ?? 0);
+            $currentGross = (float) $this->salaryRecordValue($user, 'monthly_gross', 0);
             if ($currentGross <= 0) {
                 continue;
             }
@@ -142,6 +142,11 @@ class EmployeeSalaryRevisionService
             $newGross = $this->calculateNewGross($currentGross, $mode, $value);
             $options = $this->statutoryOptionsForUser($user);
             $split = $this->calculator->splitFromGross($newGross, $components, $options);
+
+            $incrementAmount = round($newGross - $currentGross, 2);
+            $actualPercentage = $currentGross > 0
+                ? round(($incrementAmount / $currentGross) * 100, 2)
+                : null;
 
             $preview[] = [
                 'id' => $user->id,
@@ -152,9 +157,12 @@ class EmployeeSalaryRevisionService
                 'shift' => $user->employee?->shift?->name,
                 'current_gross' => $currentGross,
                 'new_gross' => $newGross,
-                'increment_amount' => round($newGross - $currentGross, 2),
-                'increment_percentage' => $currentGross > 0 ? round((($newGross - $currentGross) / $currentGross) * 100, 2) : null,
-                'salary_id' => $user->salary_record?->id,
+                'increment_amount' => $incrementAmount,
+                'increment_percentage' => $mode === 'percentage'
+                    ? $value
+                    : null,
+                'actual_increment_percentage' => $actualPercentage,
+                'salary_id' => $this->salaryRecordValue($user, 'id'),
             ];
         }
 
@@ -182,7 +190,7 @@ class EmployeeSalaryRevisionService
                 $options = $this->statutoryOptionsForUser($user);
                 $split = $this->calculator->splitFromGross((float) $row['new_gross'], $components, $options);
 
-                $incrementPct = $mode === 'percentage' ? $value : ($row['increment_percentage'] ?? null);
+                $incrementPct = $mode === 'percentage' ? $value : ($row['actual_increment_percentage'] ?? null);
 
                 $this->applySalary((int) $row['id'], $split, [
                     'revision_type' => 'increment',
@@ -216,6 +224,12 @@ class EmployeeSalaryRevisionService
 
     public function validateEffectiveFrom(int $employeeId, Carbon $effectiveFrom): void
     {
+        if ($effectiveFrom->lt(Carbon::today())) {
+            throw new \InvalidArgumentException(
+                __('Increment date must be today or a future date.')
+            );
+        }
+
         $active = EmployeeSalaryRevision::where('employee_id', $employeeId)
             ->whereNull('effective_to')
             ->first();
@@ -274,11 +288,21 @@ class EmployeeSalaryRevisionService
             ]);
 
         if (! empty($filters['search'])) {
-            $search = $filters['search'];
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                    ->orWhereHas('employee', fn ($eq) => $eq->where('employee_id', 'like', "%{$search}%"));
-            });
+            $terms = $this->parseSearchTerms($filters['search']);
+            if (! empty($terms)) {
+                $query->where(function ($q) use ($terms) {
+                    foreach ($terms as $term) {
+                        $q->orWhere(function ($sub) use ($term) {
+                            if (preg_match('/^\d+$/', $term)) {
+                                $sub->whereHas('employee', fn ($eq) => $eq->where('employee_id', $term));
+                            } else {
+                                $sub->where('name', 'like', "%{$term}%")
+                                    ->orWhereHas('employee', fn ($eq) => $eq->where('employee_id', 'like', "%{$term}%"));
+                            }
+                        });
+                    }
+                });
+            }
         }
 
         $users = $query->orderBy('name')->get();
@@ -378,5 +402,33 @@ class EmployeeSalaryRevisionService
             'apply_pf' => (bool) ($profile?->pf_flag ?? false),
             'apply_esi' => (bool) ($profile?->esic_flag ?? false),
         ];
+    }
+
+    private function salaryRecordValue(User $user, string $key, mixed $default = null): mixed
+    {
+        $record = $user->salary_record ?? null;
+
+        if (is_array($record)) {
+            return $record[$key] ?? $default;
+        }
+
+        if (is_object($record)) {
+            return $record->{$key} ?? $default;
+        }
+
+        return $default;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function parseSearchTerms(string $search): array
+    {
+        $parts = preg_split('/[\s,;]+/', trim($search), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        return array_values(array_unique(array_map(
+            static fn (string $term) => trim($term),
+            array_filter($parts, static fn ($term) => is_string($term) && trim($term) !== '')
+        )));
     }
 }

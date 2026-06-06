@@ -73,12 +73,12 @@ class SalaryPayrollIncrementController extends Controller
             'category_id' => 'nullable',
             'department_id' => 'nullable',
             'shift_id' => 'nullable',
-            'search' => 'nullable|string|max:255',
+            'search' => 'nullable|string|max:10000',
             'notes' => 'nullable|string|max:1000',
         ];
 
         if ($requireEffectiveFrom) {
-            $rules['effective_from'] = 'required|date';
+            $rules['effective_from'] = 'required|date|after_or_equal:today';
         }
 
         return $request->validate($rules);
