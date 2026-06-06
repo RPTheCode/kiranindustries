@@ -12,7 +12,8 @@ use Illuminate\Support\Facades\DB;
 class EmployeeSalaryRevisionService
 {
     public function __construct(
-        private SalaryStructureCalculator $calculator
+        private SalaryStructureCalculator $calculator,
+        private SalaryComponentAssignmentService $componentAssignment
     ) {}
 
     /**
@@ -141,7 +142,8 @@ class EmployeeSalaryRevisionService
 
             $newGross = $this->calculateNewGross($currentGross, $mode, $value);
             $options = $this->statutoryOptionsForUser($user);
-            $split = $this->calculator->splitFromGross($newGross, $components, $options);
+            $employeeComponents = $this->componentAssignment->resolveForEmployee($components, $user->employee);
+            $split = $this->calculator->splitFromGross($newGross, $employeeComponents, $options);
 
             $incrementAmount = round($newGross - $currentGross, 2);
             $actualPercentage = $currentGross > 0
@@ -188,7 +190,8 @@ class EmployeeSalaryRevisionService
                 }
 
                 $options = $this->statutoryOptionsForUser($user);
-                $split = $this->calculator->splitFromGross((float) $row['new_gross'], $components, $options);
+                $employeeComponents = $this->componentAssignment->resolveForEmployee($components, $user->employee);
+                $split = $this->calculator->splitFromGross((float) $row['new_gross'], $employeeComponents, $options);
 
                 $incrementPct = $mode === 'percentage' ? $value : ($row['actual_increment_percentage'] ?? null);
 

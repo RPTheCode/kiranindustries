@@ -19,6 +19,15 @@ import { toast } from '@/components/custom-toast';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { useTranslation } from 'react-i18next';
 import InputError from '@/components/input-error';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
+import {
+  customComponents,
+  hasCustomAssignment,
+  primaryComponents,
+  resolveAssignedComponentIds,
+  resolveComponentsForEmployee,
+} from '@/utils/salary-component-assignment';
 
 export default function EditEmployee() {
   const { t } = useTranslation();
@@ -43,6 +52,9 @@ export default function EditEmployee() {
 
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [customizeSalaryComponents, setCustomizeSalaryComponents] = useState(
+    hasCustomAssignment(employee.employee?.extra_salary_component_ids),
+  );
   
   const [formData, setFormData] = useState<any>({
     ...employee.employee,
@@ -89,6 +101,7 @@ export default function EditEmployee() {
           ? [{ name: employee.employee.nominee_name, aadhar_number: employee.employee.nominee_aadhar, percentage: '100', relation: '' }]
           : [{ name: '', aadhar_number: '', percentage: '', relation: '' }]),
     salary_components: employeeSalary?.components || {},
+    extra_salary_component_ids: (employee.employee?.extra_salary_component_ids || []).map(Number),
     ot_flag: !!employee.employee?.ot_flag,
     ot_hours: employee.employee?.ot_hours ? parseFloat(employee.employee.ot_hours).toString() : '',
     ot_type: employee.employee?.ot_type || '',
@@ -201,24 +214,77 @@ export default function EditEmployee() {
       )
     : (branchMasters.designations || []);
 
+  const primarySalaryComponents = primaryComponents(salaryComponents);
+  const customSalaryComponents = customComponents(salaryComponents);
+  const extraComponentIds = (formData.extra_salary_component_ids || []).map(Number);
+  const applicableSalaryComponents = resolveComponentsForEmployee(salaryComponents, extraComponentIds);
+
+  const recalcGrossFromComponents = (componentsMap: Record<string, string>, assignedIds: number[]) => {
+    let earnings = 0;
+    resolveComponentsForEmployee(salaryComponents, assignedIds).forEach((comp: any) => {
+      if (comp.type !== 'earning') return;
+      earnings += parseFloat(componentsMap[comp.id] || '0');
+    });
+    return earnings.toString();
+  };
+
+  const handleCustomizeToggle = (on: boolean) => {
+    setCustomizeSalaryComponents(on);
+    setFormData((prev: any) => {
+      if (on) {
+        const nextIds = resolveAssignedComponentIds(salaryComponents, prev.extra_salary_component_ids);
+        return {
+          ...prev,
+          extra_salary_component_ids: nextIds,
+          gross_salary: recalcGrossFromComponents(prev.salary_components, nextIds),
+        };
+      }
+      const newSalaryComponents = { ...prev.salary_components };
+      const applicable = resolveComponentsForEmployee(salaryComponents, []);
+      const applicableIds = new Set(applicable.map((c: any) => Number(c.id)));
+      Object.keys(newSalaryComponents).forEach((id) => {
+        if (!applicableIds.has(Number(id))) delete newSalaryComponents[id];
+      });
+      return {
+        ...prev,
+        extra_salary_component_ids: [],
+        salary_components: newSalaryComponents,
+        gross_salary: recalcGrossFromComponents(newSalaryComponents, []),
+      };
+    });
+  };
+
+  const toggleExtraComponent = (id: number, checked: boolean) => {
+    setFormData((prev: any) => {
+      const ids = [...(prev.extra_salary_component_ids || []).map(Number)];
+      const nextIds = checked ? [...ids, id] : ids.filter((x) => x !== id);
+      const newSalaryComponents = { ...prev.salary_components };
+      if (!checked) delete newSalaryComponents[id];
+
+      return {
+        ...prev,
+        extra_salary_component_ids: nextIds,
+        salary_components: newSalaryComponents,
+        gross_salary: recalcGrossFromComponents(newSalaryComponents, nextIds),
+      };
+    });
+  };
+
   const handleSalaryComponentChange = (id: string, value: string) => {
     setFormData((prev: any) => {
       const newSalaryComponents = {
         ...prev.salary_components,
         [id]: value
       };
-      
-      // Calculate new gross salary
-      let earnings = 0;
-      salaryComponents.forEach((comp: any) => {
-        const val = parseFloat(comp.id.toString() === id ? value : (newSalaryComponents[comp.id] || '0'));
-        if (comp.type === 'earning') earnings += val;
-      });
+
+      const assignedIds = customizeSalaryComponents
+        ? (prev.extra_salary_component_ids || []).map(Number)
+        : [];
 
       return {
         ...prev,
         salary_components: newSalaryComponents,
-        gross_salary: earnings.toString()
+        gross_salary: recalcGrossFromComponents(newSalaryComponents, assignedIds),
       };
     });
   };
@@ -229,6 +295,7 @@ export default function EditEmployee() {
     let deductions = 0;
 
     salaryComponents.forEach((comp: any) => {
+      if (!applicableSalaryComponents.some((c: any) => Number(c.id) === Number(comp.id))) return;
       const val = parseFloat(formData.salary_components[comp.id] || '0');
       if (comp.type === 'earning') earnings += val;
       else deductions += val;
@@ -902,6 +969,73 @@ export default function EditEmployee() {
                     </div>
                   </div>
 
+                  {(primarySalaryComponents.length > 0 || customSalaryComponents.length > 0) && (
+                    <div className="p-6 bg-amber-50/20 rounded-3xl border border-amber-100/50 shadow-sm">
+                      <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-amber-100 pb-3">
+                        <div className="flex items-center gap-3 text-amber-800">
+                          <div className="p-2 bg-amber-100 rounded-xl">
+                            <Briefcase className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <h3 className="font-bold text-sm tracking-tight">{t('Salary Components')}</h3>
+                            <p className="text-[10px] text-amber-700/70 font-medium">
+                              {t('No selection = Primary group default. Customize to pick any combination.')}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 rounded-xl border border-amber-100 bg-white/80 px-3 py-2">
+                          <Switch checked={customizeSalaryComponents} onCheckedChange={handleCustomizeToggle} />
+                          <Label className="text-xs font-semibold text-slate-700">{t('Customize for this employee')}</Label>
+                        </div>
+                      </div>
+
+                      {!customizeSalaryComponents ? (
+                        <div className="rounded-xl border border-amber-100 bg-white/80 p-4">
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{t('Default — Primary group')}</p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {primarySalaryComponents.map((comp: any) => (
+                              <Badge key={comp.id} variant="secondary" className="text-[11px]">
+                                {comp.name}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {[{ label: t('Primary group'), items: primarySalaryComponents }, { label: t('Custom group'), items: customSalaryComponents }].map(({ label, items }) => (
+                            items.length > 0 && (
+                              <div key={label} className="space-y-2">
+                                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                  {items.map((comp: any) => {
+                                    const checked = extraComponentIds.includes(Number(comp.id));
+                                    return (
+                                      <label
+                                        key={comp.id}
+                                        className="flex cursor-pointer items-center gap-2 rounded-xl border border-amber-100 bg-white/80 px-3 py-2 hover:bg-amber-50/50"
+                                      >
+                                        <Checkbox
+                                          checked={checked}
+                                          onCheckedChange={(v) => toggleExtraComponent(Number(comp.id), Boolean(v))}
+                                        />
+                                        <span className="text-sm font-medium text-slate-700">{comp.name}</span>
+                                        <span className="ml-auto text-[10px] text-muted-foreground">
+                                          {comp.calculation_type === 'percentage_of_gross'
+                                            ? `${comp.percentage_of_gross_pay}%`
+                                            : `${comp.percentage_of_basic}%`}
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     {/* Increment Components (Earnings) */}
                     <div className="space-y-6 p-6 bg-green-50/20 rounded-3xl border border-green-100/50 shadow-sm transition-all hover:shadow-md">
@@ -950,7 +1084,7 @@ export default function EditEmployee() {
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                        {salaryComponents.filter((c: any) => c.type === 'earning').map((comp: any) => (
+                        {applicableSalaryComponents.filter((c: any) => c.type === 'earning').map((comp: any) => (
                           <div key={comp.id} className="space-y-2 group">
                             <Label className="text-slate-600 text-xs font-bold px-1 transition-colors group-focus-within:text-green-600">{comp.name}</Label>
                             <div className="relative">
@@ -966,7 +1100,7 @@ export default function EditEmployee() {
                             </div>
                           </div>
                         ))}
-                        {salaryComponents.filter((c: any) => c.type === 'earning').length === 0 && (
+                        {applicableSalaryComponents.filter((c: any) => c.type === 'earning').length === 0 && (
                           <div className="col-span-full py-8 text-center bg-white/40 rounded-2xl border border-dashed border-green-200/50">
                             <Plus className="h-6 w-6 text-green-200 mx-auto mb-2" />
                             <p className="text-[10px] text-green-600/40 italic">{t('No earning components defined.')}</p>
@@ -987,7 +1121,7 @@ export default function EditEmployee() {
                         </div>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                        {salaryComponents.filter((c: any) => c.type === 'deduction').map((comp: any) => (
+                        {applicableSalaryComponents.filter((c: any) => c.type === 'deduction').map((comp: any) => (
                           <div key={comp.id} className="space-y-2 group">
                             <Label className="text-slate-600 text-xs font-bold px-1 transition-colors group-focus-within:text-red-600">{comp.name}</Label>
                             <div className="relative">
@@ -1003,7 +1137,7 @@ export default function EditEmployee() {
                             </div>
                           </div>
                         ))}
-                        {salaryComponents.filter((c: any) => c.type === 'deduction').length === 0 && (
+                        {applicableSalaryComponents.filter((c: any) => c.type === 'deduction').length === 0 && (
                           <div className="col-span-full py-8 text-center bg-white/40 rounded-2xl border border-dashed border-red-200/50">
                             <Trash2 className="h-6 w-6 text-red-200 mx-auto mb-2" />
                             <p className="text-[10px] text-red-600/40 italic">{t('No deduction components defined.')}</p>

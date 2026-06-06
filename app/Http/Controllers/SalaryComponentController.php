@@ -48,7 +48,7 @@ class SalaryComponentController extends Controller
         if ($request->has('sort_field') && !empty($request->sort_field)) {
             $query->orderBy($request->sort_field, $request->sort_direction ?? 'asc');
         } else {
-            $query->orderBy('type', 'asc')->orderBy('name', 'asc');
+            $query->orderBy('component_group', 'asc')->orderBy('type', 'asc')->orderBy('name', 'asc');
         }
 
         $salaryComponents = $query->paginate($request->per_page ?? 100)->withQueryString();
@@ -85,6 +85,7 @@ class SalaryComponentController extends Controller
             'is_taxable' => 'boolean',
             'is_mandatory' => 'boolean',
             'status' => 'nullable|in:active,inactive',
+            'component_group' => 'required|in:primary,custom',
         ]);
 
         $validated = $this->normalizePercentagePayload($validated);
@@ -130,6 +131,7 @@ class SalaryComponentController extends Controller
                     'is_taxable' => 'boolean',
                     'is_mandatory' => 'boolean',
                     'status' => 'nullable|in:active,inactive',
+                    'component_group' => 'required|in:primary,custom',
                 ]);
 
                 $validated = $this->normalizePercentagePayload($validated);
@@ -175,6 +177,14 @@ class SalaryComponentController extends Controller
         $validated['is_taxable'] = $validated['is_taxable'] ?? true;
         $validated['is_mandatory'] = $validated['is_mandatory'] ?? false;
         $validated['rounding_method'] = $validated['rounding_method'] ?? 'round';
+        if (! isset($validated['component_group'])) {
+            $validated['component_group'] = 'custom';
+        }
+        if ($validated['component_group'] === 'primary') {
+            $validated['assign_to_all'] = true;
+        } else {
+            $validated['assign_to_all'] = false;
+        }
         $validated['description'] = $this->buildDescription($validated);
 
         return $validated;

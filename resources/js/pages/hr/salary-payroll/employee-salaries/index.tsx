@@ -9,6 +9,7 @@ import {
   Info,
   History,
   TrendingUp,
+  Layers,
 } from 'lucide-react';
 import { toast } from '@/components/custom-toast';
 import { useTranslation } from 'react-i18next';
@@ -34,6 +35,16 @@ import { cn } from '@/lib/utils';
 import { hasPermission } from '@/utils/authorization';
 import { Pagination } from '@/components/ui/pagination';
 import { Combobox } from '@/components/ui/combobox';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
+import {
+  componentAppliesToEmployee,
+  customComponents as getCustomGroupComponents,
+  hasCustomAssignment,
+  primaryComponents as getPrimaryGroupComponents,
+  resolveAssignedComponentIds,
+  resolveComponentsForEmployee,
+} from '@/utils/salary-component-assignment';
 
 interface SkippedRow {
   id: number;
@@ -181,6 +192,8 @@ export default function SalaryPayrollEmployeeSalaries() {
     auth,
     employees,
     salaryComponents = [],
+    primaryComponents = [],
+    customComponents = [],
     categories = [],
     departments = [],
     shifts = [],
@@ -218,6 +231,11 @@ export default function SalaryPayrollEmployeeSalaries() {
   const [effectiveFrom, setEffectiveFrom] = useState(defaultEffectiveFrom || '');
   const [incrementNotes, setIncrementNotes] = useState('');
   const [isIncrementSaving, setIsIncrementSaving] = useState(false);
+  const [componentsOpen, setComponentsOpen] = useState(false);
+  const [componentsEmployee, setComponentsEmployee] = useState<any>(null);
+  const [selectedComponentIds, setSelectedComponentIds] = useState<number[]>([]);
+  const [componentsCustomize, setComponentsCustomize] = useState(false);
+  const [isSavingComponents, setIsSavingComponents] = useState(false);
 
   const minEffectiveDate = defaultEffectiveFrom || new Date().toISOString().slice(0, 10);
 
@@ -303,7 +321,8 @@ export default function SalaryPayrollEmployeeSalaries() {
   const getSplitForEmployee = useCallback((emp: any, grossValue: string) => {
     const gross = Number(grossValue);
     if (!gross || gross <= 0 || salaryComponents.length === 0) return null;
-    return splitGrossFromComponents(gross, salaryComponents, {
+    const employeeComponents = resolveComponentsForEmployee(salaryComponents, emp.extra_salary_component_ids);
+    return splitGrossFromComponents(gross, employeeComponents, {
       applyPf: Boolean(emp.pf_applicable),
       applyEsi: Boolean(emp.esi_applicable),
     });
@@ -415,6 +434,50 @@ export default function SalaryPayrollEmployeeSalaries() {
     });
   };
 
+  const openComponentsDialog = (emp: any) => {
+    setComponentsEmployee(emp);
+    const assigned = (emp.extra_salary_component_ids || []).map(Number);
+    setComponentsCustomize(hasCustomAssignment(assigned));
+    setSelectedComponentIds(
+      hasCustomAssignment(assigned)
+        ? assigned
+        : resolveAssignedComponentIds(salaryComponents, []),
+    );
+    setComponentsOpen(true);
+  };
+
+  const handleComponentsCustomizeToggle = (on: boolean) => {
+    setComponentsCustomize(on);
+    if (on) {
+      setSelectedComponentIds(resolveAssignedComponentIds(salaryComponents, selectedComponentIds));
+    } else {
+      setSelectedComponentIds([]);
+    }
+  };
+
+  const toggleComponentSelection = (id: number, checked: boolean) => {
+    setSelectedComponentIds((prev) => {
+      if (checked) return [...prev, id];
+      return prev.filter((x) => x !== id);
+    });
+  };
+
+  const saveComponentAssignment = () => {
+    if (!componentsEmployee) return;
+    setIsSavingComponents(true);
+    router.post(route('hr.salary-payroll.employee-salary.components', componentsEmployee.id), {
+      extra_salary_component_ids: componentsCustomize ? selectedComponentIds : [],
+    }, {
+      preserveScroll: true,
+      onSuccess: () => {
+        toast.success(t('Salary components updated'));
+        setComponentsOpen(false);
+      },
+      onError: (errors) => toast.error(Object.values(errors).join(', ')),
+      onFinish: () => setIsSavingComponents(false),
+    });
+  };
+
   const revisionTypeLabel = (type: string) => {
     const map: Record<string, string> = {
       joining: t('Joining'),
@@ -425,10 +488,20 @@ export default function SalaryPayrollEmployeeSalaries() {
     return map[type] || type;
   };
 
-  const activeComponents = useMemo(
-    () => (salaryComponents as any[]).filter((c) => !c.status || c.status === 'active'),
-    [salaryComponents],
+  const primaryCols = useMemo(
+    () => (primaryComponents as any[]).length > 0
+      ? (primaryComponents as any[])
+      : getPrimaryGroupComponents(salaryComponents as any[]),
+    [primaryComponents, salaryComponents],
   );
+  const customCols = useMemo(
+    () => (customComponents as any[]).length > 0
+      ? (customComponents as any[])
+      : getCustomGroupComponents(salaryComponents as any[]),
+    [customComponents, salaryComponents],
+  );
+  const tableComponents = useMemo(() => [...primaryCols, ...customCols], [primaryCols, customCols]);
+  const tableColSpan = 6 + tableComponents.length;
 
   const categoryOptions = useMemo(() => [
     { label: t('All Categories'), value: 'all' },
@@ -446,7 +519,6 @@ export default function SalaryPayrollEmployeeSalaries() {
   ], [shifts, t]);
 
   const hasFilters = categoryId !== 'all' || departmentId !== 'all' || shiftId !== 'all';
-  const tableColSpan = 6 + activeComponents.length;
 
   return (
     <PageTemplate
@@ -470,7 +542,7 @@ export default function SalaryPayrollEmployeeSalaries() {
             <div className="flex items-start gap-2">
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
               <p className="text-xs text-foreground/80">
-                {t('Type monthly gross — auto-splits into components. Increment uses actual date (joining date → increment date). Press Enter or blur to save.')}
+                {t('Default = Primary group. Use Customize to assign a different component set per employee.')}
               </p>
             </div>
             {canSave && (
@@ -564,18 +636,21 @@ export default function SalaryPayrollEmployeeSalaries() {
                   <th className="hidden px-3 py-2 lg:table-cell">{t('Department')}</th>
                   <th className="hidden px-3 py-2 sm:table-cell">{t('Shift')}</th>
                   <th className="min-w-[120px] px-3 py-2">{t('Gross (₹)')}</th>
-                  {activeComponents.map((comp) => (
+                  {tableComponents.map((comp) => (
                     <th
                       key={comp.id}
                       className={cn(
                         'min-w-[90px] whitespace-nowrap px-3 py-2 text-right',
-                        comp.type === 'deduction' ? 'text-destructive' : 'text-primary',
+                        comp.type === 'deduction' ? 'text-destructive' : comp.component_group === 'primary' || comp.assign_to_all ? 'text-primary' : 'text-amber-600',
                       )}
                       title={comp.calculation_type === 'percentage_of_gross'
                         ? `${comp.percentage_of_gross_pay}% ${t('on gross')}`
                         : `${comp.percentage_of_basic}% ${t('on basic')}`}
                     >
                       {comp.name}
+                      {!(comp.component_group === 'primary' || comp.assign_to_all) && (
+                        <span className="ml-1 text-[9px] font-normal text-amber-600">*</span>
+                      )}
                     </th>
                   ))}
                   <th className="min-w-[90px] px-3 py-2 text-right">{t('Actions')}</th>
@@ -628,24 +703,31 @@ export default function SalaryPayrollEmployeeSalaries() {
                         {isSaving && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />}
                       </div>
                     </td>
-                    {activeComponents.map((comp) => {
-                      const amount = split?.amounts[comp.id];
+                    {tableComponents.map((comp) => {
+                      const applies = componentAppliesToEmployee(comp, salaryComponents, emp.extra_salary_component_ids);
+                      const amount = applies ? split?.amounts[comp.id] : null;
                       return (
                         <td
                           key={comp.id}
                           className={cn(
                             'px-3 py-2 text-right text-xs font-semibold tabular-nums',
-                            comp.type === 'deduction' ? 'text-destructive' : 'text-primary',
+                            !applies && 'text-muted-foreground/30',
+                            applies && comp.type === 'deduction' ? 'text-destructive' : applies ? 'text-primary' : '',
                           )}
                         >
                           {amount != null && amount > 0
                             ? `₹${formatRupee(amount)}`
-                            : <span className="text-muted-foreground/40">—</span>}
+                            : <span className="text-muted-foreground/40">{applies ? '—' : '·'}</span>}
                         </td>
                       );
                     })}
                     <td className="px-3 py-2 text-right">
                       <div className="flex justify-end gap-1">
+                        {canSave && salaryComponents.length > 0 && (
+                          <Button type="button" size="sm" variant="ghost" className="h-7 w-7 p-0" title={t('Assign Components')} onClick={() => openComponentsDialog(emp)}>
+                            <Layers className="h-3.5 w-3.5 text-amber-600" />
+                          </Button>
+                        )}
                         <Button type="button" size="sm" variant="ghost" className="h-7 w-7 p-0" title={t('Salary History')} onClick={() => openHistory(emp)}>
                           <History className="h-3.5 w-3.5 text-muted-foreground" />
                         </Button>
@@ -812,6 +894,80 @@ export default function SalaryPayrollEmployeeSalaries() {
             <Button type="button" variant="outline" onClick={() => setIncrementOpen(false)}>{t('Cancel')}</Button>
             <Button type="button" disabled={isIncrementSaving || !incrementValue || !effectiveFrom} onClick={submitIncrement}>
               {isIncrementSaving ? t('Saving...') : t('Apply Increment')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={componentsOpen} onOpenChange={setComponentsOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('Assign Salary Components')}</DialogTitle>
+          </DialogHeader>
+          {componentsEmployee && (
+            <div className="space-y-4">
+              <div className="rounded-lg bg-muted/60 px-3 py-2 text-sm">
+                <p className="font-semibold text-foreground">{componentsEmployee.name}</p>
+                <p className="text-xs text-muted-foreground tabular-nums">
+                  {componentsEmployee.employee?.employee_id || '—'}
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+                <Label className="text-xs font-semibold">{t('Customize for this employee')}</Label>
+                <Switch checked={componentsCustomize} onCheckedChange={handleComponentsCustomizeToggle} />
+              </div>
+
+              {!componentsCustomize ? (
+                <div className="rounded-lg border border-border bg-muted/30 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{t('Default — Primary group')}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {primaryCols.map((comp) => (
+                      <Badge key={comp.id} variant="secondary" className="text-[11px]">
+                        {comp.name}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="max-h-[280px] space-y-3 overflow-y-auto">
+                  {[{ label: t('Primary group'), items: primaryCols }, { label: t('Custom group'), items: customCols }].map(({ label, items }) => (
+                    items.length > 0 && (
+                      <div key={label} className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+                        <div className="space-y-1 rounded-lg border border-border p-3">
+                          {items.map((comp) => {
+                            const checked = selectedComponentIds.includes(Number(comp.id));
+                            return (
+                              <label
+                                key={comp.id}
+                                className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 hover:bg-muted/50"
+                              >
+                                <Checkbox
+                                  checked={checked}
+                                  onCheckedChange={(v) => toggleComponentSelection(Number(comp.id), Boolean(v))}
+                                />
+                                <span className="text-sm">{comp.name}</span>
+                                <span className="ml-auto text-[10px] text-muted-foreground">
+                                  {comp.calculation_type === 'percentage_of_gross'
+                                    ? `${comp.percentage_of_gross_pay}% ${t('on gross')}`
+                                    : `${comp.percentage_of_basic}% ${t('on basic')}`}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setComponentsOpen(false)}>{t('Cancel')}</Button>
+            <Button type="button" disabled={isSavingComponents} onClick={saveComponentAssignment}>
+              {isSavingComponents ? t('Saving...') : t('Save Assignment')}
             </Button>
           </DialogFooter>
         </DialogContent>

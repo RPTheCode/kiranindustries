@@ -94,6 +94,7 @@ export default function SalaryComponents() {
     percentage_of_gross_pay: '0',
     rounding_method: 'round' as 'none' | 'round' | 'ceil' | 'floor',
     status: 'active' as 'active' | 'inactive',
+    component_group: 'custom' as 'primary' | 'custom',
   });
   const skipSearchDebounce = useRef(true);
 
@@ -172,6 +173,7 @@ export default function SalaryComponents() {
       percentage_of_gross_pay: '0',
       rounding_method: 'round',
       status: 'active',
+      component_group: 'custom',
     });
     setIsFormModalOpen(true);
   };
@@ -187,6 +189,7 @@ export default function SalaryComponents() {
       percentage_of_gross_pay: String(item.percentage_of_gross_pay ?? 0),
       rounding_method: item.rounding_method || 'round',
       status: item.status || 'active',
+      component_group: item.component_group === 'primary' ? 'primary' : 'custom',
     });
     setIsFormModalOpen(true);
   };
@@ -221,6 +224,7 @@ export default function SalaryComponents() {
       calculation_type: formData.calculation_type,
       rounding_method: formData.rounding_method,
       status: formData.status,
+      component_group: formData.component_group,
     };
 
     if (formData.calculation_type === 'percentage') {
@@ -294,6 +298,14 @@ export default function SalaryComponents() {
   const activeCount = items.filter((i) => i.status === 'active').length;
   const earningCount = items.filter((i) => i.type === 'earning').length;
   const deductionCount = items.filter((i) => i.type === 'deduction').length;
+  const primaryItems = useMemo(
+    () => items.filter((item) => item.component_group === 'primary' || item.assign_to_all),
+    [items],
+  );
+  const customItems = useMemo(
+    () => items.filter((item) => item.component_group !== 'primary' && !item.assign_to_all),
+    [items],
+  );
 
   const structureSummary = useMemo(() => {
     const activeItems = items.filter((i) => i.status === 'active');
@@ -352,7 +364,7 @@ export default function SalaryComponents() {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-slate-800">{t('Active salary structure')}</p>
               <p className="mt-0.5 text-xs text-slate-500">
-                {t('Shows percentages from components added in the table below.')}
+                {t('Primary group in master = default when nothing is customized. Toggle Customize to assign a different set.')}
               </p>
 
               {structureSummary.onGrossEarnings.length === 0 && structureSummary.onBasicItems.length === 0 ? (
@@ -465,6 +477,7 @@ export default function SalaryComponents() {
                 <tr className="border-b border-slate-100 bg-white text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                   <th className="w-10 px-2 py-2">#</th>
                   <th className="px-3 py-2">{t('Component')}</th>
+                  <th className="px-3 py-2">{t('Group')}</th>
                   <th className="px-3 py-2">{t('Type')}</th>
                   <th className="hidden px-3 py-2 sm:table-cell">{t('Calculation')}</th>
                   <th className="px-3 py-2">{t('Rate (%)')}</th>
@@ -475,7 +488,7 @@ export default function SalaryComponents() {
               <tbody>
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-14 text-center">
+                    <td colSpan={8} className="px-4 py-14 text-center">
                       <p className="text-sm font-medium text-slate-500">{t('No salary components found')}</p>
                       {canCreate && (
                         <Button
@@ -504,6 +517,19 @@ export default function SalaryComponents() {
                       <div className="mt-0.5 text-[11px] font-medium text-slate-500">
                         {getComponentSummary(item)}
                       </div>
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          'text-[10px] font-semibold',
+                          item.component_group === 'primary' || item.assign_to_all
+                            ? 'border-blue-200 bg-blue-50 text-blue-700'
+                            : 'border-amber-200 bg-amber-50 text-amber-700',
+                        )}
+                      >
+                        {item.component_group === 'primary' || item.assign_to_all ? t('Primary') : t('Custom')}
+                      </Badge>
                     </td>
                     <td className="px-3 py-1.5">
                       <Badge
@@ -635,6 +661,25 @@ export default function SalaryComponents() {
             )}
 
             <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>{t('Component Group')}</Label>
+                <Select
+                  value={formData.component_group}
+                  onValueChange={(v: 'primary' | 'custom') => setFormData((p) => ({ ...p, component_group: v }))}
+                  disabled={formMode === 'edit' && (currentItem?.component_group === 'primary' || currentItem?.assign_to_all)}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="primary">{t('Primary group (default)')}</SelectItem>
+                    <SelectItem value="custom">{t('Custom group')}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted-foreground">
+                  {formData.component_group === 'primary'
+                    ? t('Included in default group when employee has no custom selection.')
+                    : t('Optional — assign only when employee is customized (e.g. Other Allowance).')}
+                </p>
+              </div>
               <div className="space-y-1.5">
                 <Label>{t('Type')}</Label>
                 <Select

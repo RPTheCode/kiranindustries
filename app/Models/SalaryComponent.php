@@ -21,6 +21,8 @@ class SalaryComponent extends BaseModel
         'is_taxable',
         'is_mandatory',
         'status',
+        'component_group',
+        'assign_to_all',
         'created_by',
         'branch_id',
     ];
@@ -31,6 +33,7 @@ class SalaryComponent extends BaseModel
         'percentage_of_gross_pay' => 'decimal:2',
         'is_taxable' => 'boolean',
         'is_mandatory' => 'boolean',
+        'assign_to_all' => 'boolean',
     ];
 
     /**

@@ -9,6 +9,7 @@ use App\Models\SalaryComponent;
 use App\Models\Shift;
 use App\Models\User;
 use App\Services\SalaryPayroll\EmployeeSalaryRevisionService;
+use App\Services\SalaryPayroll\SalaryComponentAssignmentService;
 use App\Services\SalaryPayroll\SalaryStructureCalculator;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -19,7 +20,8 @@ class SalaryPayrollEmployeeSalaryController extends Controller
 {
     public function __construct(
         private SalaryStructureCalculator $calculator,
-        private EmployeeSalaryRevisionService $revisionService
+        private EmployeeSalaryRevisionService $revisionService,
+        private SalaryComponentAssignmentService $componentAssignment
     ) {}
 
     public function index(Request $request)
@@ -79,15 +81,20 @@ class SalaryPayrollEmployeeSalaryController extends Controller
             ] : null;
             $user->pf_applicable = (bool) ($emp?->pf_flag ?? false);
             $user->esi_applicable = (bool) ($emp?->esic_flag ?? false);
+            $user->extra_salary_component_ids = $emp?->extra_salary_component_ids ?? [];
 
             return $user;
         });
 
         $salaryComponents = $this->branchSalaryComponents($branchId);
+        $primaryComponents = $this->componentAssignment->primaryComponents($salaryComponents);
+        $customComponents = $this->componentAssignment->customComponents($salaryComponents);
 
         return Inertia::render('hr/salary-payroll/employee-salaries/index', [
             'employees' => $employees,
             'salaryComponents' => $salaryComponents,
+            'primaryComponents' => $primaryComponents,
+            'customComponents' => $customComponents,
             'categories' => $this->branchCategories($branchId),
             'departments' => $this->branchDepartments($branchId),
             'shifts' => $this->branchShifts($branchId),
@@ -171,7 +178,7 @@ class SalaryPayrollEmployeeSalaryController extends Controller
 
         $split = $this->calculator->splitFromGross(
             $newGross,
-            $components,
+            $this->componentsForEmployeeId($components, (int) $employeeId),
             $this->statutoryOptionsForEmployee((int) $employeeId)
         );
 
@@ -205,11 +212,55 @@ class SalaryPayrollEmployeeSalaryController extends Controller
             return response()->json(['error' => __('No active salary components for this branch.')], 422);
         }
 
-        $options = $this->statutoryOptionsForEmployee($validated['employee_id'] ?? null);
-
         return response()->json(
-            $this->calculator->splitFromGross((float) $validated['monthly_gross'], $components, $options)
+            $this->calculator->splitFromGross(
+                (float) $validated['monthly_gross'],
+                $this->componentsForEmployeeId($components, $validated['employee_id'] ?? null),
+                $this->statutoryOptionsForEmployee($validated['employee_id'] ?? null)
+            )
         );
+    }
+
+    public function updateComponents(Request $request, $employeeId)
+    {
+        $branchId = session('active_branch_id');
+        $employee = User::with('employee')->where('id', $employeeId)
+            ->where('type', 'employee')
+            ->whereIn('created_by', getCompanyAndUsersId())
+            ->firstOrFail();
+
+        if ($branchId && $employee->employee?->branch_id != $branchId) {
+            return redirect()->back()->with('error', __('Employee does not belong to the active branch.'));
+        }
+
+        $validated = $request->validate([
+            'extra_salary_component_ids' => 'nullable|array',
+            'extra_salary_component_ids.*' => 'integer',
+        ]);
+
+        $branchComponents = $this->branchSalaryComponents($branchId);
+        $validIds = $this->componentAssignment->validateExtraComponentIds(
+            $branchComponents,
+            $validated['extra_salary_component_ids'] ?? []
+        );
+
+        $employee->employee?->update(['extra_salary_component_ids' => $validIds]);
+
+        $salary = EmployeeSalary::where('employee_id', $employeeId)->first();
+        if ($salary && (float) ($salary->monthly_gross ?? 0) > 0) {
+            $split = $this->calculator->splitFromGross(
+                (float) $salary->monthly_gross,
+                $this->componentsForEmployeeId($branchComponents, (int) $employeeId),
+                $this->statutoryOptionsForEmployee((int) $employeeId)
+            );
+            $salary->update([
+                'basic_salary' => $split['basic_amount'],
+                'components' => $split['components'],
+                'calculation_status' => 'calculated',
+            ]);
+        }
+
+        return redirect()->back()->with('success', __('Salary components updated for employee.'));
     }
 
     public function store(Request $request)
@@ -239,8 +290,6 @@ class SalaryPayrollEmployeeSalaryController extends Controller
             return redirect()->back()->with('error', __('No active salary components for this branch.'));
         }
 
-        $split = $this->calculator->splitFromGross((float) $validated['monthly_gross'], $components);
-
         $employees = User::whereIn('id', $validated['employee_ids'])
             ->where('type', 'employee')
             ->whereHas('employee', function ($q) use ($branchId) {
@@ -251,8 +300,13 @@ class SalaryPayrollEmployeeSalaryController extends Controller
             ->pluck('id');
 
         $saved = 0;
-        DB::transaction(function () use ($employees, $split, &$saved) {
+        DB::transaction(function () use ($employees, $validated, $components, &$saved) {
             foreach ($employees as $employeeId) {
+                $split = $this->calculator->splitFromGross(
+                    (float) $validated['monthly_gross'],
+                    $this->componentsForEmployeeId($components, (int) $employeeId),
+                    $this->statutoryOptionsForEmployee((int) $employeeId)
+                );
                 $this->revisionService->applySalary((int) $employeeId, $split, [
                     'revision_type' => 'joining',
                     'effective_from' => now()->toDateString(),
@@ -287,7 +341,7 @@ class SalaryPayrollEmployeeSalaryController extends Controller
 
         $split = $this->calculator->splitFromGross(
             (float) $validated['monthly_gross'],
-            $components,
+            $this->componentsForEmployeeId($components, (int) $validated['employee_id']),
             $this->statutoryOptionsForEmployee($validated['employee_id'])
         );
 
@@ -321,11 +375,23 @@ class SalaryPayrollEmployeeSalaryController extends Controller
         ];
     }
 
+    private function componentsForEmployeeId($components, ?int $userId)
+    {
+        if (! $userId) {
+            return $this->componentAssignment->primaryComponents($components);
+        }
+
+        $user = User::with('employee')->find($userId);
+
+        return $this->componentAssignment->resolveForEmployee($components, $user?->employee);
+    }
+
     private function branchSalaryComponents(?int $branchId)
     {
         $query = SalaryComponent::withoutGlobalScopes()
             ->where('status', 'active')
             ->whereIn('created_by', getCompanyAndUsersId())
+            ->orderBy('component_group')
             ->orderBy('type')
             ->orderBy('name');
 

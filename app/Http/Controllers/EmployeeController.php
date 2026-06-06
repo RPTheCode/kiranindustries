@@ -20,6 +20,7 @@ use Illuminate\Support\Str;
 use App\Services\StorageConfigService;
 use Inertia\Inertia;
 use App\Services\ActivityLogger;
+use App\Services\SalaryPayroll\SalaryComponentAssignmentService;
 use App\Traits\LogsActivity;
 
 class EmployeeController extends Controller
@@ -294,8 +295,9 @@ class EmployeeController extends Controller
         $resignReasons = \App\Models\ResignReason::where('is_active', true)->get();
         $overtimeOptions = \App\Models\Overtime::where('is_active', true)->get();
 
-        $salaryComponents = \App\Models\SalaryComponent::where('status', 'active')
-            ->get(['id', 'name', 'type', 'calculation_type', 'default_amount', 'percentage_of_basic', 'percentage_of_gross_pay']);
+        $salaryComponents = $this->salaryComponentsForBranch(
+            $activeBranchId ? (int) $activeBranchId : null
+        );
 
         return Inertia::render('hr/employees/create', [
             'departments' => $departments,
@@ -335,6 +337,9 @@ class EmployeeController extends Controller
             }
             if ($request->has('skill_id') && is_string($request->skill_id)) {
                 $request->merge(['skill_id' => json_decode($request->skill_id, true)]);
+            }
+            if ($request->has('extra_salary_component_ids') && is_string($request->extra_salary_component_ids)) {
+                $request->merge(['extra_salary_component_ids' => json_decode($request->extra_salary_component_ids, true)]);
             }
 
             // Validate basic information
@@ -495,6 +500,10 @@ class EmployeeController extends Controller
             $employee->loan_total_amount = $request->loan_total_amount ?? 0;
             $employee->loan_installment_amount = $request->loan_installment_amount ?? 0;
             $employee->loan_period = $request->loan_period;
+            $employee->extra_salary_component_ids = $this->normalizeExtraSalaryComponentIds(
+                $request,
+                (int) ($employee->branch_id ?? 0) ?: null
+            );
 
             $employee->created_by = creatorId();
             $employee->save();
@@ -718,8 +727,9 @@ class EmployeeController extends Controller
         $resignReasons = \App\Models\ResignReason::where('is_active', true)->get();
         $overtimeOptions = \App\Models\Overtime::where('is_active', true)->get();
 
-        $salaryComponents = \App\Models\SalaryComponent::where('status', 'active')
-            ->get(['id', 'name', 'type', 'calculation_type', 'default_amount', 'percentage_of_basic', 'percentage_of_gross_pay']);
+        $salaryComponents = $this->salaryComponentsForBranch(
+            (int) ($employee->branch_id ?? session('active_branch_id') ?? 0) ?: null
+        );
 
         $employeeSalary = \App\Models\EmployeeSalary::where('employee_id', $employee->user_id)
             ->where('is_active', true)
@@ -767,6 +777,9 @@ class EmployeeController extends Controller
             }
             if ($request->has('skill_id') && is_string($request->skill_id)) {
                 $request->merge(['skill_id' => json_decode($request->skill_id, true)]);
+            }
+            if ($request->has('extra_salary_component_ids') && is_string($request->extra_salary_component_ids)) {
+                $request->merge(['extra_salary_component_ids' => json_decode($request->extra_salary_component_ids, true)]);
             }
 
             // Validate basic information
@@ -1029,6 +1042,10 @@ class EmployeeController extends Controller
             $employee->loan_total_amount = $request->loan_total_amount ?? 0;
             $employee->loan_installment_amount = $request->loan_installment_amount ?? 0;
             $employee->loan_period = $request->loan_period;
+            $employee->extra_salary_component_ids = $this->normalizeExtraSalaryComponentIds(
+                $request,
+                (int) ($employee->branch_id ?? 0) ?: null
+            );
 
             $employee->employment_status = $request->employment_status ?? 'active';
             $employee->resign_date = $request->resign_date;
@@ -1839,6 +1856,38 @@ class EmployeeController extends Controller
         $ids = array_values(array_filter(array_map('intval', $skillId)));
 
         return $ids ?: null;
+    }
+
+    /**
+     * Active salary components for a branch (primary + custom).
+     */
+    private function salaryComponentsForBranch(?int $branchId)
+    {
+        $query = \App\Models\SalaryComponent::where('status', 'active')
+            ->whereIn('created_by', getCompanyAndUsersId());
+
+        if ($branchId) {
+            $query->where('branch_id', $branchId);
+        }
+
+        return $query->get([
+            'id', 'name', 'type', 'calculation_type', 'default_amount',
+            'percentage_of_basic', 'percentage_of_gross_pay', 'component_group', 'assign_to_all',
+        ]);
+    }
+
+    private function normalizeExtraSalaryComponentIds(Request $request, ?int $branchId): array
+    {
+        $extraIds = $request->input('extra_salary_component_ids', []);
+        if (is_string($extraIds)) {
+            $extraIds = json_decode($extraIds, true) ?? [];
+        }
+        if (! is_array($extraIds)) {
+            return [];
+        }
+
+        return app(SalaryComponentAssignmentService::class)
+            ->validateExtraComponentIds(collect($this->salaryComponentsForBranch($branchId)), $extraIds);
     }
 
     /**
