@@ -12,6 +12,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from '@/components/custom-toast';
 import { Save, Plus, Trash2, IndianRupee, Percent, ShieldCheck, Users } from 'lucide-react';
 
+function sanitizeNonNegativeNumber(value: string): string {
+    if (value === '') return '';
+    let cleaned = value.replace(/-/g, '').replace(/[^\d.]/g, '');
+    const parts = cleaned.split('.');
+    if (parts.length > 2) {
+        cleaned = `${parts[0]}.${parts.slice(1).join('')}`;
+    }
+    return cleaned;
+}
+
+function blockMinusKey(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === '-' || e.key === '+' || e.key === 'e' || e.key === 'E') {
+        e.preventDefault();
+    }
+}
+
 export default function PayrollSettings() {
     const { t } = useTranslation();
     const {
@@ -59,8 +75,26 @@ export default function PayrollSettings() {
 
     const handleParamChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target;
-        setFormParams(prev => ({ ...prev, [name]: value }));
+        setFormParams(prev => ({ ...prev, [name]: sanitizeNonNegativeNumber(value) }));
     };
+
+    const numericFields = [
+        'pf_pct', 'fpf_pct', 'pf_admin_charge_pct', 'max_pf_amount',
+        'esic_employee_pct', 'esic_employer_pct', 'esic_wage_limit',
+    ];
+
+    const hasInvalidNumbers = () => numericFields.some((key) => {
+        const v = formParams[key];
+        if (v === '' || v === null || v === undefined) return false;
+        return Number(v) < 0 || Number.isNaN(Number(v));
+    });
+
+    const hasInvalidSlabNumbers = (slabs: Array<Record<string, unknown>>) => slabs.some((slab) =>
+        Object.values(slab).some((v) => {
+            if (v === '' || v === null || v === undefined) return false;
+            return Number(v) < 0 || Number.isNaN(Number(v));
+        })
+    );
 
     const pfEmployerCoreTotal = () => {
         const pf = parseFloat(String(formParams.pf_pct ?? '')) || 0;
@@ -79,6 +113,10 @@ export default function PayrollSettings() {
     const pfEmployeePctCalculated = () => pfEmployerCoreTotal();
 
     const saveParameters = () => {
+        if (hasInvalidNumbers()) {
+            toast.error(t('Only zero or positive numbers are allowed'));
+            return;
+        }
         router.post(
             route('hr.payroll-settings.parameters.update'),
             {
@@ -114,18 +152,24 @@ export default function PayrollSettings() {
     };
 
     const handleSlabChange = (type: 'pt' | 'it', index: number, field: string, value: any) => {
+        const nextValue = typeof value === 'string' ? sanitizeNonNegativeNumber(value) : value;
         if (type === 'pt') {
             const newSlabs = [...ptSlabs];
-            newSlabs[index] = { ...newSlabs[index], [field]: value };
+            newSlabs[index] = { ...newSlabs[index], [field]: nextValue };
             setPtSlabs(newSlabs);
         } else {
             const newSlabs = [...itSlabs];
-            newSlabs[index] = { ...newSlabs[index], [field]: value };
+            newSlabs[index] = { ...newSlabs[index], [field]: nextValue };
             setItSlabs(newSlabs);
         }
     };
 
     const saveSlabs = (type: 'pt' | 'it') => {
+        const slabs = type === 'pt' ? ptSlabs : itSlabs;
+        if (hasInvalidSlabNumbers(slabs)) {
+            toast.error(t('Only zero or positive numbers are allowed'));
+            return;
+        }
         router.post(
             route('hr.payroll-settings.slabs.update'),
             {
@@ -234,12 +278,12 @@ export default function PayrollSettings() {
                                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                             <div className="space-y-1">
                                                 <Label className="text-[11px] font-medium">{t('P.F (%)')}</Label>
-                                                <Input type="number" step="0.01" name="pf_pct" value={paramVal('pf_pct')} onChange={handleParamChange} className="h-9 text-sm bg-white" placeholder="8.33" />
+                                                <Input type="number" min="0" step="0.01" name="pf_pct" value={paramVal('pf_pct')} onChange={handleParamChange} onKeyDown={blockMinusKey} className="h-9 text-sm bg-white" placeholder="8.33" />
                                                 <p className="text-[10px] text-muted-foreground">{t('EPF share')}</p>
                                             </div>
                                             <div className="space-y-1">
                                                 <Label className="text-[11px] font-medium">{t('F.P.F (%)')}</Label>
-                                                <Input type="number" step="0.01" name="fpf_pct" value={paramVal('fpf_pct')} onChange={handleParamChange} className="h-9 text-sm bg-white" placeholder="3.67" />
+                                                <Input type="number" min="0" step="0.01" name="fpf_pct" value={paramVal('fpf_pct')} onChange={handleParamChange} onKeyDown={blockMinusKey} className="h-9 text-sm bg-white" placeholder="3.67" />
                                                 <p className="text-[10px] text-muted-foreground">{t('EPS pension fund')}</p>
                                             </div>
                                         </div>
@@ -252,7 +296,7 @@ export default function PayrollSettings() {
                                             </div>
                                             <div className="space-y-1">
                                                 <Label className="text-[11px] font-medium">{t('Admin Charge (%)')}</Label>
-                                                <Input type="number" step="0.01" name="pf_admin_charge_pct" value={paramVal('pf_admin_charge_pct')} onChange={handleParamChange} className="h-9 text-sm bg-white" placeholder="1.00" />
+                                                <Input type="number" min="0" step="0.01" name="pf_admin_charge_pct" value={paramVal('pf_admin_charge_pct')} onChange={handleParamChange} onKeyDown={blockMinusKey} className="h-9 text-sm bg-white" placeholder="1.00" />
                                                 <p className="text-[10px] text-muted-foreground">{t('Employer only — PF admin / EDLI')}</p>
                                             </div>
                                         </div>
@@ -264,10 +308,12 @@ export default function PayrollSettings() {
                                         </div>
                                     </div>
 
-                                    <div className="space-y-1">
-                                        <Label className="text-[11px] font-medium">{t('Max PF Wage (₹)')}</Label>
-                                        <Input type="number" name="max_pf_amount" value={paramVal('max_pf_amount')} onChange={handleParamChange} className="h-9 text-sm bg-white" placeholder="15000" />
-                                        <p className="text-[10px] text-muted-foreground">{t('PF calculated on wage up to this limit.')}</p>
+                                    <div className="space-y-1 rounded-lg border border-amber-100 bg-amber-50/30 p-3">
+                                        <Label className="text-[11px] font-semibold text-amber-900">{t('Max PF on Basic Salary (₹)')}</Label>
+                                        <Input type="number" min="0" step="1" name="max_pf_amount" value={paramVal('max_pf_amount')} onChange={handleParamChange} onKeyDown={blockMinusKey} className="h-9 text-sm bg-white" placeholder="15000" />
+                                        <p className="text-[10px] text-muted-foreground">
+                                            {t('Limit applies on Basic / PF basic wage — not gross. PF % calculated on basic up to this cap.')}
+                                        </p>
                                     </div>
                                 </div>
 
@@ -279,16 +325,19 @@ export default function PayrollSettings() {
                                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                         <div className="space-y-1">
                                             <Label className="text-[10px] font-medium">{t('Employee (%)')}</Label>
-                                            <Input type="number" step="0.01" name="esic_employee_pct" value={paramVal('esic_employee_pct')} onChange={handleParamChange} className="h-8 text-xs bg-white" placeholder="0.75" />
+                                            <Input type="number" min="0" step="0.01" name="esic_employee_pct" value={paramVal('esic_employee_pct')} onChange={handleParamChange} onKeyDown={blockMinusKey} className="h-8 text-xs bg-white" placeholder="0.75" />
                                         </div>
                                         <div className="space-y-1">
                                             <Label className="text-[10px] font-medium">{t('Employer (%)')}</Label>
-                                            <Input type="number" step="0.01" name="esic_employer_pct" value={paramVal('esic_employer_pct')} onChange={handleParamChange} className="h-8 text-xs bg-white" placeholder="3.25" />
+                                            <Input type="number" min="0" step="0.01" name="esic_employer_pct" value={paramVal('esic_employer_pct')} onChange={handleParamChange} onKeyDown={blockMinusKey} className="h-8 text-xs bg-white" placeholder="3.25" />
                                         </div>
                                     </div>
-                                    <div className="space-y-1">
-                                        <Label className="text-[10px] font-medium">{t('ESI Wage Limit (₹)')}</Label>
-                                        <Input type="number" name="esic_wage_limit" value={paramVal('esic_wage_limit')} onChange={handleParamChange} className="h-8 text-xs bg-white" placeholder="21000" />
+                                    <div className="space-y-1 rounded-lg border border-amber-100 bg-amber-50/30 p-3">
+                                        <Label className="text-[11px] font-semibold text-amber-900">{t('Max ESI on Gross Salary (₹)')}</Label>
+                                        <Input type="number" min="0" step="1" name="esic_wage_limit" value={paramVal('esic_wage_limit')} onChange={handleParamChange} onKeyDown={blockMinusKey} className="h-9 text-sm bg-white" placeholder="21000" />
+                                        <p className="text-[10px] text-muted-foreground">
+                                            {t('Limit applies on monthly gross earnings — not basic only. ESI % calculated on gross up to this cap.')}
+                                        </p>
                                     </div>
                                 </div>
                             </div>
@@ -336,26 +385,32 @@ export default function PayrollSettings() {
                                         <TableRow key={index} className="h-10 hover:bg-slate-50/30 transition-colors border-b-0">
                                             <TableCell className="py-1 px-3">
                                                 <Input 
-                                                    type="number" 
+                                                    type="number"
+                                                    min="0"
                                                     value={slab.min_amt ?? ''} 
                                                     onChange={(e) => handleSlabChange('pt', index, 'min_amt', e.target.value)}
+                                                    onKeyDown={blockMinusKey}
                                                     className="h-8 text-xs bg-transparent border-slate-200 focus:bg-white"
                                                 />
                                             </TableCell>
                                             <TableCell className="py-1 px-3">
                                                 <Input 
-                                                    type="number" 
+                                                    type="number"
+                                                    min="0"
                                                     value={slab.max_amt || ''} 
                                                     onChange={(e) => handleSlabChange('pt', index, 'max_amt', e.target.value)}
+                                                    onKeyDown={blockMinusKey}
                                                     placeholder={t('Above')}
                                                     className="h-8 text-xs bg-transparent border-slate-200 focus:bg-white"
                                                 />
                                             </TableCell>
                                             <TableCell className="py-1 px-3">
                                                 <Input 
-                                                    type="number" 
+                                                    type="number"
+                                                    min="0"
                                                     value={slab.pt_amt} 
                                                     onChange={(e) => handleSlabChange('pt', index, 'pt_amt', e.target.value)}
+                                                    onKeyDown={blockMinusKey}
                                                     className="h-8 text-xs bg-transparent border-slate-200 focus:bg-white font-bold text-primary"
                                                 />
                                             </TableCell>
@@ -412,27 +467,33 @@ export default function PayrollSettings() {
                                         <TableRow key={index} className="h-10 hover:bg-slate-50/30 transition-colors border-b-0">
                                             <TableCell className="py-1 px-3">
                                                 <Input 
-                                                    type="number" 
+                                                    type="number"
+                                                    min="0"
                                                     value={slab.min_amt ?? ''} 
                                                     onChange={(e) => handleSlabChange('it', index, 'min_amt', e.target.value)}
+                                                    onKeyDown={blockMinusKey}
                                                     className="h-8 text-xs bg-transparent border-slate-200 focus:bg-white"
                                                 />
                                             </TableCell>
                                             <TableCell className="py-1 px-3">
                                                 <Input 
-                                                    type="number" 
+                                                    type="number"
+                                                    min="0"
                                                     value={slab.max_amt || ''} 
                                                     onChange={(e) => handleSlabChange('it', index, 'max_amt', e.target.value)}
+                                                    onKeyDown={blockMinusKey}
                                                     placeholder={t('Above')}
                                                     className="h-8 text-xs bg-transparent border-slate-200 focus:bg-white"
                                                 />
                                             </TableCell>
                                             <TableCell className="py-1 px-3">
                                                 <Input 
-                                                    type="number" 
+                                                    type="number"
+                                                    min="0"
                                                     step="0.01"
                                                     value={slab.it_pct} 
                                                     onChange={(e) => handleSlabChange('it', index, 'it_pct', e.target.value)}
+                                                    onKeyDown={blockMinusKey}
                                                     className="h-8 text-xs bg-transparent border-slate-200 focus:bg-white font-bold text-primary"
                                                 />
                                             </TableCell>
