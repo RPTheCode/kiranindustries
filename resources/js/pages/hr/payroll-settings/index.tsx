@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from '@/components/custom-toast';
-import { Save, Plus, Trash2, IndianRupee, Percent, Calendar, ShieldCheck, Briefcase } from 'lucide-react';
+import { Save, Plus, Trash2, IndianRupee, Percent, ShieldCheck, Users } from 'lucide-react';
 
 export default function PayrollSettings() {
     const { t } = useTranslation();
@@ -59,30 +59,38 @@ export default function PayrollSettings() {
 
     const handleParamChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target;
-        setFormParams(prev => {
-            const newState = { ...prev, [name]: value };
-            
-            // Auto-calculate Total PF % if PF or FPF changes
-            if (name === 'pf_pct' || name === 'fpf_pct') {
-                const pfStr = name === 'pf_pct' ? value : String(prev.pf_pct ?? '');
-                const fpfStr = name === 'fpf_pct' ? value : String(prev.fpf_pct ?? '');
-                if (pfStr === '' && fpfStr === '') {
-                    newState.total_pf_pct = '';
-                } else {
-                    const pf = parseFloat(pfStr) || 0;
-                    const fpf = parseFloat(fpfStr) || 0;
-                    newState.total_pf_pct = (pf + fpf).toFixed(2);
-                }
-            }
-            
-            return newState;
-        });
+        setFormParams(prev => ({ ...prev, [name]: value }));
     };
+
+    const pfEmployerCoreTotal = () => {
+        const pf = parseFloat(String(formParams.pf_pct ?? '')) || 0;
+        const fpf = parseFloat(String(formParams.fpf_pct ?? '')) || 0;
+        if (!formParams.pf_pct && !formParams.fpf_pct) return '';
+        return (pf + fpf).toFixed(2);
+    };
+
+    const pfEmployerGrandTotal = () => {
+        const core = parseFloat(pfEmployerCoreTotal()) || 0;
+        const admin = parseFloat(String(formParams.pf_admin_charge_pct ?? '')) || 0;
+        if (!pfEmployerCoreTotal() && !formParams.pf_admin_charge_pct) return '';
+        return (core + admin).toFixed(2);
+    };
+
+    const pfEmployeePctCalculated = () => pfEmployerCoreTotal();
 
     const saveParameters = () => {
         router.post(
             route('hr.payroll-settings.parameters.update'),
-            { ...formParams, financial_year: financialYear },
+            {
+                financial_year: financialYear,
+                pf_pct: formParams.pf_pct,
+                fpf_pct: formParams.fpf_pct,
+                pf_admin_charge_pct: formParams.pf_admin_charge_pct,
+                max_pf_amount: formParams.max_pf_amount,
+                esic_employee_pct: formParams.esic_employee_pct,
+                esic_employer_pct: formParams.esic_employer_pct,
+                esic_wage_limit: formParams.esic_wage_limit,
+            },
             {
                 onSuccess: () => toast.success(t('Payroll parameters saved successfully')),
             }
@@ -138,7 +146,7 @@ export default function PayrollSettings() {
 
     const breadcrumbs = [
         { title: t('Dashboard'), href: route('dashboard') },
-        { title: t('Payroll Management'), href: '#' },
+        { title: t('Salary Payroll'), href: '#' },
         { title: t('Payroll Settings') }
     ];
 
@@ -170,11 +178,11 @@ export default function PayrollSettings() {
                 </Select>
             </div>
 
-            <Tabs defaultValue="parameters" className="w-full">
+            <Tabs defaultValue="pf-esi" className="w-full">
                 <TabsList className="grid w-full grid-cols-3 mb-8 bg-slate-100/50 p-1 rounded-xl border border-slate-200">
-                    <TabsTrigger value="parameters" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                    <TabsTrigger value="pf-esi" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
                         <ShieldCheck className="w-4 h-4 mr-2" />
-                        {t('Global Parameters')}
+                        {t('PF / ESI')}
                     </TabsTrigger>
                     <TabsTrigger value="pt" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
                         <IndianRupee className="w-4 h-4 mr-2" />
@@ -186,14 +194,16 @@ export default function PayrollSettings() {
                     </TabsTrigger>
                 </TabsList>
 
-                {/* Parameters Tab */}
-                <TabsContent value="parameters">
+                {/* PF / ESI Tab */}
+                <TabsContent value="pf-esi">
                     <Card className="border-none shadow-md overflow-hidden bg-white/50 backdrop-blur-sm">
                         <CardHeader className="bg-slate-50/50 border-b border-slate-100 p-3">
                             <div className="flex justify-between items-center">
                                 <div>
-                                    <CardTitle className="text-sm font-bold">{t('Payroll Parameters')}</CardTitle>
-                                    <CardDescription className="text-[10px]">{t('Configure PF, ESIC, Bonus and Leave limits')}</CardDescription>
+                                    <CardTitle className="text-sm font-bold">{t('PF / ESI Settings')}</CardTitle>
+                                    <CardDescription className="text-[10px]">
+                                        {t('Configure employee & employer contribution rates for')} {financialYear}
+                                    </CardDescription>
                                 </div>
                                 <Button onClick={saveParameters} size="sm" className="h-8 bg-primary hover:bg-primary/90 text-xs">
                                     <Save className="w-3.5 h-3.5 mr-1.5" />
@@ -201,115 +211,84 @@ export default function PayrollSettings() {
                                 </Button>
                             </div>
                         </CardHeader>
-                        <CardContent className="p-3">
+                        <CardContent className="p-4">
                             {!parameters?.id && (
-                                <p className="mb-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/80 px-3 py-2 text-[10px] text-slate-500">
-                                    {t('No saved settings for')} {financialYear}. {t('Fields are blank — enter values and click Save Changes.')}
+                                <p className="mb-4 rounded-lg border border-dashed border-slate-200 bg-slate-50/80 px-3 py-2 text-[10px] text-slate-500">
+                                    {t('No saved settings for')} {financialYear}. {t('Enter values and click Save Changes.')}
                                 </p>
                             )}
-                            <div className="space-y-3">
-                                {/* PF & Statutory Section */}
-                                <div className="space-y-2">
-                                    <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center">
-                                        <ShieldCheck className="w-3 h-3 mr-1 text-primary" />
-                                        {t('PF & Statutory')}
-                                    </h3>
-                                    
-                                    {/* PF Row - One Line */}
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-2 bg-slate-50/50 rounded-lg border border-slate-100">
-                                        <div className="space-y-1">
-                                            <Label className="text-[10px] flex items-center gap-1 font-medium">
-                                                {t('P.F (%)')}
-                                            </Label>
-                                            <Input type="number" step="0.01" name="pf_pct" value={paramVal('pf_pct')} onChange={handleParamChange} className="h-8 text-xs bg-white" />
+
+                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                                <div className="space-y-4 rounded-xl border border-blue-100 bg-blue-50/30 p-4">
+                                    <div>
+                                        <h3 className="text-xs font-bold uppercase tracking-wider text-blue-800 flex items-center gap-1.5">
+                                            <ShieldCheck className="w-3.5 h-3.5" />
+                                            {t('Provident Fund (PF)')}
+                                        </h3>
+                                        <p className="mt-1 text-[11px] text-slate-500">
+                                            {t('Enter P.F & F.P.F — Employee % auto-calculates. Employer adds admin charge only.')}
+                                        </p>
+                                    </div>
+
+                                    <div className="rounded-lg border border-blue-100 bg-white/80 p-3 space-y-3">
+                                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                            <div className="space-y-1">
+                                                <Label className="text-[11px] font-medium">{t('P.F (%)')}</Label>
+                                                <Input type="number" step="0.01" name="pf_pct" value={paramVal('pf_pct')} onChange={handleParamChange} className="h-9 text-sm bg-white" placeholder="8.33" />
+                                                <p className="text-[10px] text-muted-foreground">{t('EPF share')}</p>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label className="text-[11px] font-medium">{t('F.P.F (%)')}</Label>
+                                                <Input type="number" step="0.01" name="fpf_pct" value={paramVal('fpf_pct')} onChange={handleParamChange} className="h-9 text-sm bg-white" placeholder="3.67" />
+                                                <p className="text-[10px] text-muted-foreground">{t('EPS pension fund')}</p>
+                                            </div>
                                         </div>
-                                        <div className="space-y-1">
-                                            <Label className="text-[10px] flex items-center gap-1 font-medium text-slate-500">
-                                                <span className="text-primary">+</span> {t('F.P.F (%)')}
-                                            </Label>
-                                            <Input type="number" step="0.01" name="fpf_pct" value={paramVal('fpf_pct')} onChange={handleParamChange} className="h-8 text-xs bg-white" />
+
+                                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 rounded-lg border border-emerald-100 bg-emerald-50/40 p-3">
+                                            <div className="space-y-1">
+                                                <Label className="text-[11px] font-semibold text-emerald-800">{t('Employee (%)')}</Label>
+                                                <Input type="text" value={pfEmployeePctCalculated()} readOnly disabled className="h-9 text-sm bg-white font-bold text-emerald-800 border-emerald-200" placeholder="12.00" />
+                                                <p className="text-[10px] text-muted-foreground">{t('Auto: P.F + F.P.F — salary deduction')}</p>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label className="text-[11px] font-medium">{t('Admin Charge (%)')}</Label>
+                                                <Input type="number" step="0.01" name="pf_admin_charge_pct" value={paramVal('pf_admin_charge_pct')} onChange={handleParamChange} className="h-9 text-sm bg-white" placeholder="1.00" />
+                                                <p className="text-[10px] text-muted-foreground">{t('Employer only — PF admin / EDLI')}</p>
+                                            </div>
                                         </div>
-                                        <div className="space-y-1">
-                                            <Label className="text-[10px] text-primary font-bold flex items-center gap-1">
-                                                <span className="text-primary">=</span> {t('Total PF (%)')}
-                                            </Label>
-                                            <Input 
-                                                type="number" 
-                                                step="0.01" 
-                                                name="total_pf_pct" 
-                                                value={paramVal('total_pf_pct')} 
-                                                disabled 
-                                                className="h-8 text-xs bg-slate-100 font-bold border-primary/20 text-primary"
-                                            />
+
+                                        <div className="space-y-1 rounded-lg border border-blue-200 bg-blue-50/50 p-3">
+                                            <Label className="text-[11px] font-bold text-blue-800">{t('Total Employer (%)')}</Label>
+                                            <Input type="text" value={pfEmployerGrandTotal()} readOnly disabled className="h-9 text-sm bg-white font-bold text-blue-800 border-blue-200" placeholder="13.00" />
+                                            <p className="text-[10px] text-muted-foreground">{t('Auto: P.F + F.P.F + Admin charge')}</p>
                                         </div>
                                     </div>
 
-                                    {/* ESIC & Others Row */}
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                        <div className="space-y-1">
-                                            <Label className="text-[10px] font-medium">{t('Max PF Amount')}</Label>
-                                            <Input type="number" name="max_pf_amount" value={paramVal('max_pf_amount')} onChange={handleParamChange} className="h-8 text-xs" />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <Label className="text-[10px] font-medium">{t('ESIC (%)')}</Label>
-                                            <Input type="number" step="0.01" name="esic_pct" value={paramVal('esic_pct')} onChange={handleParamChange} className="h-8 text-xs" />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <Label className="text-[10px] font-medium">{t('Karchi (%)')}</Label>
-                                            <Input type="number" step="0.01" name="karchi_pct" value={paramVal('karchi_pct')} onChange={handleParamChange} className="h-8 text-xs" />
-                                        </div>
-                                    </div>
-
-                                    {/* Bonus Row */}
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        <div className="space-y-1">
-                                            <Label className="text-[10px] font-medium">{t('Bonus (%)')}</Label>
-                                            <Input type="number" step="0.01" name="bonus_pct" value={paramVal('bonus_pct')} onChange={handleParamChange} className="h-8 text-xs" />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <Label className="text-[10px] font-medium">{t('Max Bonus Amt')}</Label>
-                                            <Input type="number" name="bonus_max_limit" value={paramVal('bonus_max_limit')} onChange={handleParamChange} className="h-8 text-xs" />
-                                        </div>
+                                    <div className="space-y-1">
+                                        <Label className="text-[11px] font-medium">{t('Max PF Wage (₹)')}</Label>
+                                        <Input type="number" name="max_pf_amount" value={paramVal('max_pf_amount')} onChange={handleParamChange} className="h-9 text-sm bg-white" placeholder="15000" />
+                                        <p className="text-[10px] text-muted-foreground">{t('PF calculated on wage up to this limit.')}</p>
                                     </div>
                                 </div>
 
-                                {/* General & Leave limits combined at bottom */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-slate-100">
-                                    <div className="space-y-2">
-                                        <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center">
-                                            <Calendar className="w-3 h-3 mr-1 text-primary" />
-                                            {t('General')}
-                                        </h3>
+                                <div className="space-y-3 rounded-xl border border-emerald-100 bg-emerald-50/30 p-4">
+                                    <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+                                        <Users className="w-3.5 h-3.5" />
+                                        {t('ESIC (ESI)')}
+                                    </h3>
+                                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                         <div className="space-y-1">
-                                            <Label className="text-[10px] font-medium">{t('Financial Year')}</Label>
-                                            <Input
-                                                name="financial_year"
-                                                value={financialYear}
-                                                readOnly
-                                                className="h-8 text-xs bg-slate-50 font-medium"
-                                            />
+                                            <Label className="text-[10px] font-medium">{t('Employee (%)')}</Label>
+                                            <Input type="number" step="0.01" name="esic_employee_pct" value={paramVal('esic_employee_pct')} onChange={handleParamChange} className="h-8 text-xs bg-white" placeholder="0.75" />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label className="text-[10px] font-medium">{t('Employer (%)')}</Label>
+                                            <Input type="number" step="0.01" name="esic_employer_pct" value={paramVal('esic_employer_pct')} onChange={handleParamChange} className="h-8 text-xs bg-white" placeholder="3.25" />
                                         </div>
                                     </div>
-
-                                    <div className="space-y-2">
-                                        <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center">
-                                            <Briefcase className="w-3 h-3 mr-1 text-primary" />
-                                            {t('Leave Limits')}
-                                        </h3>
-                                        <div className="grid grid-cols-3 gap-2">
-                                            <div className="space-y-1">
-                                                <Label className="text-[10px] font-medium">{t('Max EL')}</Label>
-                                                <Input type="number" name="max_el" value={paramVal('max_el')} onChange={handleParamChange} className="h-8 text-xs" />
-                                            </div>
-                                            <div className="space-y-1">
-                                                <Label className="text-[10px] font-medium">{t('Max SL')}</Label>
-                                                <Input type="number" name="max_sl" value={paramVal('max_sl')} onChange={handleParamChange} className="h-8 text-xs" />
-                                            </div>
-                                            <div className="space-y-1">
-                                                <Label className="text-[10px] font-medium">{t('Max CL')}</Label>
-                                                <Input type="number" name="max_cl" value={paramVal('max_cl')} onChange={handleParamChange} className="h-8 text-xs" />
-                                            </div>
-                                        </div>
+                                    <div className="space-y-1">
+                                        <Label className="text-[10px] font-medium">{t('ESI Wage Limit (₹)')}</Label>
+                                        <Input type="number" name="esic_wage_limit" value={paramVal('esic_wage_limit')} onChange={handleParamChange} className="h-8 text-xs bg-white" placeholder="21000" />
                                     </div>
                                 </div>
                             </div>

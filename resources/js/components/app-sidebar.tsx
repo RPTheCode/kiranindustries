@@ -335,13 +335,6 @@ export function AppSidebar() {
             });
         }
 
-        if ((hasPermission(permissions, 'manage-settings') || hasPermission(permissions, 'view-settings'))) {
-            payrollChildren.push({
-                title: t('Payroll Settings'),
-                href: route('hr.payroll-settings.index')
-            });
-        }
-
         if (payrollChildren.length > 0) {
             items.push({
                 title: t('Payroll Management'),
@@ -372,6 +365,12 @@ export function AppSidebar() {
             title: t('Earning / Deduction'),
             href: route('hr.earning-deduction.index'),
         });
+        if (hasPermission(permissions, 'manage-settings') || hasPermission(permissions, 'view-settings')) {
+            salaryPayrollChildren.push({
+                title: t('Payroll Settings'),
+                href: route('hr.payroll-settings.index'),
+            });
+        }
         if (salaryPayrollChildren.length > 0) {
             items.push({
                 title: t('Salary Payroll'),

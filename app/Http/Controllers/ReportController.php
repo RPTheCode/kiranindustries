@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Artisan;
 use Carbon\Carbon;
 use App\Models\Employee;
+use App\Models\PayrollParameter;
 use App\Models\DailyProductionAttendanceEntry;
 use App\Models\MaterialItem;
 use App\Exports\WorkerwiseAttendanceExport;
@@ -1183,7 +1184,7 @@ class ReportController extends Controller
 
             $pf = 0;
             if ($emp->pf_flag == 1 && $payrollParams) {
-                $pfPercentage = (float)($payrollParams->total_pf_pct ?? 12);
+                $pfPercentage = PayrollParameter::pfEmployeePct($payrollParams);
                 $maxPfAmount = (float)($payrollParams->max_pf_amount ?? 15000);
                 $pfBasic = ($emp->pf_basic_salary > 0) ? (float)$emp->pf_basic_salary * $multiplier : $basic;
                 $pfBase = min($pfBasic, $maxPfAmount);
@@ -1194,10 +1195,10 @@ class ReportController extends Controller
             if ($emp->esic_flag == 1 && $payrollParams) {
                 $esiPct = ($emp->esiMaster && (float)$emp->esiMaster->percentage_employee > 0)
                     ? (float)$emp->esiMaster->percentage_employee
-                    : (float)($payrollParams->esic_pct ?? 0.75);
+                    : PayrollParameter::esicEmployeePct($payrollParams);
                 $esiCeiling = ($emp->esiMaster && (float)$emp->esiMaster->limit > 0)
                     ? (float)$emp->esiMaster->limit
-                    : 21000;
+                    : PayrollParameter::esicWageLimit($payrollParams);
                 $esiBase = min($grossEarn, $esiCeiling);
                 $esi = round(($esiBase * $esiPct) / 100, 2);
             }

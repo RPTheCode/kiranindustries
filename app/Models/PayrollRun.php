@@ -705,7 +705,7 @@ class PayrollRun extends BaseModel
         $pfAmountEmployee = 0;
         $pfAmountEmployer = 0;
         if ($emp && $emp->pf_flag == 1) {
-            $pfPercentage = (float) ($payrollParams->total_pf_pct ?? 12);
+            $pfPercentage = PayrollParameter::pfEmployeePct($payrollParams);
             $maxPfAmount = (float) ($payrollParams->max_pf_amount ?? 15000);
             $pfBasic = ($emp->pf_basic_salary > 0) ? $emp->pf_basic_salary : $basic;
 
@@ -720,7 +720,9 @@ class PayrollRun extends BaseModel
             $pfBase = min($pfBase, $maxPfAmount);
             $pfAmountEmployee = round(($pfBase * $pfPercentage) / 100, 2);
             if ($emp->pfMaster) {
-                $pfAmountEmployer = round($pfBase * ($emp->pfMaster->percentage_employer / 100), 2);
+                $pfAmountEmployer = round($pfBase * (PayrollParameter::pfEmployerPct($payrollParams) / 100), 2);
+            } elseif ($payrollParams) {
+                $pfAmountEmployer = round($pfBase * (PayrollParameter::pfEmployerPct($payrollParams) / 100), 2);
             }
         }
 
@@ -737,17 +739,17 @@ class PayrollRun extends BaseModel
         if ($emp && $emp->esic_flag == 1 && $payrollParams) {
             $esiPct = $emp->esiMaster && $emp->esiMaster->percentage_employee > 0
                 ? (float) $emp->esiMaster->percentage_employee
-                : (float) ($payrollParams->esic_pct ?? 0.75);
+                : PayrollParameter::esicEmployeePct($payrollParams);
             $esiCeiling = ($emp->esiMaster && $emp->esiMaster->limit > 0)
                 ? (float) $emp->esiMaster->limit
-                : 21000;
+                : PayrollParameter::esicWageLimit($payrollParams);
             $currentGross = array_sum($earningsBreakdown);
             $esiBase = min($currentGross, $esiCeiling);
             $esiAmountEmployee = round(($esiBase * $esiPct) / 100, 2);
             if ($emp->esiMaster && $emp->esiMaster->percentage_employer > 0) {
                 $esiAmountEmployer = round(($esiBase * $emp->esiMaster->percentage_employer) / 100, 2);
             } else {
-                $esiAmountEmployer = round(($esiBase * 3.25) / 100, 2);
+                $esiAmountEmployer = round(($esiBase * PayrollParameter::esicEmployerPct($payrollParams)) / 100, 2);
             }
             if ($esiAmountEmployee > 0) {
                 $deductionsBreakdown['ESIC'] = $esiAmountEmployee;

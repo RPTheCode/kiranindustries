@@ -43,18 +43,20 @@ class PayrollSettingController extends Controller
     {
         $validated = $request->validate([
             'financial_year' => 'required|string|max:20|in:' . implode(',', financialYearSelectOptions()),
-            'pf_pct' => 'nullable|numeric',
-            'fpf_pct' => 'nullable|numeric',
-            'total_pf_pct' => 'nullable|numeric',
-            'max_pf_amount' => 'nullable|numeric',
-            'esic_pct' => 'nullable|numeric',
-            'karchi_pct' => 'nullable|numeric',
-            'bonus_pct' => 'nullable|numeric',
-            'bonus_max_limit' => 'nullable|numeric',
-            'max_el' => 'nullable|integer',
-            'max_sl' => 'nullable|integer',
-            'max_cl' => 'nullable|integer',
+            'pf_pct' => 'nullable|numeric|min:0|max:100',
+            'fpf_pct' => 'nullable|numeric|min:0|max:100',
+            'pf_admin_charge_pct' => 'nullable|numeric|min:0|max:100',
+            'max_pf_amount' => 'nullable|numeric|min:0',
+            'esic_employee_pct' => 'nullable|numeric|min:0|max:100',
+            'esic_employer_pct' => 'nullable|numeric|min:0|max:100',
+            'esic_wage_limit' => 'nullable|numeric|min:0',
         ]);
+
+        $corePf = (float) ($validated['pf_pct'] ?? 0) + (float) ($validated['fpf_pct'] ?? 0);
+        $validated['pf_employee_pct'] = $corePf;
+        $validated['total_pf_pct'] = $corePf;
+        $validated['pf_employer_pct'] = $corePf + (float) ($validated['pf_admin_charge_pct'] ?? 0);
+        $validated['esic_pct'] = $validated['esic_employee_pct'] ?? null;
 
         PayrollParameter::updateOrCreate(
             ['financial_year' => $validated['financial_year']],
@@ -116,10 +118,38 @@ class PayrollSettingController extends Controller
         $parameters = PayrollParameter::where('financial_year', $financialYear)->first();
 
         if ($parameters) {
-            return $parameters->toArray();
+            return $this->normalizeParametersForUi($parameters->toArray());
         }
 
         return $this->emptyParameters($financialYear);
+    }
+
+    private function normalizeParametersForUi(array $data): array
+    {
+        if (empty($data['pf_pct']) && empty($data['fpf_pct'])) {
+            $data['pf_pct'] = 8.33;
+            $data['fpf_pct'] = 3.67;
+        }
+        if (empty($data['pf_admin_charge_pct'])) {
+            $data['pf_admin_charge_pct'] = 1;
+        }
+        $core = (float) ($data['pf_pct'] ?? 0) + (float) ($data['fpf_pct'] ?? 0);
+        if ($core > 0) {
+            $data['pf_employee_pct'] = $core;
+        } elseif (empty($data['pf_employee_pct']) && ! empty($data['total_pf_pct'])) {
+            $data['pf_employee_pct'] = $data['total_pf_pct'];
+        }
+        if (empty($data['esic_employee_pct']) && ! empty($data['esic_pct'])) {
+            $data['esic_employee_pct'] = $data['esic_pct'];
+        }
+        if (empty($data['esic_employer_pct'])) {
+            $data['esic_employer_pct'] = 3.25;
+        }
+        if (empty($data['esic_wage_limit'])) {
+            $data['esic_wage_limit'] = 21000;
+        }
+
+        return $data;
     }
 
     private function resolvePtSlabsForYear(string $financialYear): array
@@ -153,17 +183,13 @@ class PayrollSettingController extends Controller
         return [
             'id' => null,
             'financial_year' => $financialYear,
-            'total_pf_pct' => '',
             'pf_pct' => '',
             'fpf_pct' => '',
+            'pf_admin_charge_pct' => '',
             'max_pf_amount' => '',
-            'esic_pct' => '',
-            'karchi_pct' => '',
-            'bonus_pct' => '',
-            'bonus_max_limit' => '',
-            'max_el' => '',
-            'max_sl' => '',
-            'max_cl' => '',
+            'esic_employee_pct' => '',
+            'esic_employer_pct' => '',
+            'esic_wage_limit' => '',
         ];
     }
 }
