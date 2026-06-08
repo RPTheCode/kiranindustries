@@ -6,9 +6,7 @@ import {
   ArrowLeft,
   Lock,
   Loader2,
-  IndianRupee,
   Users,
-  ShieldCheck,
   Search,
   X,
   RefreshCw,
@@ -17,6 +15,7 @@ import {
   ChevronDown,
   ChevronRight,
   FileDown,
+  AlertTriangle,
 } from 'lucide-react';
 import { toast } from '@/components/custom-toast';
 import { Button } from '@/components/ui/button';
@@ -42,11 +41,153 @@ import {
 } from '@/components/ui/table';
 import { ConfirmActionDialog } from './components/ConfirmActionDialog';
 import { PayrollEntryBreakdownPanel } from './components/PayrollEntryBreakdownPanel';
-import { StatutoryAmountCell, StatutoryLegend } from './components/StatutoryIndicators';
 import { cn } from '@/lib/utils';
 
 function formatRupee(value: number) {
   return Number(value).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function AttendanceDaysCell({
+  entry,
+  t,
+}: {
+  entry: any;
+  t: (key: string, opts?: Record<string, unknown>) => string;
+}) {
+  const working = Number(entry.working_days ?? 26);
+  const paid = Number(entry.paid_days ?? 0);
+  const present = Number(entry.present_days ?? 0);
+  const incentiveDays = Number(entry.incentive_days ?? 0);
+  const otEnabled = Boolean(entry.ot_enabled);
+
+  return (
+    <div className="flex flex-col items-center gap-0.5">
+      <div
+        className={cn(
+          'rounded-md px-2 py-0.5 text-[11px] font-bold tabular-nums leading-tight',
+          paid >= working ? 'bg-emerald-100 text-emerald-800' : paid > 0 ? 'bg-sky-100 text-sky-800' : 'bg-slate-100 text-slate-500',
+        )}
+        title={t('Paid {{paid}} of {{working}} working days', { paid, working })}
+      >
+        {paid}/{working}
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-1 text-[9px] text-slate-500">
+        <span title={t('Present days')}>{t('Present')} {present}</span>
+        <span
+          className={cn(
+            'rounded px-1 py-px font-bold uppercase',
+            otEnabled ? 'bg-violet-100 text-violet-800' : 'bg-slate-100 text-slate-500',
+          )}
+          title={t('Overtime (P.I.) enabled on employee')}
+        >
+          {t('OT')} {otEnabled ? t('Yes') : t('No')}
+        </span>
+        {incentiveDays > 0 && (
+          <span className="rounded bg-amber-100 px-1 py-px font-bold text-amber-800" title={t('Production incentive days')}>
+            {t('PI')} {incentiveDays}
+          </span>
+        )}
+        {entry.has_mispunch ? (
+          <span className="inline-flex items-center rounded bg-amber-500 px-1 py-px font-bold text-white" title={t('Mispunch — fix before lock')}>
+            <AlertTriangle className="h-2.5 w-2.5" />
+            {entry.mispunch_count}
+          </span>
+        ) : (
+          <span className="text-emerald-600" title={t('No mispunch')}>✓</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function salaryDisplayMeta(entry: {
+  monthly_gross: number;
+  total_earnings: number;
+  net_salary: number;
+  daily_option?: boolean;
+  employee_working_days?: number;
+}) {
+  const monthlyGross = Number(entry.monthly_gross ?? 0);
+  const dailyOption = Boolean(entry.daily_option);
+  const configDays = Number(entry.employee_working_days ?? 0);
+  const salaryDays = configDays > 0 ? configDays : (dailyOption ? 1 : 26);
+
+  if (dailyOption && salaryDays <= 1) {
+    return {
+      mode: 'day' as const,
+      rate: monthlyGross,
+      rateLabel: 'day',
+      ctc: Math.round(monthlyGross * 26),
+    };
+  }
+
+  if (dailyOption && salaryDays > 1) {
+    return {
+      mode: 'day' as const,
+      rate: Math.round((monthlyGross / salaryDays) * 100) / 100,
+      rateLabel: 'day',
+      ctc: monthlyGross,
+    };
+  }
+
+  return {
+    mode: 'month' as const,
+    rate: monthlyGross,
+    rateLabel: 'month',
+    ctc: monthlyGross,
+  };
+}
+
+function SalaryCompactCell({ entry, formatRupee: fmt, t }: { entry: any; formatRupee: (v: number) => string; t: (k: string) => string }) {
+  const meta = salaryDisplayMeta(entry);
+  const incentiveAmount = Number(entry.incentive_amount ?? 0);
+  const incentiveDays = Number(entry.incentive_days ?? 0);
+
+  return (
+    <div className="min-w-[118px] text-right text-[10px] leading-snug tabular-nums">
+      <div className="mb-1 flex items-center justify-end gap-1">
+        <span className={cn(
+          'rounded px-1 py-px text-[8px] font-bold uppercase',
+          meta.mode === 'day' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800',
+        )}>
+          {meta.mode === 'day' ? t('Day') : t('Month')}
+        </span>
+        <span className="font-semibold text-slate-800" title={t('Contract rate')}>
+          ₹{fmt(meta.rate)}<span className="text-[9px] font-normal text-slate-500">/{meta.rateLabel === 'day' ? t('day') : t('mo')}</span>
+        </span>
+      </div>
+      <div className="flex items-center justify-end gap-1.5 text-[9px] text-slate-400" title={t('Full month package (CTC)')}>
+        <span>{t('CTC')}</span>
+        <span className="text-slate-600">₹{fmt(meta.ctc)}</span>
+      </div>
+      {incentiveAmount > 0 && (
+        <div className="flex items-center justify-end gap-1.5 text-[9px] text-amber-700" title={t('Production incentive for extra days')}>
+          <span>{t('PI')} ({incentiveDays} {t('days')})</span>
+          <span className="font-semibold">+ ₹{fmt(incentiveAmount)}</span>
+        </div>
+      )}
+      <div
+        className="my-0.5 flex items-center justify-end gap-1.5 rounded bg-emerald-50 px-1 py-0.5 text-[10px]"
+        title={t('Salary after attendance — before deductions')}
+      >
+        <span className="font-medium text-emerald-800">{t('Total Salary')}</span>
+        <span className="font-bold text-emerald-900">₹{fmt(entry.total_earnings)}</span>
+      </div>
+      {Number(entry.total_deductions) > 0 && (
+        <div className="flex items-center justify-end gap-1.5 text-[9px] text-red-600" title={t('PF, PT & other deductions')}>
+          <span>{t('Deductions')}</span>
+          <span className="font-semibold">− ₹{fmt(entry.total_deductions)}</span>
+        </div>
+      )}
+      <div
+        className="flex items-center justify-end gap-1.5 border-t border-slate-200 pt-0.5 text-[11px]"
+        title={t('Take-home after PF, PT & other deductions')}
+      >
+        <span className="font-semibold text-primary">{t('Net Salary')}</span>
+        <span className="font-bold text-primary">₹{fmt(entry.net_salary)}</span>
+      </div>
+    </div>
+  );
 }
 
 function statusBadge(status: string, t: (key: string) => string) {
@@ -74,6 +215,7 @@ export default function PayrollGenerateShow() {
     departments = [],
     shifts = [],
     flash,
+    mispunch_count: mispunchCount = 0,
   } = usePage().props as any;
   const permissions = auth?.permissions || [];
   const canFinalize = canFinalizeSalaryPayrollRuns(permissions);
@@ -200,10 +342,15 @@ export default function PayrollGenerateShow() {
 
   const showRowActions = !isRunLocked && (canManage || canFinalize);
   const showPayslipActions = canDownloadAnyPayslip;
-  const tableColSpan = (showRowActions || showPayslipActions ? 12 : 11) + 1;
+  const usesAttendance = run?.use_attendance !== false;
+  const tableColSpan = (usesAttendance ? 5 : 4) + (showRowActions || showPayslipActions ? 1 : 0);
 
   const toggleEntryExpand = (entryId: number) => {
-    setExpandedEntryIds((prev) => ({ ...prev, [entryId]: !prev[entryId] }));
+    setExpandedEntryIds((prev) => {
+      const isOpen = !!prev[entryId];
+      if (isOpen) return {};
+      return { [entryId]: true };
+    });
   };
 
   const expandedCount = Object.values(expandedEntryIds).filter(Boolean).length;
@@ -256,18 +403,6 @@ export default function PayrollGenerateShow() {
     { title: t('Dashboard'), href: route('dashboard') },
     { title: t('Salary Payroll'), href: route('hr.salary-payroll.generate.index') },
     { title: run?.title || t('Payroll Run') },
-  ];
-
-  const summaryCards = [
-    { label: t('Total Gross'), value: run?.total_gross, icon: IndianRupee, color: 'text-blue-600 bg-blue-50' },
-    { label: t('Total Net'), value: run?.total_net, icon: IndianRupee, color: 'text-green-600 bg-green-50' },
-    { label: t('Employees'), value: run?.employee_count, icon: Users, color: 'text-violet-600 bg-violet-50', isCount: true },
-    ...(!isRunLocked ? [
-      { label: t('Locked'), value: lockedCount, icon: Lock, color: 'text-green-700 bg-green-50', isCount: true, onClick: lockedCount > 0 ? () => applyFilters({ lock_status: 'locked', page: 1 }) : undefined },
-      { label: t('Unlocked'), value: unlockedCount, icon: RefreshCw, color: 'text-amber-700 bg-amber-50', isCount: true, onClick: unlockedCount > 0 ? () => applyFilters({ lock_status: 'unlocked', page: 1 }) : undefined },
-    ] : []),
-    { label: t('PF (Employee)'), value: run?.total_pf_employee, icon: ShieldCheck, color: 'text-orange-600 bg-orange-50' },
-    { label: t('ESI (Employee)'), value: run?.total_esi_employee, icon: ShieldCheck, color: 'text-teal-600 bg-teal-50' },
   ];
 
   const entryRows = entries?.data ?? [];
@@ -348,100 +483,79 @@ export default function PayrollGenerateShow() {
         </div>
       </div>
 
-      <div className={cn('mb-4 grid gap-3 sm:grid-cols-2', !isRunLocked ? 'lg:grid-cols-7' : 'lg:grid-cols-5')}>
-        {summaryCards.map((card) => (
-          <div
-            key={card.label}
-            className={cn(
-              'rounded-xl border border-slate-200 bg-white p-3 shadow-sm',
-              card.onClick && 'cursor-pointer transition-shadow hover:border-primary/30 hover:shadow-md',
-            )}
-            onClick={card.onClick}
-            role={card.onClick ? 'button' : undefined}
-            tabIndex={card.onClick ? 0 : undefined}
-            onKeyDown={card.onClick ? (e) => e.key === 'Enter' && card.onClick?.() : undefined}
-            title={card.onClick ? t('Click to filter') : undefined}
-          >
-            <div className={`mb-2 inline-flex rounded-lg p-2 ${card.color}`}>
-              <card.icon className="h-4 w-4" />
-            </div>
-            <p className="text-[10px] uppercase tracking-wider text-slate-500">{card.label}</p>
-            <p className="text-lg font-bold text-slate-800">
-              {card.isCount ? card.value : `₹${formatRupee(Number(card.value || 0))}`}
-            </p>
-          </div>
-        ))}
+      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs shadow-sm">
+        <span className="font-semibold text-slate-800">{t('Gross')} <span className="text-blue-700">₹{formatRupee(Number(run?.total_gross || 0))}</span></span>
+        <span className="text-slate-300">|</span>
+        <span className="font-semibold text-slate-800">{t('Net')} <span className="text-green-700">₹{formatRupee(Number(run?.total_net || 0))}</span></span>
+        <span className="text-slate-300">|</span>
+        <span className="text-slate-600"><Users className="mr-1 inline h-3.5 w-3.5" />{run?.employee_count} {t('emp')}</span>
+        {!isRunLocked && (
+          <>
+            <span className="text-slate-300">|</span>
+            <span className="text-green-700">{lockedCount} {t('locked')}</span>
+            <span className="text-amber-700">{unlockedCount} {t('unlocked')}</span>
+          </>
+        )}
+        {usesAttendance && mispunchCount > 0 && (
+          <>
+            <span className="text-slate-300">|</span>
+            <Link href={route('hr.attendance.sync')} className="inline-flex items-center gap-1 font-semibold text-amber-700 hover:underline">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              {mispunchCount} {t('mispunch')}
+            </Link>
+          </>
+        )}
       </div>
 
-      {isRunLocked && (
-        <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-xs text-green-800">
-          {t('Locked on')} {run.finalized_at} {run.finalizer?.name ? `${t('by')} ${run.finalizer.name}` : ''}
-          {' — '}{t('Regenerate and customize are disabled after lock.')}
+      {(usesAttendance || !isRunLocked) && (
+        <div className={cn(
+          'mb-3 rounded-lg border px-3 py-2 text-[11px] leading-snug',
+          usesAttendance && mispunchCount > 0 ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-blue-100 bg-blue-50/70 text-blue-900',
+        )}>
+          {usesAttendance ? (
+            <>
+              {t('Total Salary = rate × paid days ÷ 26. Deductions = PF & PT. Net Salary = take-home.')}
+              {mispunchCount > 0 && (
+                <> {t('Fix {{n}} mispunch before lock.', { n: mispunchCount })}</>
+              )}
+            </>
+          ) : (
+            t('Total Salary = full month. Deductions = PF & PT. Net Salary = take-home.')
+          )}
         </div>
       )}
 
       {hasPartialLocks && (
-        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
-          <p className="font-medium">
-            {t('{{locked}} locked · {{unlocked}} unlocked — locking an employee auto-generates their payslip PDF.', {
-              locked: lockedCount,
-              unlocked: unlockedCount,
-            })}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 border-green-300 bg-white text-[11px] text-green-800 hover:bg-green-50"
-              onClick={() => applyFilters({ lock_status: 'locked', page: 1 })}
-            >
-              <Lock className="mr-1 h-3 w-3" />
-              {t('Show Locked ({{count}})', { count: lockedCount })}
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+          <span>{lockedCount} {t('locked')} · {unlockedCount} {t('open')}</span>
+          <Button variant="outline" size="sm" className="h-6 border-green-300 bg-white px-2 text-[10px] text-green-800" onClick={() => applyFilters({ lock_status: 'locked', page: 1 })}>
+            {t('Locked')}
+          </Button>
+          <Button variant="outline" size="sm" className="h-6 border-amber-300 bg-white px-2 text-[10px] text-amber-900" onClick={() => applyFilters({ lock_status: 'unlocked', page: 1 })}>
+            {t('Open')}
+          </Button>
+          {lockFilter !== 'all' && (
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]" onClick={() => applyFilters({ lock_status: 'all', page: 1 })}>
+              {t('All')}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 border-amber-300 bg-white text-[11px] text-amber-900 hover:bg-amber-100/50"
-              onClick={() => applyFilters({ lock_status: 'unlocked', page: 1 })}
-            >
-              <RefreshCw className="mr-1 h-3 w-3" />
-              {t('Show Unlocked ({{count}})', { count: unlockedCount })}
-            </Button>
-            {lockFilter !== 'all' && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 text-[11px] text-amber-800"
-                onClick={() => applyFilters({ lock_status: 'all', page: 1 })}
-              >
-                {t('Show all employees')}
-              </Button>
-            )}
-          </div>
+          )}
         </div>
       )}
 
-      {!isRunLocked && lockedCount === 0 && (
-        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-xs text-blue-800">
-          {t('Lock individual employees to freeze salary and generate payslip PDF. Use "Lock Payroll" to finalize everyone and generate all payslips.')}
-        </div>
-      )}
-
-      {isRunLocked && payslipCount > 0 && (
-        <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-xs text-green-800">
-          {t('{{count}} payslip(s) ready. Download individually from each row or use "Download Payslips" for a ZIP file.', { count: payslipCount })}
+      {isRunLocked && (
+        <div className="mb-3 rounded-lg border border-green-200 bg-green-50 px-3 py-1.5 text-[11px] text-green-800">
+          {t('Locked')} · {run.finalized_at}{run.finalizer?.name ? ` · ${run.finalizer.name}` : ''}
+          {payslipCount > 0 && <> · {t('{{count}} payslip(s) ready', { count: payslipCount })}</>}
         </div>
       )}
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 px-4 py-3">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h3 className="text-sm font-bold text-slate-800">{t('Employee Payroll Details')}</h3>
-              <p className="mt-0.5 text-[11px] text-slate-500">
-                {t('Click the arrow on any row to expand full earnings & deductions breakdown.')}
-              </p>
-            </div>
+        <div className="border-b border-slate-100 px-3 py-2">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-xs font-bold text-slate-800">
+              {t('Employees')}
+              <span className="ml-1.5 font-normal text-slate-500">— {t('click row for salary breakdown')}</span>
+            </h3>
             <div className="flex flex-wrap items-center gap-2">
               {entryRows.length > 0 && (
                 <>
@@ -463,15 +577,15 @@ export default function PayrollGenerateShow() {
               )}
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" />
               <Input
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                placeholder={t('Search name or code...')}
-                className="h-8 w-[170px] pl-8 text-xs"
+                placeholder={t('Search...')}
+                className="h-7 w-[120px] pl-7 text-[11px]"
               />
               {searchTerm && (
                 <button type="button" onClick={() => { setSearchTerm(''); applyFilters({ search: '', page: 1 }); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
@@ -479,52 +593,52 @@ export default function PayrollGenerateShow() {
                 </button>
               )}
             </div>
-            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={handleSearch}>
-              {t('Search')}
+            <Button variant="outline" size="sm" className="h-7 px-2 text-[11px]" onClick={handleSearch}>
+              {t('Go')}
             </Button>
             <Combobox
               value={categoryFilter}
               onChange={(v) => applyFilters({ category_id: v || 'all', page: 1 })}
               options={categoryOptions}
-              placeholder={t('All Categories')}
-              searchPlaceholder={t('Search category...')}
-              emptyText={t('No category found.')}
-              className="h-8 w-[140px] text-xs"
+              placeholder={t('Category')}
+              searchPlaceholder={t('Search...')}
+              emptyText={t('None')}
+              className="h-7 w-[110px] text-[11px]"
             />
             <Combobox
               value={shiftFilter}
               onChange={(v) => applyFilters({ shift_id: v || 'all', page: 1 })}
               options={shiftOptions}
-              placeholder={t('All Shifts')}
-              searchPlaceholder={t('Search shift...')}
-              emptyText={t('No shift found.')}
-              className="h-8 w-[130px] text-xs"
+              placeholder={t('Shift')}
+              searchPlaceholder={t('Search...')}
+              emptyText={t('None')}
+              className="h-7 w-[100px] text-[11px]"
             />
             <Combobox
               value={departmentFilter}
               onChange={(v) => applyFilters({ department_id: v || 'all', page: 1 })}
               options={departmentOptions}
-              placeholder={t('All Departments')}
-              searchPlaceholder={t('Search department...')}
-              emptyText={t('No department found.')}
-              className="h-8 w-[150px] text-xs"
+              placeholder={t('Dept')}
+              searchPlaceholder={t('Search...')}
+              emptyText={t('None')}
+              className="h-7 w-[100px] text-[11px]"
             />
             {!isRunLocked && (
               <Combobox
                 value={lockFilter}
                 onChange={(v) => applyFilters({ lock_status: v || 'all', page: 1 })}
                 options={lockStatusOptions}
-                placeholder={t('All Lock Status')}
+                placeholder={t('Lock')}
                 searchPlaceholder={t('Search...')}
-                emptyText={t('No option found.')}
-                className="h-8 w-[130px] text-xs"
+                emptyText={t('None')}
+                className="h-7 w-[90px] text-[11px]"
               />
             )}
             <Select
               value={String(filters.per_page ?? 50)}
               onValueChange={(v) => applyFilters({ per_page: Number(v), page: 1 })}
             >
-              <SelectTrigger className="h-8 w-[90px] text-xs">
+              <SelectTrigger className="h-7 w-[72px] text-[11px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -535,28 +649,30 @@ export default function PayrollGenerateShow() {
             </Select>
           </div>
         </div>
-        <StatutoryLegend />
-        <div className="overflow-x-auto">
-          <Table>
+        <Table className="w-full">
+            <colgroup>
+              <col className="w-[52px]" />
+              <col />
+              {usesAttendance && <col className="w-[72px]" />}
+              <col className="w-[142px]" />
+              {(showRowActions || showPayslipActions) && <col className="w-[80px]" />}
+            </colgroup>
             <TableHeader className="bg-slate-50">
-              <TableRow>
-                <TableHead className="w-8" />
-                <TableHead className="text-[10px]">{t('Code')}</TableHead>
-                <TableHead className="text-[10px]">{t('Name')}</TableHead>
-                <TableHead className="text-center text-[10px]">{t('Lock')}</TableHead>
-                <TableHead className="text-[10px]">{t('Category')}</TableHead>
-                <TableHead className="text-[10px]">{t('Shift')}</TableHead>
-                <TableHead className="text-right text-[10px]">{t('Gross')}</TableHead>
-                <TableHead className="text-right text-[10px]">{t('Basic')}</TableHead>
-                <TableHead className="text-right text-[10px]">{t('PF')}<span className="mt-0.5 block font-normal normal-case text-slate-400">{t('On/Off')}</span></TableHead>
-                <TableHead className="text-right text-[10px]">{t('ESI')}<span className="mt-0.5 block font-normal normal-case text-slate-400">{t('On/Off')}</span></TableHead>
-                <TableHead className="text-right text-[10px]">{t('P.Tax')}</TableHead>
-                <TableHead className="text-right text-[10px]">{t('Net')}</TableHead>
-                {showRowActions && (
-                  <TableHead className="text-right text-[10px]">{t('Action')}</TableHead>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="h-8 px-1 text-center text-[10px]">{t('Details')}</TableHead>
+                <TableHead className="h-8 px-2 text-[10px]">{t('Employee')}</TableHead>
+                {usesAttendance && (
+                  <TableHead className="h-8 px-1 text-center text-[10px]" title={t('Paid days / Working days')}>
+                    {t('Days')}
+                  </TableHead>
                 )}
-                {!showRowActions && showPayslipActions && (
-                  <TableHead className="text-right text-[10px]">{t('Payslip')}</TableHead>
+                <TableHead className="h-8 px-2 text-right text-[10px]" title={t('Rate → CTC → Total Salary → Deductions → Net Salary')}>
+                  {t('Pay')}
+                </TableHead>
+                {(showRowActions || showPayslipActions) && (
+                  <TableHead className="h-8 px-1 text-right text-[10px]">
+                    {showRowActions ? t('Actions') : 'PDF'}
+                  </TableHead>
                 )}
               </TableRow>
             </TableHeader>
@@ -574,122 +690,66 @@ export default function PayrollGenerateShow() {
                     <TableRow
                       className={cn(
                         'cursor-pointer transition-colors',
-                        entry.is_locked ? 'bg-green-50/60' : isExpanded ? 'bg-primary/5' : 'hover:bg-slate-50',
+                        entry.is_locked ? 'bg-green-50/50' : entry.has_mispunch ? 'bg-amber-50/30' : isExpanded ? 'bg-primary/5 ring-1 ring-inset ring-primary/20' : 'hover:bg-slate-50',
                       )}
                       onClick={() => toggleEntryExpand(entry.id)}
+                      title={isExpanded ? t('Click to close breakdown') : t('Click to see salary breakdown')}
                     >
-                      <TableCell className="w-8 px-2">
+                      <TableCell className="px-1 py-1.5 align-top">
                         <button
                           type="button"
-                          className="flex h-6 w-6 items-center justify-center rounded text-slate-500 hover:bg-slate-200/80"
+                          className={cn(
+                            'flex w-full flex-col items-center justify-center rounded-md border px-0.5 py-1 text-[9px] font-medium leading-none',
+                            isExpanded
+                              ? 'border-primary/30 bg-primary/10 text-primary'
+                              : 'border-slate-200 bg-white text-slate-500 hover:border-primary/30 hover:bg-primary/5 hover:text-primary',
+                          )}
                           onClick={(e) => { e.stopPropagation(); toggleEntryExpand(entry.id); }}
-                          title={isExpanded ? t('Collapse') : t('Expand breakdown')}
+                          aria-expanded={isExpanded}
+                          aria-label={isExpanded ? t('Close breakdown') : t('View breakdown')}
                         >
-                          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                          <span className="mt-0.5">{isExpanded ? t('Hide') : t('View')}</span>
                         </button>
                       </TableCell>
-                      <TableCell className="text-xs">{entry.employee_code || '—'}</TableCell>
-                      <TableCell className="text-xs font-medium">{entry.name}</TableCell>
-                      <TableCell className="text-center">
-                        {entry.is_locked ? (
-                          <Badge
-                            className="border-0 bg-green-100 px-1.5 py-0.5 text-[9px] uppercase text-green-700"
-                            title={entry.locked_at ? `${t('Locked on')} ${entry.locked_at}` : t('Locked')}
-                          >
-                            <Lock className="mr-0.5 inline h-2.5 w-2.5" />
-                            {t('Locked')}
-                          </Badge>
-                        ) : (
-                          <Badge className="border-0 bg-slate-100 px-1.5 py-0.5 text-[9px] uppercase text-slate-500">
-                            {t('Open')}
-                          </Badge>
-                        )}
-                        {entry.payslip_number && (
-                          <div className="mt-0.5 text-[9px] font-normal normal-case text-green-700">{entry.payslip_number}</div>
-                        )}
+                      <TableCell className="min-w-0 px-2 py-1.5 align-top">
+                        <div className="flex items-start gap-1.5 min-w-0">
+                          {entry.is_locked && <Lock className="mt-0.5 h-3 w-3 shrink-0 text-green-600" />}
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-xs font-semibold text-slate-900">{entry.name}</div>
+                            <div className="truncate text-[10px] text-slate-500">
+                              {entry.employee_code || '—'}
+                              {(entry.category || entry.shift) && (
+                                <> · {[entry.category, entry.shift].filter(Boolean).join(' · ')}</>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </TableCell>
-                      <TableCell className="text-xs">{entry.category || '—'}</TableCell>
-                      <TableCell className="text-xs">{entry.shift || '—'}</TableCell>
-                      <TableCell className="text-right text-xs">₹{formatRupee(entry.monthly_gross)}</TableCell>
-                      <TableCell className="text-right text-xs">₹{formatRupee(entry.basic)}</TableCell>
-                      <TableCell className="text-right">
-                        <StatutoryAmountCell
-                          enabled={!!entry.pf_enabled}
-                          amount={entry.pf_employee}
-                          formatRupee={formatRupee}
-                        />
+                      {usesAttendance && (
+                        <TableCell className="whitespace-nowrap px-1 py-1.5">
+                          <AttendanceDaysCell entry={entry} t={t} />
+                        </TableCell>
+                      )}
+                      <TableCell className="whitespace-nowrap px-2 py-1.5">
+                        <SalaryCompactCell entry={entry} formatRupee={formatRupee} t={t} />
                       </TableCell>
-                      <TableCell className="text-right">
-                        <StatutoryAmountCell
-                          enabled={!!entry.esi_enabled}
-                          amount={entry.esi_employee}
-                          formatRupee={formatRupee}
-                        />
-                      </TableCell>
-                      <TableCell className="text-right text-xs">₹{formatRupee(entry.pt_amount)}</TableCell>
-                      <TableCell className="text-right text-xs font-semibold text-primary">₹{formatRupee(entry.net_salary)}</TableCell>
-                      {(showRowActions || (showPayslipActions && entry.can_download_payslip)) && (
-                        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-end gap-0.5">
+                      {(showRowActions || showPayslipActions) && (
+                        <TableCell className="whitespace-nowrap px-1 py-1.5 text-right" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-end gap-0">
                             {entry.can_download_payslip && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-green-700 hover:bg-green-50 hover:text-green-800"
-                                title={entry.payslip_number ? t('Download payslip {{no}}', { no: entry.payslip_number }) : t('Download payslip')}
-                                onClick={() => handleDownloadPayslip(entry.id)}
-                              >
-                                <FileDown className="h-4 w-4" />
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-green-700" title={t('Download payslip')} onClick={() => handleDownloadPayslip(entry.id)}>
+                                <FileDown className="h-3.5 w-3.5" />
                               </Button>
                             )}
                             {canManage && !entry.is_locked && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-primary hover:bg-primary/10 hover:text-primary"
-                                title={t('Regenerate this employee')}
-                                disabled={regeneratingEntryId === entry.id || isRegenerating}
-                                onClick={() => setEntryRegenerateTarget({ id: entry.id, name: entry.name })}
-                              >
-                                {regeneratingEntryId === entry.id
-                                  ? <Loader2 className="h-4 w-4 animate-spin" />
-                                  : <RefreshCw className="h-4 w-4" />}
-                              </Button>
-                            )}
-                            {canManage && entry.is_locked && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 cursor-not-allowed text-slate-300"
-                                title={t('Locked — cannot regenerate')}
-                                disabled
-                              >
-                                <RefreshCw className="h-4 w-4" />
-                              </Button>
-                            )}
-                            {canFinalize && entry.is_locked && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 cursor-default text-green-600"
-                                title={t('Already locked')}
-                                disabled
-                              >
-                                <Lock className="h-4 w-4" />
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-primary" title={t('Regenerate')} disabled={regeneratingEntryId === entry.id || isRegenerating} onClick={() => setEntryRegenerateTarget({ id: entry.id, name: entry.name })}>
+                                {regeneratingEntryId === entry.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                               </Button>
                             )}
                             {canFinalize && !entry.is_locked && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-amber-600 hover:bg-amber-50 hover:text-amber-700"
-                                title={t('Lock this employee')}
-                                disabled={lockingEntryId === entry.id}
-                                onClick={() => setEntryLockTarget({ id: entry.id, name: entry.name })}
-                              >
-                                {lockingEntryId === entry.id
-                                  ? <Loader2 className="h-4 w-4 animate-spin" />
-                                  : <Lock className="h-4 w-4" />}
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-amber-600" title={t('Lock')} disabled={lockingEntryId === entry.id} onClick={() => setEntryLockTarget({ id: entry.id, name: entry.name })}>
+                                {lockingEntryId === entry.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lock className="h-3.5 w-3.5" />}
                               </Button>
                             )}
                           </div>
@@ -697,9 +757,15 @@ export default function PayrollGenerateShow() {
                       )}
                     </TableRow>
                     {isExpanded && (
-                      <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={tableColSpan} className="p-0">
-                          <PayrollEntryBreakdownPanel entry={entry} />
+                      <TableRow className="hover:bg-transparent bg-slate-50/50">
+                        <TableCell colSpan={tableColSpan} className="w-full p-0">
+                          <div className="w-full border-t border-slate-200">
+                            <PayrollEntryBreakdownPanel
+                              entry={entry}
+                              runUsesAttendance={usesAttendance}
+                              onClose={() => toggleEntryExpand(entry.id)}
+                            />
+                          </div>
                         </TableCell>
                       </TableRow>
                     )}
@@ -708,7 +774,6 @@ export default function PayrollGenerateShow() {
               })}
             </TableBody>
           </Table>
-        </div>
         {(entries?.total ?? 0) > 0 && (
           <Pagination
             from={entries.from ?? 0}

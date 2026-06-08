@@ -59,6 +59,24 @@ class PayrollParameter extends Model
         return (float) ($params->pf_admin_charge_pct ?? 1);
     }
 
+    public static function pfEpsPct(?self $params): float
+    {
+        if (! $params) {
+            return 8.33;
+        }
+
+        return (float) ($params->pf_pct ?? 8.33);
+    }
+
+    public static function pfEpEmployerSharePct(?self $params): float
+    {
+        if (! $params) {
+            return 3.67;
+        }
+
+        return (float) ($params->fpf_pct ?? 3.67);
+    }
+
     public static function pfEmployerPct(?self $params): float
     {
         return static::pfEmployerCorePct($params) + static::pfAdminChargePct($params);

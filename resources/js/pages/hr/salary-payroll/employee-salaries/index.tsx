@@ -188,6 +188,51 @@ function formatRupee(value: number) {
   return Number(value).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
+type GrossInputMode = 'day' | 'month';
+
+function getEmployeeWorkingDays(emp: any): number {
+  const daily = Boolean(emp?.employee?.daily_option ?? emp?.daily_option);
+  const days = Number(emp?.employee?.working_days ?? emp?.working_days);
+  if (days > 0) return days;
+  return daily ? 1 : 26;
+}
+
+/** Day/month follows employee profile (Daily Option + Working Days). */
+function grossInputModeFromEmployee(emp: any): GrossInputMode {
+  return (emp?.employee?.daily_option ?? emp?.daily_option) ? 'day' : 'month';
+}
+
+function grossDisplayAfterDailyToggle(emp: any, currentInput: string, newDailyOption: boolean): string {
+  const amount = Number(currentInput);
+  if (!amount || amount <= 0) return currentInput;
+  const monthlyGross = resolveGrossForSplit(amount, emp);
+  const newDays = newDailyOption ? 1 : 26;
+  if (newDailyOption) {
+    return String(Math.round((monthlyGross / newDays) * 100) / 100);
+  }
+  return String(Math.round(monthlyGross));
+}
+
+function resolveGrossForSplit(amount: number, emp: any): number {
+  if (!amount || amount <= 0) return 0;
+  if (grossInputModeFromEmployee(emp) === 'day') {
+    return amount * getEmployeeWorkingDays(emp);
+  }
+  return amount;
+}
+
+function grossDisplayForEmployee(emp: any): string {
+  const record = emp?.salary_record;
+  if (!record) return '';
+  const monthly = Number(record.monthly_gross ?? 0);
+  if (monthly <= 0) return '';
+  if (grossInputModeFromEmployee(emp) === 'day') {
+    const perDay = monthly / getEmployeeWorkingDays(emp);
+    return String(Math.round(perDay * 100) / 100);
+  }
+  return String(Math.round(monthly));
+}
+
 export default function SalaryPayrollEmployeeSalaries() {
   const { t } = useTranslation();
   const {
@@ -216,6 +261,7 @@ export default function SalaryPayrollEmployeeSalaries() {
   const [items, setItems] = useState<any[]>([]);
   const [grossInputs, setGrossInputs] = useState<Record<number, string>>({});
   const [savingIds, setSavingIds] = useState<Set<number>>(new Set());
+  const [togglingDailyIds, setTogglingDailyIds] = useState<Set<number>>(new Set());
   const [isSearching, setIsSearching] = useState(false);
   const skipDebounce = useRef(true);
 
@@ -253,9 +299,7 @@ export default function SalaryPayrollEmployeeSalaries() {
     setIsSearching(false);
     const drafts: Record<number, string> = {};
     data.forEach((emp: any) => {
-      drafts[emp.id] = emp.salary_record?.monthly_gross
-        ? String(emp.salary_record.monthly_gross)
-        : '';
+      drafts[emp.id] = grossDisplayForEmployee(emp);
     });
     setGrossInputs(drafts);
   }, [employees]);
@@ -319,10 +363,10 @@ export default function SalaryPayrollEmployeeSalaries() {
   };
 
   const getSplitForEmployee = useCallback((emp: any, grossValue: string) => {
-    const gross = Number(grossValue);
-    if (!gross || gross <= 0 || salaryComponents.length === 0) return null;
+    const grossForSplit = resolveGrossForSplit(Number(grossValue), emp);
+    if (!grossForSplit || grossForSplit <= 0 || salaryComponents.length === 0) return null;
     const employeeComponents = resolveComponentsForEmployee(salaryComponents, emp.extra_salary_component_ids);
-    return splitGrossFromComponents(gross, employeeComponents, {
+    return splitGrossFromComponents(grossForSplit, employeeComponents, {
       applyPf: Boolean(emp.pf_applicable),
       applyEsi: Boolean(emp.esi_applicable),
     });
@@ -332,8 +376,8 @@ export default function SalaryPayrollEmployeeSalaries() {
     const gross = Number(grossValue);
     if (!gross || gross <= 0) return;
 
-    const savedGross = emp.salary_record?.monthly_gross;
-    if (savedGross && Number(savedGross) === gross) return;
+    const savedDisplay = grossDisplayForEmployee(emp);
+    if (savedDisplay && Number(savedDisplay) === gross) return;
 
     setSavingIds((prev) => new Set(prev).add(emp.id));
 
@@ -346,7 +390,7 @@ export default function SalaryPayrollEmployeeSalaries() {
 
     router[method](route(routeName, routeParams), {
       employee_id: emp.id,
-      monthly_gross: grossValue,
+      gross_amount: grossValue,
     }, {
       preserveScroll: true,
       preserveState: true,
@@ -380,6 +424,66 @@ export default function SalaryPayrollEmployeeSalaries() {
     }
   };
 
+  const patchEmployeeDailyProfile = (empId: number, dailyOption: boolean, workingDays: number) => {
+    setItems((prev) => prev.map((e) => (e.id === empId ? {
+      ...e,
+      daily_option: dailyOption,
+      working_days: workingDays,
+      employee: {
+        ...e.employee,
+        daily_option: dailyOption,
+        working_days: workingDays,
+      },
+    } : e)));
+  };
+
+  const handleDailyOptionToggle = (emp: any, checked: boolean) => {
+    if (!canSave) return;
+
+    const workingDays = checked ? 1 : 26;
+    const currentInput = grossInputs[emp.id] ?? '';
+    const newDisplay = grossDisplayAfterDailyToggle(emp, currentInput, checked);
+    const updatedEmp = {
+      ...emp,
+      daily_option: checked,
+      working_days: workingDays,
+      employee: { ...emp.employee, daily_option: checked, working_days: workingDays },
+    };
+
+    patchEmployeeDailyProfile(emp.id, checked, workingDays);
+    if (newDisplay !== currentInput) {
+      setGrossInputs((prev) => ({ ...prev, [emp.id]: newDisplay }));
+    }
+
+    setTogglingDailyIds((prev) => new Set(prev).add(emp.id));
+
+    router.patch(route('hr.salary-payroll.employee-salary.daily-option', emp.id), {
+      daily_option: checked,
+    }, {
+      preserveScroll: true,
+      preserveState: true,
+      onSuccess: () => {
+        if (newDisplay && Number(newDisplay) > 0 && emp.salary_record) {
+          saveEmployeeGross(updatedEmp, newDisplay);
+        } else {
+          toast.success(t('Daily option updated'));
+        }
+      },
+      onError: () => {
+        patchEmployeeDailyProfile(emp.id, !checked, !checked ? 1 : 26);
+        setGrossInputs((prev) => ({ ...prev, [emp.id]: currentInput }));
+        toast.error(t('Failed to update daily option'));
+      },
+      onFinish: () => {
+        setTogglingDailyIds((prev) => {
+          const next = new Set(prev);
+          next.delete(emp.id);
+          return next;
+        });
+      },
+    });
+  };
+
   const openHistory = async (emp: any) => {
     setHistoryEmployee(emp);
     setHistoryOpen(true);
@@ -407,7 +511,8 @@ export default function SalaryPayrollEmployeeSalaries() {
 
   const incrementPreviewGross = useMemo(() => {
     if (!incrementEmployee || !incrementValue) return null;
-    const current = Number(grossInputs[incrementEmployee.id] ?? incrementEmployee.salary_record?.monthly_gross ?? 0);
+    const displayAmount = Number(grossInputs[incrementEmployee.id] ?? grossDisplayForEmployee(incrementEmployee) ?? 0);
+    const current = resolveGrossForSplit(displayAmount, incrementEmployee);
     const value = Number(incrementValue);
     if (!value || value <= 0) return null;
     if (incrementMode === 'percentage') return Math.round(current * (1 + value / 100));
@@ -545,8 +650,12 @@ export default function SalaryPayrollEmployeeSalaries() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex items-start gap-2">
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <p className="text-xs text-foreground/80">
-                {t('Default = Primary group. Customize to add custom components on top of primary.')}
+              <p className="text-xs leading-relaxed text-foreground/80">
+                {t('How to enter salary:')}{' '}
+                <span className="font-bold text-amber-700">{t('Daily')}</span>
+                {t(' = enter one day\'s pay (daily wage workers).')}{' '}
+                <span className="font-bold text-blue-700">{t('Monthly')}</span>
+                {t(' = enter full month pay (staff / fixed salary). BASIC, HRA & LTA auto-calculate below.')}
               </p>
             </div>
             {canSave && (
@@ -639,7 +748,14 @@ export default function SalaryPayrollEmployeeSalaries() {
                   <th className="hidden px-3 py-2 md:table-cell">{t('Category')}</th>
                   <th className="hidden px-3 py-2 lg:table-cell">{t('Department')}</th>
                   <th className="hidden px-3 py-2 sm:table-cell">{t('Shift')}</th>
-                  <th className="min-w-[120px] px-3 py-2">{t('Gross (₹)')}</th>
+                  <th className="min-w-[188px] px-3 py-2">
+                    <div>{t('Gross Salary')}</div>
+                    <div className="mt-1 flex items-center gap-1 text-[9px] font-normal normal-case tracking-normal text-muted-foreground">
+                      <span className="rounded-sm bg-amber-500 px-1.5 py-0.5 font-bold text-white">{t('Daily')}</span>
+                      <span className="text-[8px]">{t('or')}</span>
+                      <span className="rounded-sm bg-blue-600 px-1.5 py-0.5 font-bold text-white">{t('Monthly')}</span>
+                    </div>
+                  </th>
                   {tableComponents.map((comp) => (
                     <th
                       key={comp.id}
@@ -669,8 +785,14 @@ export default function SalaryPayrollEmployeeSalaries() {
                   </tr>
                 ) : items.map((emp, index) => {
                   const grossValue = grossInputs[emp.id] ?? '';
+                  const isDayWise = grossInputModeFromEmployee(emp) === 'day';
+                  const workingDays = getEmployeeWorkingDays(emp);
+                  const grossForSplit = resolveGrossForSplit(Number(grossValue), emp);
                   const split = getSplitForEmployee(emp, grossValue);
                   const isSaving = savingIds.has(emp.id);
+                  const isTogglingDaily = togglingDailyIds.has(emp.id);
+                  const dailyOption = Boolean(emp.employee?.daily_option ?? emp.daily_option);
+                  const grossDisabled = !canSave || isSaving || isTogglingDaily;
 
                   return (
                   <tr key={emp.id} className="border-b border-border/60 hover:bg-muted/40">
@@ -691,20 +813,90 @@ export default function SalaryPayrollEmployeeSalaries() {
                       {emp.employee?.shift?.name || '—'}
                     </td>
                     <td className="px-3 py-2">
-                      <div className="relative flex items-center gap-1">
-                        <Input
-                          type="number"
-                          min="0"
-                          step="1"
-                          disabled={!canSave || isSaving}
-                          value={grossValue}
-                          onChange={(e) => handleGrossChange(emp.id, e.target.value)}
-                          onBlur={() => handleGrossBlur(emp)}
-                          onKeyDown={handleGrossKeyDown}
-                          placeholder={t('Enter gross')}
-                          className="h-8 w-[110px] border-input bg-background text-sm font-semibold tabular-nums shadow-none"
-                        />
-                        {isSaving && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />}
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-1.5">
+                          {/* Day | Month segmented control */}
+                          <div
+                            className="flex shrink-0 flex-col rounded-md border border-slate-200 bg-slate-100 p-0.5 shadow-inner"
+                            role="group"
+                            aria-label={t('Salary entry type')}
+                          >
+                            <button
+                              type="button"
+                              disabled={grossDisabled}
+                              aria-pressed={dailyOption}
+                              title={t('Enter per-day wage')}
+                              onClick={() => !dailyOption && handleDailyOptionToggle(emp, true)}
+                              className={cn(
+                                'rounded px-1.5 py-0.5 text-[9px] font-bold leading-tight transition-all',
+                                dailyOption
+                                  ? 'bg-amber-500 text-white shadow-sm'
+                                  : 'text-slate-600 hover:bg-white hover:text-slate-900',
+                                grossDisabled && 'cursor-not-allowed opacity-60',
+                              )}
+                            >
+                              {t('Daily')}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={grossDisabled}
+                              aria-pressed={!dailyOption}
+                              title={t('Enter full month salary')}
+                              onClick={() => dailyOption && handleDailyOptionToggle(emp, false)}
+                              className={cn(
+                                'rounded px-1.5 py-0.5 text-[9px] font-bold leading-tight transition-all',
+                                !dailyOption
+                                  ? 'bg-blue-600 text-white shadow-sm'
+                                  : 'text-slate-600 hover:bg-white hover:text-slate-900',
+                                grossDisabled && 'cursor-not-allowed opacity-60',
+                              )}
+                            >
+                              {t('Monthly')}
+                            </button>
+                          </div>
+
+                          <div
+                            className="relative flex h-8 min-w-[80px] flex-1 items-center rounded-md border border-slate-200 bg-white pl-1.5 pr-7 shadow-sm"
+                            title={dailyOption ? t('Amount per day') : t('Amount per month')}
+                          >
+                            <span className="text-[10px] font-bold text-slate-400">₹</span>
+                            <Input
+                              type="number"
+                              min="0"
+                              step={isDayWise ? '0.01' : '1'}
+                              disabled={grossDisabled}
+                              value={grossValue}
+                              onChange={(e) => handleGrossChange(emp.id, e.target.value)}
+                              onBlur={() => handleGrossBlur(emp)}
+                              onKeyDown={handleGrossKeyDown}
+                              placeholder={dailyOption ? t('Per day') : t('Per month')}
+                              aria-label={dailyOption ? t('Daily gross amount') : t('Monthly gross amount')}
+                              className="h-full min-w-0 flex-1 border-0 bg-transparent p-0 pl-0.5 text-sm font-bold tabular-nums shadow-none focus-visible:ring-0"
+                            />
+                            <span className={cn(
+                              'pointer-events-none absolute right-1.5 text-[9px] font-bold',
+                              dailyOption ? 'text-amber-600' : 'text-blue-600',
+                            )}>
+                              {dailyOption ? t('/day') : t('/mo')}
+                            </span>
+                            {(isSaving || isTogglingDaily) && (
+                              <Loader2 className="absolute -right-4 h-3 w-3 animate-spin text-primary" />
+                            )}
+                          </div>
+                        </div>
+                        <p className={cn(
+                          'truncate pl-0.5 text-[9px] font-medium leading-tight',
+                          dailyOption ? 'text-amber-700' : 'text-blue-700',
+                        )}>
+                          {dailyOption
+                            ? (workingDays === 1
+                              ? t('One day\'s pay → Basic on 1 day')
+                              : t('Daily × {{days}} days = ₹{{total}}/month', {
+                                days: workingDays,
+                                total: grossForSplit > 0 ? formatRupee(grossForSplit) : '—',
+                              }))
+                            : t('Full month salary ({{days}} days)', { days: workingDays })}
+                        </p>
                       </div>
                     </td>
                     {tableComponents.map((comp) => {
@@ -843,7 +1035,12 @@ export default function SalaryPayrollEmployeeSalaries() {
               <div className="rounded-lg bg-muted/60 px-3 py-2 text-sm">
                 <p className="font-semibold text-foreground">{incrementEmployee.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  {t('Current gross')}: ₹{formatRupee(Number(grossInputs[incrementEmployee.id] ?? incrementEmployee.salary_record?.monthly_gross ?? 0))}
+                  {t('Current gross')}: ₹{formatRupee(
+                    resolveGrossForSplit(
+                      Number(grossInputs[incrementEmployee.id] ?? grossDisplayForEmployee(incrementEmployee) ?? 0),
+                      incrementEmployee,
+                    ),
+                  )} {t('monthly')}
                 </p>
               </div>
               <div className="space-y-1.5">

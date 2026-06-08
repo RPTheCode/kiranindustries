@@ -132,6 +132,9 @@ export default function PayrollGenerateCreate() {
   const [monthYear, setMonthYear] = useState(existingRun?.month_year || defaultMonthYear || '');
   const [customStart, setCustomStart] = useState(existingRun?.pay_period_start || '');
   const [customEnd, setCustomEnd] = useState(existingRun?.pay_period_end || '');
+  const [useAttendance, setUseAttendance] = useState(
+    existingRun?.use_attendance !== undefined ? Boolean(existingRun.use_attendance) : true
+  );
   const [scopeMode, setScopeMode] = useState<ScopeMode>(existingRun?.scope_mode || 'all');
   const [categoryIds, setCategoryIds] = useState<number[]>(initialFilters.category_ids || []);
   const [shiftIds, setShiftIds] = useState<number[]>(initialFilters.shift_ids || []);
@@ -215,7 +218,8 @@ export default function PayrollGenerateCreate() {
     employee_ids: scopeMode === 'employee' ? employeeIds : [],
     department_ids: departmentId !== 'all' ? [Number(departmentId)] : [],
     search: searchTerm || undefined,
-  }), [periodMode, financialYear, monthYear, customStart, customEnd, scopeMode, categoryIds, shiftIds, employeeIds, departmentId, searchTerm]);
+    use_attendance: useAttendance,
+  }), [periodMode, financialYear, monthYear, customStart, customEnd, scopeMode, categoryIds, shiftIds, employeeIds, departmentId, searchTerm, useAttendance]);
 
   const toggleId = (list: number[], id: number, checked: boolean) =>
     checked ? [...list, id] : list.filter((x) => x !== id);
@@ -590,6 +594,22 @@ export default function PayrollGenerateCreate() {
         {periodMode === 'custom' && customStart && customEnd && customEnd < customStart && (
           <p className="mt-2 text-xs text-red-600">{t('End date must be on or after start date')}</p>
         )}
+
+        <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50/60 px-3 py-3">
+          <label className="flex cursor-pointer items-start gap-3">
+            <Checkbox
+              checked={useAttendance}
+              onCheckedChange={(v) => setUseAttendance(Boolean(v))}
+              className="mt-0.5"
+            />
+            <div>
+              <p className="text-xs font-bold text-slate-800">{t('Use attendance for salary')}</p>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-slate-600">
+                {t('When ON: pay is calculated from biometric present days (working days → present → paid). Mispunch (MIS) days are flagged — fix in Attendance Sync before locking payroll.')}
+              </p>
+            </div>
+          </label>
+        </div>
 
         {step === 1 && (
           <div className="mt-4 flex justify-end">

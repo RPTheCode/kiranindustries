@@ -76,12 +76,17 @@ class SalaryPayrollEmployeeSalaryController extends Controller
             $user->salary_record = $salary ? [
                 'id' => $salary->id,
                 'monthly_gross' => (float) ($salary->monthly_gross ?? $salary->basic_salary ?? 0),
+                'gross_input_mode' => $this->grossInputModeForProfile($emp),
+                'per_day_salary' => (float) ($salary->per_day_salary ?? 0),
+                'gross_display_amount' => $this->grossDisplayAmount($salary, $emp),
                 'net_salary' => $this->netFromRecord($salary),
                 'is_active' => (bool) $salary->is_active,
             ] : null;
             $user->pf_applicable = (bool) ($emp?->pf_flag ?? false);
             $user->esi_applicable = (bool) ($emp?->esic_flag ?? false);
             $user->extra_salary_component_ids = $emp?->extra_salary_component_ids ?? [];
+            $user->daily_option = (bool) ($emp?->daily_option ?? false);
+            $user->working_days = $this->workingDaysFromProfile($emp);
 
             return $user;
         });
@@ -201,7 +206,10 @@ class SalaryPayrollEmployeeSalaryController extends Controller
     public function calculate(Request $request)
     {
         $validated = $request->validate([
-            'monthly_gross' => 'required|numeric|min:0',
+            'monthly_gross' => 'nullable|numeric|min:0',
+            'gross_amount' => 'nullable|numeric|min:0',
+            'gross_input_mode' => 'nullable|in:day,month',
+            'working_days' => 'nullable|integer|min:1|max:31',
             'employee_id' => 'nullable|exists:users,id',
         ]);
 
@@ -212,9 +220,17 @@ class SalaryPayrollEmployeeSalaryController extends Controller
             return response()->json(['error' => __('No active salary components for this branch.')], 422);
         }
 
+        $workingDays = $this->workingDaysForEmployee($validated['employee_id'] ?? null, $validated['working_days'] ?? null);
+        $grossInputMode = $this->grossInputModeForEmployee($validated['employee_id'] ?? null);
+        $monthlyGross = $this->resolveMonthlyGross(
+            (float) ($validated['gross_amount'] ?? $validated['monthly_gross'] ?? 0),
+            $grossInputMode,
+            $workingDays
+        );
+
         return response()->json(
             $this->calculator->splitFromGross(
-                (float) $validated['monthly_gross'],
+                $monthlyGross,
                 $this->componentsForEmployeeId($components, $validated['employee_id'] ?? null),
                 $this->statutoryOptionsForEmployee($validated['employee_id'] ?? null)
             )
@@ -261,6 +277,44 @@ class SalaryPayrollEmployeeSalaryController extends Controller
         }
 
         return redirect()->back()->with('success', __('Salary components updated for employee.'));
+    }
+
+    public function updateDailyOption(Request $request, $employeeId)
+    {
+        $branchId = session('active_branch_id');
+
+        $validated = $request->validate([
+            'daily_option' => 'required|boolean',
+        ]);
+
+        $employee = User::with('employee')->where('id', $employeeId)
+            ->where('type', 'employee')
+            ->whereIn('created_by', getCompanyAndUsersId())
+            ->firstOrFail();
+
+        if ($branchId && $employee->employee?->branch_id != $branchId) {
+            return redirect()->back()->with('error', __('Employee does not belong to the active branch.'));
+        }
+
+        $dailyOption = (bool) $validated['daily_option'];
+        $workingDays = $dailyOption ? 1 : 26;
+
+        $employee->employee?->update([
+            'daily_option' => $dailyOption,
+            'working_days' => $workingDays,
+        ]);
+
+        $salary = EmployeeSalary::where('employee_id', $employeeId)->first();
+        if ($salary) {
+            $salary->update([
+                'gross_input_mode' => $dailyOption ? 'day' : 'month',
+                'per_day_salary' => $dailyOption && (float) ($salary->monthly_gross ?? 0) > 0
+                    ? round((float) $salary->monthly_gross / max(1, $workingDays), 2)
+                    : ($salary->per_day_salary ?? null),
+            ]);
+        }
+
+        return redirect()->back()->with('success', __('Daily option updated.'));
     }
 
     public function store(Request $request)
@@ -325,7 +379,9 @@ class SalaryPayrollEmployeeSalaryController extends Controller
 
         $validated = $request->validate([
             'employee_id' => 'required|exists:users,id',
-            'monthly_gross' => 'required|numeric|min:0',
+            'monthly_gross' => 'nullable|numeric|min:0',
+            'gross_amount' => 'nullable|numeric|min:0',
+            'gross_input_mode' => 'nullable|in:day,month',
             'notes' => 'nullable|string|max:1000',
         ]);
 
@@ -339,8 +395,20 @@ class SalaryPayrollEmployeeSalaryController extends Controller
             return redirect()->back()->with('error', __('No active salary components for this branch.'));
         }
 
+        $grossInputMode = $this->grossInputModeForEmployee((int) $validated['employee_id']);
+        $grossAmount = (float) ($validated['gross_amount'] ?? $validated['monthly_gross'] ?? 0);
+        if ($grossAmount <= 0) {
+            return redirect()->back()->with('error', __('Gross salary amount is required.'));
+        }
+
+        $workingDays = $this->workingDaysForEmployee((int) $validated['employee_id']);
+        $monthlyGross = $this->resolveMonthlyGross($grossAmount, $grossInputMode, $workingDays);
+        $perDaySalary = $grossInputMode === 'day'
+            ? round($grossAmount, 2)
+            : round($monthlyGross / max(1, $workingDays), 2);
+
         $split = $this->calculator->splitFromGross(
-            (float) $validated['monthly_gross'],
+            $monthlyGross,
             $this->componentsForEmployeeId($components, (int) $validated['employee_id']),
             $this->statutoryOptionsForEmployee($validated['employee_id'])
         );
@@ -357,7 +425,86 @@ class SalaryPayrollEmployeeSalaryController extends Controller
             'notes' => $validated['notes'] ?? ($revisionType === 'joining' ? __('Initial salary from joining date') : null),
         ], $salaryId);
 
+        EmployeeSalary::where('employee_id', $validated['employee_id'])->update([
+            'gross_input_mode' => $grossInputMode,
+            'per_day_salary' => $perDaySalary,
+        ]);
+
         return redirect()->back()->with('success', __('Employee salary saved successfully.'));
+    }
+
+    private function grossDisplayAmount(?EmployeeSalary $salary, $empProfile): float
+    {
+        if (! $salary) {
+            return 0;
+        }
+
+        $monthly = (float) ($salary->monthly_gross ?? $salary->basic_salary ?? 0);
+        if ($monthly <= 0) {
+            return 0;
+        }
+
+        if ($this->grossInputModeForProfile($empProfile) === 'day') {
+            $days = $this->workingDaysFromProfile($empProfile);
+
+            return round($monthly / max(1, $days), 2);
+        }
+
+        return $monthly;
+    }
+
+    private function grossInputModeForProfile($empProfile): string
+    {
+        return ($empProfile?->daily_option ?? false) ? 'day' : 'month';
+    }
+
+    private function grossInputModeForEmployee(?int $userId): string
+    {
+        if (! $userId) {
+            return 'month';
+        }
+
+        $employee = User::with('employee')->find($userId);
+
+        return $this->grossInputModeForProfile($employee?->employee);
+    }
+
+    private function workingDaysFromProfile($empProfile): int
+    {
+        $days = (int) ($empProfile?->working_days ?? 0);
+        if ($days > 0) {
+            return $days;
+        }
+
+        return ($empProfile?->daily_option ?? false) ? 1 : 26;
+    }
+
+    private function workingDaysForEmployee(?int $userId, ?int $override = null): int
+    {
+        if ($override && $override > 0) {
+            return $override;
+        }
+
+        if (! $userId) {
+            return 26;
+        }
+
+        $employee = User::with('employee')->find($userId);
+
+        return $this->workingDaysFromProfile($employee?->employee);
+    }
+
+    private function resolveMonthlyGross(float $amount, string $mode, int $workingDays): float
+    {
+        if ($amount <= 0) {
+            return 0;
+        }
+
+        if ($mode === 'day') {
+            return round($amount * max(1, $workingDays), 2);
+        }
+
+        return round($amount, 2);
     }
 
     private function statutoryOptionsForEmployee(?int $userId): array

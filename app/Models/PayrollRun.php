@@ -718,11 +718,11 @@ class PayrollRun extends BaseModel
             }
 
             $pfBase = min($pfBase, $maxPfAmount);
-            $pfAmountEmployee = round(($pfBase * $pfPercentage) / 100, 2);
+            $pfAmountEmployee = round(($pfBase * $pfPercentage) / 100, 0);
             if ($emp->pfMaster) {
-                $pfAmountEmployer = round($pfBase * (PayrollParameter::pfEmployerPct($payrollParams) / 100), 2);
+                $pfAmountEmployer = round($pfBase * (PayrollParameter::pfEmployerPct($payrollParams) / 100), 0);
             } elseif ($payrollParams) {
-                $pfAmountEmployer = round($pfBase * (PayrollParameter::pfEmployerPct($payrollParams) / 100), 2);
+                $pfAmountEmployer = round($pfBase * (PayrollParameter::pfEmployerPct($payrollParams) / 100), 0);
             }
         }
 

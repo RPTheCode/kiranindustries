@@ -5,6 +5,7 @@ namespace App\Http\Controllers\SalaryPayroll;
 use App\Http\Controllers\Controller;
 use App\Models\Category;
 use App\Models\Department;
+use App\Models\PayrollParameter;
 use App\Models\SalaryPayroll\SalaryPayrollEntry;
 use App\Models\SalaryPayroll\SalaryPayrollRun;
 use App\Models\Shift;
@@ -206,11 +207,17 @@ class SalaryPayrollGenerateController extends Controller
             ->paginate($perPage)
             ->withQueryString();
 
-        $entries->getCollection()->transform(fn ($entry) => $this->formatEntry($entry));
+        $entries->getCollection()->transform(fn ($entry) => $this->formatEntry($entry, $salaryPayrollRun));
+
+        $mispunchCount = SalaryPayrollEntry::query()
+            ->where('salary_payroll_run_id', $salaryPayrollRun->id)
+            ->where('has_mispunch', true)
+            ->count();
 
         return Inertia::render('hr/salary-payroll/payroll-generate/show', [
             'run' => $this->formatRun($salaryPayrollRun),
             'entries' => $entries,
+            'mispunch_count' => $mispunchCount,
             'filters' => $request->only(['search', 'per_page', 'category_id', 'shift_id', 'department_id', 'lock_status']),
             'categories' => $this->branchCategories($branchId),
             'departments' => $this->branchDepartments($branchId),
@@ -419,6 +426,7 @@ class SalaryPayrollGenerateController extends Controller
             'department_ids' => 'nullable|array',
             'department_ids.*' => 'integer',
             'search' => 'nullable|string|max:100',
+            'use_attendance' => 'nullable|boolean',
         ]);
 
         if ($validated['scope_mode'] === 'category' && empty($validated['category_ids'])) {
@@ -472,6 +480,7 @@ class SalaryPayrollGenerateController extends Controller
             'scope_mode' => $run->scope_mode,
             'scope_label' => $run->scopeLabel(),
             'scope_filters' => $run->scope_filters,
+            'use_attendance' => (bool) ($run->use_attendance ?? true),
             'status' => $run->status,
             'is_locked' => $run->isFinalized(),
             'locked_entry_count' => $this->runService->lockedEntryCount($run),
@@ -494,7 +503,7 @@ class SalaryPayrollGenerateController extends Controller
         ];
     }
 
-    private function formatEntry(SalaryPayrollEntry $entry): array
+    private function formatEntry(SalaryPayrollEntry $entry, ?SalaryPayrollRun $run = null): array
     {
         return [
             'id' => $entry->id,
@@ -508,16 +517,32 @@ class SalaryPayrollGenerateController extends Controller
             'esi_enabled' => (bool) ($entry->employee?->employee?->esic_flag ?? false),
             'pf_basic_salary' => (float) ($entry->employee?->employee?->pf_basic_salary ?? 0),
             'monthly_gross' => (float) $entry->monthly_gross,
+            'daily_option' => (bool) ($entry->employee?->employee?->daily_option ?? false),
+            'employee_working_days' => (float) ($entry->employee?->employee?->working_days ?? 0),
+            'working_days' => (float) ($entry->working_days ?? 26),
+            'present_days' => (float) ($entry->present_days ?? 0),
+            'paid_days' => (float) ($entry->paid_days ?? 0),
+            'ot_enabled' => (bool) ($entry->ot_enabled ?? $entry->employee?->employee?->ot_flag ?? false),
+            'incentive_days' => (float) ($entry->incentive_days ?? 0),
+            'incentive_amount' => (float) ($entry->incentive_amount ?? 0),
+            'incentive_per_day_rate' => $this->incentivePerDayRateForEntry($entry),
+            'regular_earnings' => $this->regularEarningsForEntry($entry),
+            'mispunch_count' => (int) ($entry->mispunch_count ?? 0),
+            'has_mispunch' => (bool) ($entry->has_mispunch ?? false),
             'basic' => (float) $entry->basic,
             'total_earnings' => (float) $entry->total_earnings,
             'total_deductions' => (float) $entry->total_deductions,
             'net_salary' => (float) $entry->net_salary,
             'pf_employee' => (float) $entry->pf_employee,
+            'pf_wages' => (float) ($entry->pf_wages ?: $entry->basic),
             'pf_employer' => (float) $entry->pf_employer,
+            'pf_eps_employer' => (float) ($entry->pf_eps_employer ?? 0),
+            'pf_epf_employer' => (float) ($entry->pf_epf_employer ?? 0),
+            'pf_breakdown' => $this->pfBreakdownForEntry($entry, $run),
             'esi_employee' => (float) $entry->esi_employee,
             'esi_employer' => (float) $entry->esi_employer,
             'pt_amount' => (float) $entry->pt_amount,
-            'earnings_breakdown' => $entry->earnings_breakdown ?? [],
+            'earnings_breakdown' => $this->componentEarningsBreakdown($entry->earnings_breakdown ?? []),
             'deductions_breakdown' => $entry->deductions_breakdown ?? [],
             'status' => $entry->status,
             'error_message' => $entry->error_message,
@@ -528,6 +553,97 @@ class SalaryPayrollGenerateController extends Controller
             'has_payslip' => (bool) $entry->payslip,
             'can_download_payslip' => $entry->isLocked(),
         ];
+    }
+
+    /**
+     * @return array<string, float|int>|null
+     */
+    private function pfBreakdownForEntry(SalaryPayrollEntry $entry, ?SalaryPayrollRun $run = null): ?array
+    {
+        if (! ($entry->employee?->employee?->pf_flag ?? false) || (float) $entry->pf_employee <= 0) {
+            return null;
+        }
+
+        $financialYear = $run?->financial_year ?? $entry->run?->financial_year;
+        $params = PayrollParameter::forFinancialYear($financialYear);
+        $wages = (float) ($entry->pf_wages ?: $entry->basic);
+        $employeePct = PayrollParameter::pfEmployeePct($params);
+        $epsPct = PayrollParameter::pfEpsPct($params);
+        $epfPct = PayrollParameter::pfEpEmployerSharePct($params);
+
+        $eps = (float) $entry->pf_eps_employer;
+        $epfEmployer = (float) $entry->pf_epf_employer;
+        if ($eps <= 0 && $epfEmployer <= 0 && $wages > 0) {
+            $eps = round($wages * $epsPct / 100, 0);
+            $epfEmployer = round($wages * $epfPct / 100, 0);
+        }
+
+        return [
+            'wages' => $wages,
+            'employee_pct' => $employeePct,
+            'employee' => (float) $entry->pf_employee,
+            'eps_pct' => $epsPct,
+            'eps' => $eps,
+            'epf_employer_pct' => $epfPct,
+            'epf_employer' => $epfEmployer,
+        ];
+    }
+
+    /**
+     * @param  array<string, float|int>  $breakdown
+     * @return array<string, float>
+     */
+    private function componentEarningsBreakdown(array $breakdown): array
+    {
+        $filtered = [];
+        foreach ($breakdown as $name => $amount) {
+            if ($this->isIncentiveEarningLine((string) $name)) {
+                continue;
+            }
+            if ((float) $amount > 0) {
+                $filtered[(string) $name] = (float) $amount;
+            }
+        }
+
+        return $filtered;
+    }
+
+    private function isIncentiveEarningLine(string $name): bool
+    {
+        $upper = strtoupper($name);
+
+        return str_contains($upper, 'INCENTIVE')
+            || str_contains($upper, 'PI)')
+            || str_contains($upper, 'OVERTIME SALARY')
+            || str_contains($upper, 'EXTRA DAYS');
+    }
+
+    private function incentivePerDayRateForEntry(SalaryPayrollEntry $entry): float
+    {
+        $incentiveDays = (float) ($entry->incentive_days ?? 0);
+        if ($incentiveDays <= 0) {
+            return 0.0;
+        }
+
+        $workingDays = (float) ($entry->working_days ?? 26);
+        $monthlyGross = (float) $entry->monthly_gross;
+        if ($workingDays <= 0 || $monthlyGross <= 0) {
+            return 0.0;
+        }
+
+        return round($monthlyGross / $workingDays, 2);
+    }
+
+    private function regularEarningsForEntry(SalaryPayrollEntry $entry): float
+    {
+        $incentiveAmount = (float) ($entry->incentive_amount ?? 0);
+        $totalEarnings = (float) $entry->total_earnings;
+
+        if ($incentiveAmount <= 0) {
+            return $totalEarnings;
+        }
+
+        return round(max(0, $totalEarnings - $incentiveAmount), 0);
     }
 
     private function branchCategories(?int $branchId)

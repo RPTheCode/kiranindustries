@@ -283,6 +283,9 @@ class SalaryPayrollRunService
             'title' => $this->buildTitle($period, $branchId),
             'scope_mode' => $scopeMode,
             'scope_filters' => $filters,
+            'use_attendance' => array_key_exists('use_attendance', $data)
+                ? (bool) $data['use_attendance']
+                : true,
             'status' => 'draft',
             'created_by' => Auth::id(),
         ]);
@@ -396,6 +399,9 @@ class SalaryPayrollRunService
             'title' => $this->buildTitle($period, $branchId ?? $run->branch_id),
             'scope_mode' => $scopeMode,
             'scope_filters' => $filters,
+            'use_attendance' => array_key_exists('use_attendance', $data)
+                ? (bool) $data['use_attendance']
+                : ($run->use_attendance ?? true),
             'status' => 'draft',
         ]);
 
@@ -409,7 +415,7 @@ class SalaryPayrollRunService
 
         $run->update([
             'employee_count' => $entries->count(),
-            'total_gross' => round($calculated->sum('monthly_gross'), 2),
+            'total_gross' => round($calculated->sum('total_earnings'), 2),
             'total_net' => round($calculated->sum('net_salary'), 2),
             'total_pf_employee' => round($calculated->sum('pf_employee'), 2),
             'total_pf_employer' => round($calculated->sum('pf_employer'), 2),

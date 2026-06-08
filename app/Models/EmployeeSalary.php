@@ -12,6 +12,7 @@ class EmployeeSalary extends BaseModel
     protected $fillable = [
         'employee_id',
         'monthly_gross',
+        'gross_input_mode',
         'basic_salary',
         'per_day_salary',
         'minimum_wages',
