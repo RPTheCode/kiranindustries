@@ -214,7 +214,7 @@ function EarningsBreakdownPanel({
 
       {hasIncentive && (
         <div className="border-t border-amber-200 bg-amber-50/50 px-2.5 py-2 text-[10px] text-amber-950">
-          <p className="mb-1.5 font-bold uppercase tracking-wide text-amber-900">{t('Production Incentive (PI)')}</p>
+          <p className="mb-1.5 font-bold uppercase tracking-wide text-amber-900">{t('Incentive')}</p>
           <div className="grid gap-1 sm:grid-cols-2">
             <div className="flex justify-between gap-2 rounded bg-white/80 px-2 py-1">
               <span>{t('Month salary')}</span>
