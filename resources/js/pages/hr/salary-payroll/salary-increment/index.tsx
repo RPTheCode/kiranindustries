@@ -26,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { hasPermission } from '@/utils/authorization';
+import { canApplySalaryPayrollIncrement } from '@/utils/authorization';
 import { Combobox } from '@/components/ui/combobox';
 import { Pagination } from '@/components/ui/pagination';
 import {
@@ -69,9 +69,7 @@ export default function SalaryIncrementBulk() {
   } = usePage().props as any;
   const permissions = auth?.permissions || [];
 
-  const canApply = hasPermission(permissions, 'create-employee-salaries')
-    || hasPermission(permissions, 'edit-employee-salaries')
-    || hasPermission(permissions, 'manage-employee-salaries');
+  const canApply = canApplySalaryPayrollIncrement(permissions);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryId, setCategoryId] = useState('all');

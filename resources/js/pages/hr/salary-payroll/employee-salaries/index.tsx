@@ -32,7 +32,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { hasPermission } from '@/utils/authorization';
+import { canCreateSalaryPayrollEmployee, canEditSalaryPayrollEmployee } from '@/utils/authorization';
 import { Pagination } from '@/components/ui/pagination';
 import { Combobox } from '@/components/ui/combobox';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -206,9 +206,7 @@ export default function SalaryPayrollEmployeeSalaries() {
   } = usePage().props as any;
   const permissions = auth?.permissions || [];
 
-  const canSave = hasPermission(permissions, 'create-employee-salaries')
-    || hasPermission(permissions, 'edit-employee-salaries')
-    || hasPermission(permissions, 'manage-employee-salaries');
+  const canSave = canCreateSalaryPayrollEmployee(permissions) || canEditSalaryPayrollEmployee(permissions);
 
   const [searchTerm, setSearchTerm] = useState(pageFilters.search || '');
   const [categoryId, setCategoryId] = useState(pageFilters.category_id || 'all');

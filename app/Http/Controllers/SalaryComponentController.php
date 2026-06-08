@@ -6,6 +6,7 @@ use App\Models\SalaryComponent;
 use App\Models\Branch;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 
 class SalaryComponentController extends Controller
@@ -51,7 +52,32 @@ class SalaryComponentController extends Controller
             $query->orderBy('component_group', 'asc')->orderBy('type', 'asc')->orderBy('name', 'asc');
         }
 
-        $salaryComponents = $query->paginate($request->per_page ?? 100)->withQueryString();
+        $salaryComponents = $query->paginate($request->per_page ?? 10)->withQueryString();
+
+        $structureQuery = SalaryComponent::withPermissionCheck()
+            ->where('status', 'active');
+
+        if ($request->has('branch_id') && ! empty($request->branch_id) && $request->branch_id !== 'all') {
+            $structureQuery->where('branch_id', $request->branch_id);
+        } elseif ($branchId = session('active_branch_id')) {
+            if ($branchId !== 'all') {
+                $structureQuery->where('branch_id', $branchId);
+            }
+        }
+
+        $structureSummaryItems = $structureQuery
+            ->orderBy('component_group')
+            ->orderBy('name')
+            ->get([
+                'id',
+                'name',
+                'type',
+                'calculation_type',
+                'percentage_of_basic',
+                'percentage_of_gross_pay',
+                'component_group',
+                'assign_to_all',
+            ]);
 
         // Get branches for filter
         $branches = Branch::whereIn('created_by', getCompanyAndUsersId())
@@ -65,6 +91,7 @@ class SalaryComponentController extends Controller
 
         return Inertia::render('hr/salary-components/index', [
             'salaryComponents' => $salaryComponents,
+            'structureSummaryItems' => $structureSummaryItems,
             'branches' => $branches,
             'activeBranchId' => $branchId,
             'activeBranchName' => $activeBranchName,
@@ -248,5 +275,130 @@ class SalaryComponentController extends Controller
         } else {
             return redirect()->back()->with('error', __('Salary component Not Found.'));
         }
+    }
+
+    public function copyToBranches(Request $request, $salaryComponentId)
+    {
+        $request->validate([
+            'branch_ids' => 'required|array|min:1',
+            'branch_ids.*' => 'required|integer|exists:branches,id',
+        ]);
+
+        $source = SalaryComponent::withoutGlobalScope(\App\Models\Scopes\BranchScope::class)
+            ->whereIn('created_by', getCompanyAndUsersId())
+            ->where('id', $salaryComponentId)
+            ->first();
+
+        if (! $source) {
+            return redirect()->back()->with('error', __('Salary component not found.'));
+        }
+
+        $successCount = 0;
+        $warnings = [];
+
+        DB::beginTransaction();
+        try {
+            foreach ($request->branch_ids as $branchId) {
+                if ($this->cloneSalaryComponentToBranch($source, (int) $branchId, $warnings)) {
+                    $successCount++;
+                }
+            }
+            DB::commit();
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return redirect()->back()->with('error', $e->getMessage() ?: __('Failed to copy salary component to branches.'));
+        }
+
+        if ($successCount === 0) {
+            return redirect()->back()->with('error', count($warnings) > 0 ? implode(' ', $warnings) : __('No salary components were copied.'));
+        }
+
+        $msg = __(':count salary component(s) successfully copied.', ['count' => $successCount]);
+        if (count($warnings) > 0) {
+            $msg .= ' '.implode(' ', $warnings);
+        }
+
+        return redirect()->back()->with('success', $msg);
+    }
+
+    public function bulkCopyToBranches(Request $request)
+    {
+        $request->validate([
+            'salary_component_ids' => 'required|array|min:1',
+            'salary_component_ids.*' => 'required|integer|exists:salary_components,id',
+            'branch_ids' => 'required|array|min:1',
+            'branch_ids.*' => 'required|integer|exists:branches,id',
+        ]);
+
+        $sources = SalaryComponent::withoutGlobalScope(\App\Models\Scopes\BranchScope::class)
+            ->whereIn('id', $request->salary_component_ids)
+            ->whereIn('created_by', getCompanyAndUsersId())
+            ->get();
+
+        if ($sources->isEmpty()) {
+            return redirect()->back()->with('error', __('Salary components not found.'));
+        }
+
+        $successCount = 0;
+        $warnings = [];
+
+        DB::beginTransaction();
+        try {
+            foreach ($sources as $source) {
+                foreach ($request->branch_ids as $branchId) {
+                    if ($this->cloneSalaryComponentToBranch($source, (int) $branchId, $warnings)) {
+                        $successCount++;
+                    }
+                }
+            }
+            DB::commit();
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return redirect()->back()->with('error', $e->getMessage() ?: __('Failed to bulk copy salary components.'));
+        }
+
+        if ($successCount === 0) {
+            return redirect()->back()->with('error', count($warnings) > 0 ? implode(' ', $warnings) : __('No salary components were copied.'));
+        }
+
+        $msg = __(':count salary component(s) successfully copied.', ['count' => $successCount]);
+        if (count($warnings) > 0) {
+            $msg .= ' '.implode(' ', $warnings);
+        }
+
+        return redirect()->back()->with('success', $msg);
+    }
+
+    /**
+     * @param  array<int, string>  $warnings
+     */
+    private function cloneSalaryComponentToBranch(SalaryComponent $source, int $branchId, array &$warnings): bool
+    {
+        $companyUserIds = getCompanyAndUsersId();
+
+        $existing = SalaryComponent::withoutGlobalScope(\App\Models\Scopes\BranchScope::class)
+            ->where('branch_id', $branchId)
+            ->where('name', $source->name)
+            ->whereIn('created_by', $companyUserIds)
+            ->first();
+
+        if ($existing) {
+            $branch = Branch::find($branchId);
+            $warnings[] = __("':name' already exists in ':branch'. Skipped.", [
+                'name' => $source->name,
+                'branch' => $branch ? $branch->name : '#'.$branchId,
+            ]);
+
+            return false;
+        }
+
+        $clone = $source->replicate();
+        $clone->branch_id = $branchId;
+        $clone->created_by = Auth::id();
+        $clone->save();
+
+        return true;
     }
 }

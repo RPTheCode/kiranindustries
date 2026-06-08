@@ -13,6 +13,7 @@ import {
   X,
   Loader2,
   Check,
+  Copy,
 } from 'lucide-react';
 import { CrudDeleteModal } from '@/components/CrudDeleteModal';
 import { toast } from '@/components/custom-toast';
@@ -37,19 +38,27 @@ import {
 } from '@/components/ui/select';
 import axios from 'axios';
 import { cn } from '@/lib/utils';
-import { hasPermission } from '@/utils/authorization';
+import { canCreateEntity, canEditEntity, canDeleteEntity } from '@/utils/authorization';
+import { Pagination } from '@/components/ui/pagination';
+import { CopyToBranchesModal } from '@/components/CopyToBranchesModal';
+import { Checkbox } from '@/components/ui/checkbox';
 
 export default function DeductionTypes() {
   const { t } = useTranslation();
   const { auth, deductionTypes, categories = [], branches = [], activeBranchId, activeBranchName, filters: pageFilters = {} } = usePage().props as any;
   const permissions = auth?.permissions || [];
 
-  const canCreate = hasPermission(permissions, 'create-deduction-types');
-  const canEdit = hasPermission(permissions, 'edit-deduction-types');
-  const canDelete = hasPermission(permissions, 'delete-deduction-types');
+  const canCreate = canCreateEntity(permissions, 'deduction-types');
+  const canEdit = canEditEntity(permissions, 'deduction-types');
+  const canDelete = canDeleteEntity(permissions, 'deduction-types');
+  const canCopy = canCreate || canEdit;
 
   const [searchTerm, setSearchTerm] = useState(pageFilters.search || '');
   const [selectedStatus, setSelectedStatus] = useState(pageFilters.status || 'all');
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
+  const [isBulkCopy, setIsBulkCopy] = useState(false);
+  const [isCopying, setIsCopying] = useState(false);
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [currentItem, setCurrentItem] = useState<any>(null);
@@ -72,27 +81,36 @@ export default function DeductionTypes() {
   useEffect(() => {
     setItems(deductionTypes?.data || []);
     setIsSearching(false);
+    setSelectedIds([]);
   }, [deductionTypes]);
+
+  const perPage = Number(pageFilters.per_page || 10);
+  const totalItems = deductionTypes?.total ?? items.length;
+  const rowOffset = (deductionTypes?.from ?? 1) - 1;
 
   const currentBranchName =
     activeBranchName ||
     branches.find((b: any) => String(b.id) === String(activeBranchId))?.name ||
     t('Selected Branch');
 
-  const canReorder = canEdit && !searchTerm && selectedStatus === 'all';
+  const canReorder = canEdit && !searchTerm && selectedStatus === 'all' && (deductionTypes?.last_page ?? 1) <= 1;
 
-  const fetchList = useCallback((params: Record<string, string | undefined>) => {
-    router.get(route('hr.deduction-types.index'), {
-      page: 1,
-      per_page: 100,
-      ...params,
-    }, {
+  const listParams = useCallback((overrides: Record<string, string | number | undefined> = {}) => ({
+    page: overrides.page ?? pageFilters.page ?? 1,
+    per_page: overrides.per_page ?? perPage,
+    search: searchTerm || undefined,
+    status: selectedStatus !== 'all' ? selectedStatus : undefined,
+    ...overrides,
+  }), [pageFilters.page, perPage, searchTerm, selectedStatus]);
+
+  const fetchList = useCallback((params: Record<string, string | number | undefined> = {}) => {
+    router.get(route('hr.deduction-types.index'), listParams(params), {
       preserveState: true,
       preserveScroll: true,
       onStart: () => setIsSearching(true),
       onFinish: () => setIsSearching(false),
     });
-  }, []);
+  }, [listParams]);
 
   useEffect(() => {
     if (skipSearchDebounce.current) {
@@ -100,27 +118,80 @@ export default function DeductionTypes() {
       return;
     }
     const timer = setTimeout(() => {
-      fetchList({
-        search: searchTerm || undefined,
-        status: selectedStatus !== 'all' ? selectedStatus : undefined,
-      });
+      fetchList({ page: 1 });
     }, 300);
     return () => clearTimeout(timer);
   }, [searchTerm, fetchList]);
 
   const handleStatusChange = (value: string) => {
     setSelectedStatus(value);
-    fetchList({
-      search: searchTerm || undefined,
-      status: value !== 'all' ? value : undefined,
-    });
+    fetchList({ page: 1, status: value !== 'all' ? value : undefined });
   };
 
   const clearSearch = () => {
     setSearchTerm('');
-    fetchList({
-      status: selectedStatus !== 'all' ? selectedStatus : undefined,
-    });
+    fetchList({ page: 1, search: undefined });
+  };
+
+  const handleCopyConfirm = (branchIds: number[]) => {
+    if (branchIds.length === 0) {
+      toast.error(t('Please select at least one branch'));
+      return;
+    }
+    setIsCopying(true);
+    toast.loading(t('Copying deduction types...'));
+
+    if (isBulkCopy) {
+      router.post(route('hr.deduction-types.bulk-copy'), {
+        deduction_type_ids: selectedIds,
+        branch_ids: branchIds,
+      }, {
+        onSuccess: (page: any) => {
+          setIsCopying(false);
+          setIsCopyModalOpen(false);
+          setSelectedIds([]);
+          toast.dismiss();
+          if (page.props.flash?.success) toast.success(page.props.flash.success);
+          else if (page.props.flash?.error) toast.error(page.props.flash.error);
+        },
+        onError: () => {
+          setIsCopying(false);
+          toast.dismiss();
+          toast.error(t('Failed to copy deduction types'));
+        },
+      });
+    } else {
+      router.post(route('hr.deduction-types.copy-to-branches', currentItem.id), {
+        branch_ids: branchIds,
+      }, {
+        onSuccess: (page: any) => {
+          setIsCopying(false);
+          setIsCopyModalOpen(false);
+          toast.dismiss();
+          if (page.props.flash?.success) toast.success(page.props.flash.success);
+          else if (page.props.flash?.error) toast.error(page.props.flash.error);
+        },
+        onError: () => {
+          setIsCopying(false);
+          toast.dismiss();
+          toast.error(t('Failed to copy deduction type'));
+        },
+      });
+    }
+  };
+
+  const openCopyModal = (item?: any, bulk = false) => {
+    if (item) setCurrentItem(item);
+    setIsBulkCopy(bulk);
+    setIsCopyModalOpen(true);
+  };
+
+  const toggleSelectAll = (checked: boolean) => {
+    setSelectedIds(checked ? items.map((item) => item.id) : []);
+  };
+
+  const toggleSelectOne = (id: number, checked: boolean) => {
+    setSelectedIds((prev) => (checked ? [...prev, id] : prev.filter((x) => x !== id)));
   };
 
   const initCategoryAmounts = (item?: any) => {
@@ -274,6 +345,25 @@ export default function DeductionTypes() {
 
   const activeCount = items.filter((i) => i.status === 'active').length;
 
+  const pageActions: any[] = [];
+  if (canCopy && selectedIds.length > 0) {
+    pageActions.push({
+      label: `${t('Copy Selected')} (${selectedIds.length})`,
+      icon: <Copy className="h-4 w-4" />,
+      variant: 'secondary',
+      className: 'bg-purple-600 hover:bg-purple-700 text-white border-none',
+      onClick: () => openCopyModal(undefined, true),
+    });
+  }
+  if (canCreate) {
+    pageActions.push({
+      label: t('Add Deduction Type'),
+      icon: <Plus className="h-4 w-4" />,
+      variant: 'default',
+      onClick: () => openCreateForm(),
+    });
+  }
+
   return (
     <PageTemplate
       title={t('Deduction Master')}
@@ -289,14 +379,7 @@ export default function DeductionTypes() {
         { title: t('Masters') },
         { title: t('Deduction Master') },
       ]}
-      actions={canCreate ? [
-        {
-          label: t('Add Deduction Type'),
-          icon: <Plus className="h-4 w-4" />,
-          variant: 'default',
-          onClick: () => openCreateForm(),
-        },
-      ] : []}
+      actions={pageActions}
     >
       <div className="mx-auto max-w-6xl space-y-0 px-1 pb-6">
         {/* Compact toolbar + table card */}
@@ -333,6 +416,20 @@ export default function DeductionTypes() {
               </SelectContent>
             </Select>
 
+            <Select
+              value={String(perPage)}
+              onValueChange={(value) => fetchList({ page: 1, per_page: parseInt(value, 10) })}
+            >
+              <SelectTrigger className="h-8 w-[72px] border-slate-200 bg-white text-xs shadow-none">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[10, 25, 50, 100].map((n) => (
+                  <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
             <div className="ml-auto flex items-center gap-2 text-[11px] text-slate-500">
               {isSearching && (
                 <span className="flex items-center gap-1 text-indigo-600">
@@ -353,7 +450,7 @@ export default function DeductionTypes() {
                 </span>
               )}
               <span className="hidden sm:inline">
-                {items.length} {t('items')} · {activeCount} {t('active')}
+                {totalItems} {t('items')} · {activeCount} {t('active')}
               </span>
               {canReorder && items.length > 1 && (
                 <span className="hidden items-center gap-1 rounded-full bg-white px-2 py-0.5 text-slate-400 ring-1 ring-slate-200 md:flex">
@@ -366,7 +463,9 @@ export default function DeductionTypes() {
 
           {!canReorder && items.length > 0 && (
             <div className="border-b border-amber-100 bg-amber-50/80 px-4 py-1.5 text-[11px] text-amber-700">
-              {t('Clear filters to enable drag & drop reordering')}
+              {(deductionTypes?.last_page ?? 1) > 1
+                ? t('Show all items on one page (per page ≥ total) to enable drag & drop reordering')
+                : t('Clear filters to enable drag & drop reordering')}
             </div>
           )}
 
@@ -376,13 +475,22 @@ export default function DeductionTypes() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 bg-white text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    {canCopy && (
+                      <th className="w-10 px-2 py-2">
+                        <Checkbox
+                          checked={items.length > 0 && selectedIds.length === items.length}
+                          onCheckedChange={(v) => toggleSelectAll(Boolean(v))}
+                          aria-label={t('Select all')}
+                        />
+                      </th>
+                    )}
                     {canReorder && <th className="w-9 px-2 py-2" />}
                     <th className="w-10 px-2 py-2">#</th>
                     <th className="px-3 py-2">{t('Name')}</th>
                     <th className="hidden px-3 py-2 sm:table-cell">{t('Amount')}</th>
                     <th className="px-3 py-2">{t('Mode')}</th>
                     <th className="w-16 px-3 py-2 text-center">{t('Status')}</th>
-                    <th className="w-20 px-2 py-2 text-right">{t('Actions')}</th>
+                    <th className="w-28 px-2 py-2 text-right">{t('Actions')}</th>
                   </tr>
                 </thead>
                 <Droppable droppableId="deduction-types-list" isDropDisabled={!canReorder}>
@@ -390,7 +498,7 @@ export default function DeductionTypes() {
                     <tbody ref={provided.innerRef} {...provided.droppableProps}>
                       {items.length === 0 ? (
                         <tr>
-                          <td colSpan={canReorder ? 7 : 6} className="px-4 py-14 text-center">
+                          <td colSpan={(canReorder ? 1 : 0) + (canCopy ? 1 : 0) + 6} className="px-4 py-14 text-center">
                             <p className="text-sm font-medium text-slate-500">{t('No deduction types found')}</p>
                             <Button
                               type="button"
@@ -423,6 +531,15 @@ export default function DeductionTypes() {
                               )}
                               style={dragProvided.draggableProps.style}
                             >
+                              {canCopy && (
+                                <td className="w-10 px-2 py-1.5">
+                                  <Checkbox
+                                    checked={selectedIds.includes(item.id)}
+                                    onCheckedChange={(v) => toggleSelectOne(item.id, Boolean(v))}
+                                    aria-label={t('Select row')}
+                                  />
+                                </td>
+                              )}
                               {canReorder && (
                                 <td className="w-9 px-1 py-1.5">
                                   <button
@@ -436,7 +553,7 @@ export default function DeductionTypes() {
                                 </td>
                               )}
                               <td className="px-2 py-1.5 text-xs font-medium tabular-nums text-slate-400">
-                                {index + 1}
+                                {rowOffset + index + 1}
                               </td>
                               <td className="px-3 py-1.5">
                                 <div className="font-semibold text-slate-800">{item.name}</div>
@@ -489,8 +606,20 @@ export default function DeductionTypes() {
                                 )}
                               </td>
                               <td className="px-2 py-1.5">
-                                {(canEdit || canDelete) && (
+                                {(canEdit || canDelete || canCopy) && (
                                 <div className="flex items-center justify-end gap-0.5 opacity-70 transition-opacity group-hover:opacity-100">
+                                  {canCopy && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-purple-600 hover:bg-purple-50 hover:text-purple-700"
+                                    onClick={() => openCopyModal(item, false)}
+                                    title={t('Copy to Branches')}
+                                  >
+                                    <Copy className="h-3.5 w-3.5" />
+                                  </Button>
+                                  )}
                                   {canEdit && (
                                   <Button
                                     type="button"
@@ -529,8 +658,40 @@ export default function DeductionTypes() {
               </table>
             </div>
           </DragDropContext>
+
+          <Pagination
+            from={deductionTypes?.from || 0}
+            to={deductionTypes?.to || 0}
+            total={deductionTypes?.total || 0}
+            links={deductionTypes?.links}
+            entityName={t('deduction types')}
+            onPageChange={(url) => router.get(url, {}, { preserveState: true, preserveScroll: true })}
+            className="border-t border-slate-100 bg-slate-50/40"
+          />
         </div>
       </div>
+
+      <CopyToBranchesModal
+        open={isCopyModalOpen}
+        onClose={() => {
+          if (!isCopying) {
+            setIsCopyModalOpen(false);
+            if (isBulkCopy) setSelectedIds([]);
+          }
+        }}
+        onConfirm={handleCopyConfirm}
+        branches={branches}
+        excludeBranchId={activeBranchId && activeBranchId !== 'all' ? Number(activeBranchId) : currentItem?.branch_id}
+        title={
+          isBulkCopy
+            ? t('Copy {{count}} Deduction Type(s) to Branches', { count: selectedIds.length })
+            : currentItem?.name
+              ? t("Copy '{{name}}' to Branches", { name: currentItem.name })
+              : t('Copy to Branches')
+        }
+        description={t('Existing names in the target branch will be skipped. Category-wise amounts map by category code.')}
+        isLoading={isCopying}
+      />
 
       <Dialog open={isFormModalOpen} onOpenChange={setIsFormModalOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
@@ -658,6 +819,7 @@ export default function DeductionTypes() {
         onClose={() => setIsDeleteModalOpen(false)}
         onConfirm={handleDeleteConfirm}
         itemName={currentItem?.name}
+        entityName={t('deduction type')}
       />
     </PageTemplate>
   );

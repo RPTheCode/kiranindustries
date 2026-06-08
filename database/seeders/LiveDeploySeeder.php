@@ -73,9 +73,40 @@ class LiveDeploySeeder extends Seeder
         }
 
         $salaryPayrollPerms = [
-            ['name' => 'view-salary-payroll-runs', 'label' => 'View Salary Payroll Runs', 'module' => 'salary_payroll_runs'],
-            ['name' => 'create-salary-payroll-runs', 'label' => 'Create Salary Payroll Runs', 'module' => 'salary_payroll_runs'],
-            ['name' => 'finalize-salary-payroll-runs', 'label' => 'Finalize Salary Payroll Runs', 'module' => 'salary_payroll_runs'],
+            // Employee Salary
+            ['name' => 'manage-salary-payroll-employee-salary', 'label' => 'Manage Employee Salary', 'module' => 'Salary Payroll'],
+            ['name' => 'manage-any-salary-payroll-employee-salary', 'label' => 'Manage Any Employee Salary', 'module' => 'Salary Payroll'],
+            ['name' => 'manage-own-salary-payroll-employee-salary', 'label' => 'Manage Own Employee Salary', 'module' => 'Salary Payroll'],
+            ['name' => 'view-salary-payroll-employee-salary', 'label' => 'View Employee Salary', 'module' => 'Salary Payroll'],
+            ['name' => 'create-salary-payroll-employee-salary', 'label' => 'Create Employee Salary', 'module' => 'Salary Payroll'],
+            ['name' => 'edit-salary-payroll-employee-salary', 'label' => 'Edit Employee Salary', 'module' => 'Salary Payroll'],
+            ['name' => 'delete-salary-payroll-employee-salary', 'label' => 'Delete Employee Salary', 'module' => 'Salary Payroll'],
+            // Bulk Increment
+            ['name' => 'manage-salary-payroll-increment', 'label' => 'Manage Bulk Salary Increment', 'module' => 'Salary Payroll'],
+            ['name' => 'manage-any-salary-payroll-increment', 'label' => 'Manage Any Bulk Salary Increment', 'module' => 'Salary Payroll'],
+            ['name' => 'view-salary-payroll-increment', 'label' => 'View Bulk Salary Increment', 'module' => 'Salary Payroll'],
+            ['name' => 'create-salary-payroll-increment', 'label' => 'Apply Bulk Salary Increment', 'module' => 'Salary Payroll'],
+            ['name' => 'edit-salary-payroll-increment', 'label' => 'Edit Bulk Salary Increment', 'module' => 'Salary Payroll'],
+            // Generate Payroll
+            ['name' => 'manage-salary-payroll-runs', 'label' => 'Manage Generate Payroll', 'module' => 'Salary Payroll'],
+            ['name' => 'manage-any-salary-payroll-runs', 'label' => 'Manage Any Generate Payroll', 'module' => 'Salary Payroll'],
+            ['name' => 'view-salary-payroll-runs', 'label' => 'View Generate Payroll', 'module' => 'Salary Payroll'],
+            ['name' => 'create-salary-payroll-runs', 'label' => 'Create Generate Payroll', 'module' => 'Salary Payroll'],
+            ['name' => 'edit-salary-payroll-runs', 'label' => 'Edit Generate Payroll', 'module' => 'Salary Payroll'],
+            ['name' => 'delete-salary-payroll-runs', 'label' => 'Delete Generate Payroll', 'module' => 'Salary Payroll'],
+            ['name' => 'finalize-salary-payroll-runs', 'label' => 'Finalize Generate Payroll', 'module' => 'Salary Payroll'],
+            // Earning / Deduction
+            ['name' => 'manage-earning-deduction-entry', 'label' => 'Manage Earning / Deduction', 'module' => 'Salary Payroll'],
+            ['name' => 'manage-any-earning-deduction-entry', 'label' => 'Manage Any Earning / Deduction', 'module' => 'Salary Payroll'],
+            ['name' => 'manage-own-earning-deduction-entry', 'label' => 'Manage Own Earning / Deduction', 'module' => 'Salary Payroll'],
+            ['name' => 'view-earning-deduction-entry', 'label' => 'View Earning / Deduction', 'module' => 'Salary Payroll'],
+            ['name' => 'create-earning-deduction-entry', 'label' => 'Create Earning / Deduction', 'module' => 'Salary Payroll'],
+            ['name' => 'edit-earning-deduction-entry', 'label' => 'Edit Earning / Deduction', 'module' => 'Salary Payroll'],
+            ['name' => 'delete-earning-deduction-entry', 'label' => 'Delete Earning / Deduction', 'module' => 'Salary Payroll'],
+            // Payroll Settings
+            ['name' => 'manage-payroll-settings', 'label' => 'Manage Payroll Settings', 'module' => 'Salary Payroll'],
+            ['name' => 'view-payroll-settings', 'label' => 'View Payroll Settings', 'module' => 'Salary Payroll'],
+            ['name' => 'edit-payroll-settings', 'label' => 'Edit Payroll Settings', 'module' => 'Salary Payroll'],
         ];
         foreach ($salaryPayrollPerms as $p) {
             Permission::firstOrCreate(
@@ -123,13 +154,17 @@ class LiveDeploySeeder extends Seeder
             'master-reports' => 'Reports',
 
             // Payroll Management
-            'salary-components' => 'Payroll Management',
+            'salary-components' => 'Masters',
             'payroll-runs' => 'Payroll Management',
             'payslips' => 'Payroll Management',
             'payroll-adjustments' => 'Payroll Management',
 
             // Salary Payroll (new module)
+            'salary-payroll-employee-salary' => 'Salary Payroll',
+            'salary-payroll-increment' => 'Salary Payroll',
             'salary-payroll-runs' => 'Salary Payroll',
+            'earning-deduction-entry' => 'Salary Payroll',
+            'payroll-settings' => 'Salary Payroll',
 
             // Leave Management
             'leave-types' => 'Leave Management',
@@ -186,6 +221,7 @@ class LiveDeploySeeder extends Seeder
                 'delete-',
                 'approve-',
                 'reject-',
+                'finalize-',
                 'toggle-status-',
                 'download-',
                 'process-',

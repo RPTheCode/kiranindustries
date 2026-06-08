@@ -22,7 +22,7 @@ import { toast } from '@/components/custom-toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { hasPermission } from '@/utils/authorization';
+import { canManageSalaryPayrollRuns, canFinalizeSalaryPayrollRuns } from '@/utils/authorization';
 import { Pagination } from '@/components/ui/pagination';
 import { Combobox } from '@/components/ui/combobox';
 import {
@@ -76,14 +76,8 @@ export default function PayrollGenerateShow() {
     flash,
   } = usePage().props as any;
   const permissions = auth?.permissions || [];
-  const canFinalize = hasPermission(permissions, 'finalize-salary-payroll-runs')
-    || hasPermission(permissions, 'manage-employee-salaries')
-    || hasPermission(permissions, 'manage-any-employee-salaries');
-  const canManage = hasPermission(permissions, 'create-salary-payroll-runs')
-    || hasPermission(permissions, 'create-employee-salaries')
-    || hasPermission(permissions, 'edit-employee-salaries')
-    || hasPermission(permissions, 'manage-employee-salaries')
-    || hasPermission(permissions, 'manage-any-employee-salaries');
+  const canFinalize = canFinalizeSalaryPayrollRuns(permissions);
+  const canManage = canManageSalaryPayrollRuns(permissions);
 
   const [lockConfirmOpen, setLockConfirmOpen] = useState(false);
   const [regenerateConfirmOpen, setRegenerateConfirmOpen] = useState(false);

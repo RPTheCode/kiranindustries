@@ -291,6 +291,7 @@ export function RolePermissionCheckboxGroup({
             'Attendance & Bio-Sync',
             'Essl sync',
             'Payroll Management',
+            'Salary Payroll',
             'Reports',
             'Leave Management',
             'Staff & Security',
@@ -368,6 +369,12 @@ export function RolePermissionCheckboxGroup({
                           const groupedByEntity: Record<string, any[]> = {};
                           const entityDisplayNames: Record<string, string> = {
                             'deduction-types': 'Deduction Master',
+                            'salary-components': 'Salary Component Master',
+                            'salary-payroll-employee-salary': 'Employee Salary',
+                            'salary-payroll-increment': 'Bulk Salary Increment',
+                            'salary-payroll-runs': 'Generate Payroll',
+                            'earning-deduction-entry': 'Earning / Deduction',
+                            'payroll-settings': 'Payroll Settings',
                           };
                           
                           modulePermissions.forEach(permission => {
@@ -376,7 +383,7 @@ export function RolePermissionCheckboxGroup({
                             const prefixes = [
                                 'manage-any-', 'manage-own-', 'manage-', 
                                 'view-', 'create-', 'edit-', 'update-', 'delete-', 'remove-',
-                                'approve-', 'reject-', 'toggle-status-', 'download-', 
+                                'approve-', 'reject-', 'finalize-', 'toggle-status-', 'download-', 
                                 'process-', 'publish-', 'record-', 'request-', 'resolve-',
                                 'send-', 'subscribe-', 'trial-', 'upgrade-', 'acknowledge-'
                             ];

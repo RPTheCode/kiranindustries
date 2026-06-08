@@ -36,7 +36,7 @@ import { Input } from '@/components/ui/input';
 import AppLogo from './app-logo';
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { hasPermission } from '@/utils/authorization';
+import { hasPermission, canAccessEntity, canAccessSalaryPayrollEmployee, canAccessSalaryPayrollIncrement, canAccessSalaryPayrollRuns, canAccessEarningDeductionEntry, canAccessPayrollSettings } from '@/utils/authorization';
 import { toast } from '@/components/custom-toast';
 import { getImagePath } from '@/utils/helpers';
 
@@ -220,12 +220,7 @@ export function AppSidebar() {
         if ((hasPermission(permissions, 'manage-material-items') || hasPermission(permissions, 'view-material-items'))) {
             masterChildren.push({ title: t('Material Items'), href: route('hr.material-items.index') });
         }
-        if (
-            hasPermission(permissions, 'manage-deduction-types')
-            || hasPermission(permissions, 'manage-any-deduction-types')
-            || hasPermission(permissions, 'manage-own-deduction-types')
-            || hasPermission(permissions, 'view-deduction-types')
-        ) {
+        if (canAccessEntity(permissions, 'deduction-types')) {
             masterChildren.push({ title: t('Deduction Master'), href: route('hr.deduction-types.index') });
         }
 
@@ -236,7 +231,7 @@ export function AppSidebar() {
             });
         }
 
-        if ((hasPermission(permissions, 'manage-salary-components') || hasPermission(permissions, 'view-salary-components'))) {
+        if (canAccessEntity(permissions, 'salary-components')) {
             masterChildren.push({
                 title: t('Salary Component Master'),
                 href: route('hr.salary-components.index')
@@ -346,39 +341,31 @@ export function AppSidebar() {
 
         // New salary payroll module (separate from legacy payroll)
         const salaryPayrollChildren = [];
-        if (
-            hasPermission(permissions, 'manage-employee-salaries')
-            || hasPermission(permissions, 'manage-any-employee-salaries')
-            || hasPermission(permissions, 'manage-own-employee-salaries')
-            || hasPermission(permissions, 'view-employee-salaries')
-        ) {
+        if (canAccessSalaryPayrollEmployee(permissions)) {
             salaryPayrollChildren.push({
                 title: t('Employee Salary'),
                 href: route('hr.salary-payroll.employee-salary.index'),
             });
+        }
+        if (canAccessSalaryPayrollIncrement(permissions)) {
             salaryPayrollChildren.push({
                 title: t('Bulk Salary Increment'),
                 href: route('hr.salary-payroll.salary-increment.index'),
             });
-            salaryPayrollChildren.push({
-                title: t('Generate Payroll'),
-                href: route('hr.salary-payroll.generate.index'),
-            });
-        } else if (
-            hasPermission(permissions, 'view-salary-payroll-runs')
-            || hasPermission(permissions, 'create-salary-payroll-runs')
-            || hasPermission(permissions, 'finalize-salary-payroll-runs')
-        ) {
+        }
+        if (canAccessSalaryPayrollRuns(permissions)) {
             salaryPayrollChildren.push({
                 title: t('Generate Payroll'),
                 href: route('hr.salary-payroll.generate.index'),
             });
         }
-        salaryPayrollChildren.push({
-            title: t('Earning / Deduction'),
-            href: route('hr.earning-deduction.index'),
-        });
-        if (hasPermission(permissions, 'manage-settings') || hasPermission(permissions, 'view-settings')) {
+        if (canAccessEarningDeductionEntry(permissions)) {
+            salaryPayrollChildren.push({
+                title: t('Earning / Deduction'),
+                href: route('hr.earning-deduction.index'),
+            });
+        }
+        if (canAccessPayrollSettings(permissions)) {
             salaryPayrollChildren.push({
                 title: t('Payroll Settings'),
                 href: route('hr.payroll-settings.index'),

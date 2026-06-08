@@ -27,6 +27,10 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import axios from 'axios';
+import {
+    canCreateEarningDeductionEntry,
+    canEditEarningDeductionEntry,
+} from '@/utils/authorization';
 
 import { Combobox, ComboboxOption } from '@/components/ui/combobox';
 import { Badge } from '@/components/ui/badge';
@@ -105,8 +109,10 @@ interface HistoryEntry {
 }
 
 export default function MonthlyIncentiveIndex() {
-    const { employees, selected_employee_id, deductionTypes = [], activeBranchName } = usePage<PageProps>().props as any;
+    const { employees, selected_employee_id, deductionTypes = [], activeBranchName, auth } = usePage<PageProps>().props as any;
     const { t } = useTranslation();
+    const permissions = auth?.permissions || [];
+    const canSave = canCreateEarningDeductionEntry(permissions) || canEditEarningDeductionEntry(permissions);
 
     const [loading, setLoading] = useState(false);
     const [historyLoading, setHistoryLoading] = useState(false);
@@ -423,6 +429,7 @@ export default function MonthlyIncentiveIndex() {
                                     />
                                 </div>
                                 <div className="flex gap-2 md:col-span-3">
+                                    {canSave && (
                                     <Button 
                                         type="submit"
                                         className="flex-1 h-11 bg-primary hover:bg-primary/90 text-white font-bold text-xs shadow-lg shadow-primary/20"
@@ -431,6 +438,8 @@ export default function MonthlyIncentiveIndex() {
                                         <Save className="w-4 h-4 mr-2" />
                                         {t('Save Record')}
                                     </Button>
+                                    )}
+                                    {canSave && (
                                     <Button 
                                         type="button" variant="outline"
                                         className="h-11 w-11 text-red-500 border-red-100 hover:bg-red-50 hover:border-red-200 shadow-sm"
@@ -454,6 +463,7 @@ export default function MonthlyIncentiveIndex() {
                                     >
                                         <Trash2 className="w-4 h-4" />
                                     </Button>
+                                    )}
                                 </div>
                             </div>
                         </CardHeader>
@@ -510,10 +520,12 @@ export default function MonthlyIncentiveIndex() {
                                         <p className="text-[10px] text-slate-500 font-medium">{t('Add custom earning components')}</p>
                                     </div>
                                 </div>
+                                {canSave && (
                                 <Button type="button" variant="outline" size="sm" onClick={() => addRow('earning')}
                                     className="h-8 text-[11px] font-bold border-green-200 text-green-600 hover:bg-green-50">
                                     <PlusCircle className="w-3.5 h-3.5 mr-1.5" />{t('Add New')}
                                 </Button>
+                                )}
                             </CardHeader>
                             <CardContent className="p-4 space-y-3">
                                 {formEarnings.length === 0 ? (
@@ -546,9 +558,11 @@ export default function MonthlyIncentiveIndex() {
                                                 </div>
                                             </div>
                                             <div className="col-span-2 md:col-span-1 flex justify-end">
+                                                {canSave && (
                                                 <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-slate-300 hover:text-red-500 hover:bg-red-50" onClick={() => removeRow(row.temp_id)}>
                                                     <Trash2 className="w-4 h-4" />
                                                 </Button>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -568,10 +582,12 @@ export default function MonthlyIncentiveIndex() {
                                         <p className="text-[10px] text-slate-500 font-medium">{t('From Deduction Master or custom entry')}</p>
                                     </div>
                                 </div>
+                                {canSave && (
                                 <Button type="button" variant="outline" size="sm" onClick={() => addRow('deduction')}
                                     className="h-8 text-[11px] font-bold border-red-200 text-red-600 hover:bg-red-50">
                                     <PlusCircle className="w-3.5 h-3.5 mr-1.5" />{t('Add New')}
                                 </Button>
+                                )}
                             </CardHeader>
                             <CardContent className="p-4 space-y-3">
                                 {formDeductions.length === 0 ? (
@@ -683,6 +699,7 @@ export default function MonthlyIncentiveIndex() {
                                                         {row.mode === 'day' ? t('Days') : '₹'}
                                                     </span>
                                                 </div>
+                                                {canSave && (
                                                 <Button
                                                     type="button"
                                                     variant="ghost"
@@ -692,6 +709,7 @@ export default function MonthlyIncentiveIndex() {
                                                 >
                                                     <Trash2 className="h-4 w-4" />
                                                 </Button>
+                                                )}
                                             </div>
                                         </div>
                                     </div>

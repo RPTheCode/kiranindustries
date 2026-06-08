@@ -5,7 +5,7 @@ import { Plus, Eye, Trash2, Banknote, RefreshCw, Settings2, Lock } from 'lucide-
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Pagination } from '@/components/ui/pagination';
-import { hasPermission } from '@/utils/authorization';
+import { canManageSalaryPayrollRuns, canAccessSalaryPayrollRuns } from '@/utils/authorization';
 import {
   Table,
   TableBody,
@@ -49,17 +49,9 @@ export default function PayrollGenerateIndex() {
   const { auth, runs, activeBranchName, flash } = usePage().props as any;
   const permissions = auth?.permissions || [];
 
-  const canCreate = hasPermission(permissions, 'create-salary-payroll-runs')
-    || hasPermission(permissions, 'create-employee-salaries')
-    || hasPermission(permissions, 'edit-employee-salaries')
-    || hasPermission(permissions, 'manage-employee-salaries')
-    || hasPermission(permissions, 'manage-any-employee-salaries');
+  const canCreate = canManageSalaryPayrollRuns(permissions);
   const canDelete = canCreate;
-  const canView = hasPermission(permissions, 'view-salary-payroll-runs')
-    || hasPermission(permissions, 'create-salary-payroll-runs')
-    || hasPermission(permissions, 'finalize-salary-payroll-runs')
-    || hasPermission(permissions, 'view-employee-salaries')
-    || hasPermission(permissions, 'manage-employee-salaries');
+  const canView = canAccessSalaryPayrollRuns(permissions);
 
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [isProcessing, setIsProcessing] = useState(false);

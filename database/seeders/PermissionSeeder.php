@@ -832,14 +832,23 @@ class PermissionSeeder extends Seeder
             ['name' => 'approve-time-entries', 'module' => 'time_entries', 'label' => 'Approve Time Entries', 'description' => 'Can approve time entries'],
             ['name' => 'reject-time-entries', 'module' => 'time_entries', 'label' => 'Reject Time Entries', 'description' => 'Can reject time entries'],
 
+            // Deduction Master (Masters)
+            ['name' => 'manage-deduction-types', 'module' => 'Masters', 'label' => 'Manage Deduction Master', 'description' => 'Can manage deduction types'],
+            ['name' => 'manage-any-deduction-types', 'module' => 'Masters', 'label' => 'Manage All Deduction Master', 'description' => 'Manage any deduction types'],
+            ['name' => 'manage-own-deduction-types', 'module' => 'Masters', 'label' => 'Manage Own Deduction Master', 'description' => 'Manage own deduction types'],
+            ['name' => 'view-deduction-types', 'module' => 'Masters', 'label' => 'View Deduction Master', 'description' => 'View deduction types'],
+            ['name' => 'create-deduction-types', 'module' => 'Masters', 'label' => 'Create Deduction Master', 'description' => 'Can create deduction types'],
+            ['name' => 'edit-deduction-types', 'module' => 'Masters', 'label' => 'Edit Deduction Master', 'description' => 'Can edit deduction types'],
+            ['name' => 'delete-deduction-types', 'module' => 'Masters', 'label' => 'Delete Deduction Master', 'description' => 'Can delete deduction types'],
+
             // Salary Components management
-            ['name' => 'manage-salary-components', 'module' => 'salary_components', 'label' => 'Manage Salary Components', 'description' => 'Can manage salary components'],
-            ['name' => 'manage-any-salary-components', 'module' => 'salary_components', 'label' => 'Manage All Salary Components', 'description' => 'Manage Any Salary Components'],
-            ['name' => 'manage-own-salary-components', 'module' => 'salary_components', 'label' => 'Manage Own Salary Components', 'description' => 'Manage Limited Salary Components that is created by own'],
-            ['name' => 'view-salary-components', 'module' => 'salary_components', 'label' => 'View Salary Components', 'description' => 'View Salary Components'],
-            ['name' => 'create-salary-components', 'module' => 'salary_components', 'label' => 'Create Salary Components', 'description' => 'Can create salary components'],
-            ['name' => 'edit-salary-components', 'module' => 'salary_components', 'label' => 'Edit Salary Components', 'description' => 'Can edit salary components'],
-            ['name' => 'delete-salary-components', 'module' => 'salary_components', 'label' => 'Delete Salary Components', 'description' => 'Can delete salary components'],
+            ['name' => 'manage-salary-components', 'module' => 'Masters', 'label' => 'Manage Salary Components', 'description' => 'Can manage salary components'],
+            ['name' => 'manage-any-salary-components', 'module' => 'Masters', 'label' => 'Manage All Salary Components', 'description' => 'Manage Any Salary Components'],
+            ['name' => 'manage-own-salary-components', 'module' => 'Masters', 'label' => 'Manage Own Salary Components', 'description' => 'Manage Limited Salary Components that is created by own'],
+            ['name' => 'view-salary-components', 'module' => 'Masters', 'label' => 'View Salary Components', 'description' => 'View Salary Components'],
+            ['name' => 'create-salary-components', 'module' => 'Masters', 'label' => 'Create Salary Components', 'description' => 'Can create salary components'],
+            ['name' => 'edit-salary-components', 'module' => 'Masters', 'label' => 'Edit Salary Components', 'description' => 'Can edit salary components'],
+            ['name' => 'delete-salary-components', 'module' => 'Masters', 'label' => 'Delete Salary Components', 'description' => 'Can delete salary components'],
 
             // Employee Salaries management
             ['name' => 'manage-employee-salaries', 'module' => 'employee_salaries', 'label' => 'Manage Employee Salaries', 'description' => 'Can manage employee salaries'],
@@ -850,12 +859,46 @@ class PermissionSeeder extends Seeder
             ['name' => 'edit-employee-salaries', 'module' => 'employee_salaries', 'label' => 'Edit Employee Salaries', 'description' => 'Can edit employee salaries'],
             ['name' => 'delete-employee-salaries', 'module' => 'employee_salaries', 'label' => 'Delete Employee Salaries', 'description' => 'Can delete employee salaries'],
 
-            // Salary Payroll Generate (new module)
-            ['name' => 'view-salary-payroll-runs', 'module' => 'salary_payroll_runs', 'label' => 'View Salary Payroll Runs', 'description' => 'View generated salary payroll runs'],
-            ['name' => 'create-salary-payroll-runs', 'module' => 'salary_payroll_runs', 'label' => 'Create Salary Payroll Runs', 'description' => 'Generate salary payroll runs'],
-            ['name' => 'finalize-salary-payroll-runs', 'module' => 'salary_payroll_runs', 'label' => 'Finalize Salary Payroll Runs', 'description' => 'Finalize salary payroll runs'],
+            // Salary Payroll — Employee Salary
+            ['name' => 'manage-salary-payroll-employee-salary', 'module' => 'Salary Payroll', 'label' => 'Manage Employee Salary', 'description' => 'Manage employee salary records in Salary Payroll'],
+            ['name' => 'manage-any-salary-payroll-employee-salary', 'module' => 'Salary Payroll', 'label' => 'Manage Any Employee Salary', 'description' => 'Manage any employee salary in Salary Payroll'],
+            ['name' => 'manage-own-salary-payroll-employee-salary', 'module' => 'Salary Payroll', 'label' => 'Manage Own Employee Salary', 'description' => 'Manage own employee salary records'],
+            ['name' => 'view-salary-payroll-employee-salary', 'module' => 'Salary Payroll', 'label' => 'View Employee Salary', 'description' => 'View employee salary in Salary Payroll'],
+            ['name' => 'create-salary-payroll-employee-salary', 'module' => 'Salary Payroll', 'label' => 'Create Employee Salary', 'description' => 'Create employee salary in Salary Payroll'],
+            ['name' => 'edit-salary-payroll-employee-salary', 'module' => 'Salary Payroll', 'label' => 'Edit Employee Salary', 'description' => 'Edit employee salary in Salary Payroll'],
+            ['name' => 'delete-salary-payroll-employee-salary', 'module' => 'Salary Payroll', 'label' => 'Delete Employee Salary', 'description' => 'Delete employee salary in Salary Payroll'],
 
-            // Payroll Runs management
+            // Salary Payroll — Bulk Increment
+            ['name' => 'manage-salary-payroll-increment', 'module' => 'Salary Payroll', 'label' => 'Manage Bulk Salary Increment', 'description' => 'Manage bulk salary increment'],
+            ['name' => 'manage-any-salary-payroll-increment', 'module' => 'Salary Payroll', 'label' => 'Manage Any Bulk Salary Increment', 'description' => 'Manage any bulk salary increment'],
+            ['name' => 'view-salary-payroll-increment', 'module' => 'Salary Payroll', 'label' => 'View Bulk Salary Increment', 'description' => 'View bulk salary increment'],
+            ['name' => 'create-salary-payroll-increment', 'module' => 'Salary Payroll', 'label' => 'Apply Bulk Salary Increment', 'description' => 'Apply bulk salary increment'],
+            ['name' => 'edit-salary-payroll-increment', 'module' => 'Salary Payroll', 'label' => 'Edit Bulk Salary Increment', 'description' => 'Edit bulk salary increment preview'],
+
+            // Salary Payroll — Generate
+            ['name' => 'manage-salary-payroll-runs', 'module' => 'Salary Payroll', 'label' => 'Manage Generate Payroll', 'description' => 'Full access to generate payroll'],
+            ['name' => 'manage-any-salary-payroll-runs', 'module' => 'Salary Payroll', 'label' => 'Manage Any Generate Payroll', 'description' => 'Manage any payroll run'],
+            ['name' => 'view-salary-payroll-runs', 'module' => 'Salary Payroll', 'label' => 'View Generate Payroll', 'description' => 'View generated salary payroll runs'],
+            ['name' => 'create-salary-payroll-runs', 'module' => 'Salary Payroll', 'label' => 'Create Generate Payroll', 'description' => 'Generate salary payroll runs'],
+            ['name' => 'edit-salary-payroll-runs', 'module' => 'Salary Payroll', 'label' => 'Edit Generate Payroll', 'description' => 'Edit salary payroll runs'],
+            ['name' => 'delete-salary-payroll-runs', 'module' => 'Salary Payroll', 'label' => 'Delete Generate Payroll', 'description' => 'Delete salary payroll runs'],
+            ['name' => 'finalize-salary-payroll-runs', 'module' => 'Salary Payroll', 'label' => 'Finalize Generate Payroll', 'description' => 'Finalize salary payroll runs'],
+
+            // Salary Payroll — Earning / Deduction
+            ['name' => 'manage-earning-deduction-entry', 'module' => 'Salary Payroll', 'label' => 'Manage Earning / Deduction', 'description' => 'Manage earning and deduction entries'],
+            ['name' => 'manage-any-earning-deduction-entry', 'module' => 'Salary Payroll', 'label' => 'Manage Any Earning / Deduction', 'description' => 'Manage any earning/deduction entry'],
+            ['name' => 'manage-own-earning-deduction-entry', 'module' => 'Salary Payroll', 'label' => 'Manage Own Earning / Deduction', 'description' => 'Manage own earning/deduction entries'],
+            ['name' => 'view-earning-deduction-entry', 'module' => 'Salary Payroll', 'label' => 'View Earning / Deduction', 'description' => 'View earning and deduction entries'],
+            ['name' => 'create-earning-deduction-entry', 'module' => 'Salary Payroll', 'label' => 'Create Earning / Deduction', 'description' => 'Create earning and deduction entries'],
+            ['name' => 'edit-earning-deduction-entry', 'module' => 'Salary Payroll', 'label' => 'Edit Earning / Deduction', 'description' => 'Edit earning and deduction entries'],
+            ['name' => 'delete-earning-deduction-entry', 'module' => 'Salary Payroll', 'label' => 'Delete Earning / Deduction', 'description' => 'Delete earning and deduction entries'],
+
+            // Salary Payroll — Settings
+            ['name' => 'manage-payroll-settings', 'module' => 'Salary Payroll', 'label' => 'Manage Payroll Settings', 'description' => 'Manage PF, ESIC, PT payroll settings'],
+            ['name' => 'view-payroll-settings', 'module' => 'Salary Payroll', 'label' => 'View Payroll Settings', 'description' => 'View payroll settings'],
+            ['name' => 'edit-payroll-settings', 'module' => 'Salary Payroll', 'label' => 'Edit Payroll Settings', 'description' => 'Edit payroll settings'],
+
+            // Employee Salaries management (legacy Payroll Management)
             ['name' => 'manage-payroll-runs', 'module' => 'payroll_runs', 'label' => 'Manage Payroll Runs', 'description' => 'Can manage payroll runs'],
             ['name' => 'manage-any-payroll-runs', 'module' => 'payroll_runs', 'label' => 'Manage All Payroll Runs', 'description' => 'Manage Any Payroll Runs'],
             ['name' => 'manage-own-payroll-runs', 'module' => 'payroll_runs', 'label' => 'Manage Own Payroll Runs', 'description' => 'Manage Limited Payroll Runs that is created by own'],

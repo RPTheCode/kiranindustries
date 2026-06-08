@@ -6,6 +6,7 @@ use App\Models\Branch;
 use App\Models\Category;
 use App\Models\DeductionType;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -40,7 +41,7 @@ class DeductionTypeController extends Controller
             $query->orderBy('sort_order')->orderBy('name');
         }
 
-        $deductionTypes = $query->paginate($request->per_page ?? 100)->withQueryString();
+        $deductionTypes = $query->paginate($request->per_page ?? 10)->withQueryString();
 
         $filters = $request->all(['search', 'status', 'branch_id', 'sort_field', 'sort_direction', 'per_page']);
         if (! isset($filters['branch_id'])) {
@@ -211,6 +212,102 @@ class DeductionTypeController extends Controller
         return response()->json(['success' => true]);
     }
 
+    public function copyToBranches(Request $request, $deductionTypeId)
+    {
+        $request->validate([
+            'branch_ids' => 'required|array|min:1',
+            'branch_ids.*' => 'required|integer|exists:branches,id',
+        ]);
+
+        $source = DeductionType::withoutGlobalScope(\App\Models\Scopes\BranchScope::class)
+            ->with(['categoryAmounts.category'])
+            ->whereIn('created_by', getCompanyAndUsersId())
+            ->where('id', $deductionTypeId)
+            ->first();
+
+        if (! $source) {
+            return redirect()->back()->with('error', __('Deduction type not found.'));
+        }
+
+        $successCount = 0;
+        $warnings = [];
+
+        DB::beginTransaction();
+        try {
+            foreach ($request->branch_ids as $branchId) {
+                if ($this->cloneDeductionTypeToBranch($source, (int) $branchId, $warnings)) {
+                    $successCount++;
+                }
+            }
+            DB::commit();
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return redirect()->back()->with('error', $e->getMessage() ?: __('Failed to copy deduction type to branches.'));
+        }
+
+        if ($successCount === 0) {
+            return redirect()->back()->with('error', count($warnings) > 0 ? implode(' ', $warnings) : __('No deduction types were copied.'));
+        }
+
+        $msg = __(':count deduction type(s) successfully copied.', ['count' => $successCount]);
+        if (count($warnings) > 0) {
+            $msg .= ' '.implode(' ', $warnings);
+        }
+
+        return redirect()->back()->with('success', $msg);
+    }
+
+    public function bulkCopyToBranches(Request $request)
+    {
+        $request->validate([
+            'deduction_type_ids' => 'required|array|min:1',
+            'deduction_type_ids.*' => 'required|integer|exists:deduction_types,id',
+            'branch_ids' => 'required|array|min:1',
+            'branch_ids.*' => 'required|integer|exists:branches,id',
+        ]);
+
+        $sources = DeductionType::withoutGlobalScope(\App\Models\Scopes\BranchScope::class)
+            ->with(['categoryAmounts.category'])
+            ->whereIn('id', $request->deduction_type_ids)
+            ->whereIn('created_by', getCompanyAndUsersId())
+            ->get();
+
+        if ($sources->isEmpty()) {
+            return redirect()->back()->with('error', __('Deduction types not found.'));
+        }
+
+        $successCount = 0;
+        $warnings = [];
+
+        DB::beginTransaction();
+        try {
+            foreach ($sources as $source) {
+                foreach ($request->branch_ids as $branchId) {
+                    if ($this->cloneDeductionTypeToBranch($source, (int) $branchId, $warnings)) {
+                        $successCount++;
+                    }
+                }
+            }
+            DB::commit();
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return redirect()->back()->with('error', $e->getMessage() ?: __('Failed to bulk copy deduction types.'));
+        }
+
+        if ($successCount === 0) {
+            return redirect()->back()->with('error', count($warnings) > 0 ? implode(' ', $warnings) : __('No deduction types were copied.'));
+        }
+
+        $msg = __(':count deduction type(s) successfully copied.', ['count' => $successCount]);
+        if (count($warnings) > 0) {
+            $msg .= ' '.implode(' ', $warnings);
+        }
+
+        return redirect()->back()->with('success', $msg);
+    }
+
     /**
      * Active deduction types for the current branch (API for entry screens).
      */
@@ -238,6 +335,65 @@ class DeductionTypeController extends Controller
             ->when($branchId && $branchId !== 'all', fn ($q) => $q->where('branch_id', $branchId))
             ->orderBy('name')
             ->get(['id', 'name', 'code']);
+    }
+
+    /**
+     * @param  array<int, string>  $warnings
+     */
+    private function cloneDeductionTypeToBranch(DeductionType $source, int $branchId, array &$warnings): bool
+    {
+        $companyUserIds = getCompanyAndUsersId();
+
+        $existing = DeductionType::withoutGlobalScope(\App\Models\Scopes\BranchScope::class)
+            ->where('branch_id', $branchId)
+            ->where('name', $source->name)
+            ->whereIn('created_by', $companyUserIds)
+            ->first();
+
+        if ($existing) {
+            $branch = Branch::find($branchId);
+            $warnings[] = __("':name' already exists in ':branch'. Skipped.", [
+                'name' => $source->name,
+                'branch' => $branch ? $branch->name : '#'.$branchId,
+            ]);
+
+            return false;
+        }
+
+        $nextSortOrder = (int) DeductionType::withoutGlobalScope(\App\Models\Scopes\BranchScope::class)
+            ->where('branch_id', $branchId)
+            ->whereIn('created_by', $companyUserIds)
+            ->max('sort_order');
+
+        $clone = $source->replicate();
+        $clone->branch_id = $branchId;
+        $clone->created_by = Auth::id();
+        $clone->sort_order = $nextSortOrder + 1;
+        $clone->save();
+
+        if ($source->amount_type === DeductionType::AMOUNT_CATEGORY_WISE) {
+            foreach ($source->categoryAmounts as $row) {
+                $categoryCode = $row->category?->code;
+                if (! $categoryCode) {
+                    continue;
+                }
+
+                $targetCategory = Category::withoutGlobalScope(\App\Models\Scopes\BranchScope::class)
+                    ->where('branch_id', $branchId)
+                    ->where('code', $categoryCode)
+                    ->whereIn('created_by', $companyUserIds)
+                    ->first();
+
+                if ($targetCategory) {
+                    $clone->categoryAmounts()->create([
+                        'category_id' => $targetCategory->id,
+                        'amount' => $row->amount,
+                    ]);
+                }
+            }
+        }
+
+        return true;
     }
 
     private function syncCategoryAmounts(DeductionType $deductionType, array $rows): void

@@ -12,6 +12,7 @@ import {
   TrendingDown,
   Percent,
   Info,
+  Copy,
 } from 'lucide-react';
 import { CrudDeleteModal } from '@/components/CrudDeleteModal';
 import { toast } from '@/components/custom-toast';
@@ -35,7 +36,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { hasPermission } from '@/utils/authorization';
+import { canCreateEntity, canEditEntity, canDeleteEntity } from '@/utils/authorization';
+import { Pagination } from '@/components/ui/pagination';
+import { CopyToBranchesModal } from '@/components/CopyToBranchesModal';
+import { Checkbox } from '@/components/ui/checkbox';
 
 const ROUNDING_OPTIONS = [
   {
@@ -65,6 +69,7 @@ export default function SalaryComponents() {
   const {
     auth,
     salaryComponents,
+    structureSummaryItems = [],
     branches = [],
     activeBranchId,
     activeBranchName,
@@ -72,13 +77,18 @@ export default function SalaryComponents() {
   } = usePage().props as any;
   const permissions = auth?.permissions || [];
 
-  const canCreate = hasPermission(permissions, 'create-salary-components');
-  const canEdit = hasPermission(permissions, 'edit-salary-components');
-  const canDelete = hasPermission(permissions, 'delete-salary-components');
+  const canCreate = canCreateEntity(permissions, 'salary-components');
+  const canEdit = canEditEntity(permissions, 'salary-components');
+  const canDelete = canDeleteEntity(permissions, 'salary-components');
+  const canCopy = canCreate || canEdit;
 
   const [searchTerm, setSearchTerm] = useState(pageFilters.search || '');
   const [selectedType, setSelectedType] = useState(pageFilters.type || 'all');
   const [selectedStatus, setSelectedStatus] = useState(pageFilters.status || 'all');
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
+  const [isBulkCopy, setIsBulkCopy] = useState(false);
+  const [isCopying, setIsCopying] = useState(false);
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [currentItem, setCurrentItem] = useState<any>(null);
@@ -101,25 +111,35 @@ export default function SalaryComponents() {
   useEffect(() => {
     setItems(salaryComponents?.data || []);
     setIsSearching(false);
+    setSelectedIds([]);
   }, [salaryComponents]);
+
+  const perPage = Number(pageFilters.per_page || 10);
+  const totalItems = salaryComponents?.total ?? items.length;
+  const rowOffset = (salaryComponents?.from ?? 1) - 1;
 
   const currentBranchName =
     activeBranchName ||
     branches.find((b: any) => String(b.id) === String(activeBranchId))?.name ||
     t('Selected Branch');
 
-  const fetchList = useCallback((params: Record<string, string | undefined>) => {
-    router.get(route('hr.salary-components.index'), {
-      page: 1,
-      per_page: 100,
-      ...params,
-    }, {
+  const listParams = useCallback((overrides: Record<string, string | number | undefined> = {}) => ({
+    page: overrides.page ?? pageFilters.page ?? 1,
+    per_page: overrides.per_page ?? perPage,
+    search: searchTerm || undefined,
+    type: selectedType !== 'all' ? selectedType : undefined,
+    status: selectedStatus !== 'all' ? selectedStatus : undefined,
+    ...overrides,
+  }), [pageFilters.page, perPage, searchTerm, selectedType, selectedStatus]);
+
+  const fetchList = useCallback((params: Record<string, string | number | undefined> = {}) => {
+    router.get(route('hr.salary-components.index'), listParams(params), {
       preserveState: true,
       preserveScroll: true,
       onStart: () => setIsSearching(true),
       onFinish: () => setIsSearching(false),
     });
-  }, []);
+  }, [listParams]);
 
   useEffect(() => {
     if (skipSearchDebounce.current) {
@@ -127,39 +147,85 @@ export default function SalaryComponents() {
       return;
     }
     const timer = setTimeout(() => {
-      fetchList({
-        search: searchTerm || undefined,
-        type: selectedType !== 'all' ? selectedType : undefined,
-        status: selectedStatus !== 'all' ? selectedStatus : undefined,
-      });
+      fetchList({ page: 1 });
     }, 300);
     return () => clearTimeout(timer);
   }, [searchTerm, fetchList]);
 
   const handleTypeChange = (value: string) => {
     setSelectedType(value);
-    fetchList({
-      search: searchTerm || undefined,
-      type: value !== 'all' ? value : undefined,
-      status: selectedStatus !== 'all' ? selectedStatus : undefined,
-    });
+    fetchList({ page: 1, type: value !== 'all' ? value : undefined });
   };
 
   const handleStatusChange = (value: string) => {
     setSelectedStatus(value);
-    fetchList({
-      search: searchTerm || undefined,
-      type: selectedType !== 'all' ? selectedType : undefined,
-      status: value !== 'all' ? value : undefined,
-    });
+    fetchList({ page: 1, status: value !== 'all' ? value : undefined });
   };
 
   const clearSearch = () => {
     setSearchTerm('');
-    fetchList({
-      type: selectedType !== 'all' ? selectedType : undefined,
-      status: selectedStatus !== 'all' ? selectedStatus : undefined,
-    });
+    fetchList({ page: 1, search: undefined });
+  };
+
+  const handleCopyConfirm = (branchIds: number[]) => {
+    if (branchIds.length === 0) {
+      toast.error(t('Please select at least one branch'));
+      return;
+    }
+    setIsCopying(true);
+    toast.loading(t('Copying salary components...'));
+
+    if (isBulkCopy) {
+      router.post(route('hr.salary-components.bulk-copy'), {
+        salary_component_ids: selectedIds,
+        branch_ids: branchIds,
+      }, {
+        onSuccess: (page: any) => {
+          setIsCopying(false);
+          setIsCopyModalOpen(false);
+          setSelectedIds([]);
+          toast.dismiss();
+          if (page.props.flash?.success) toast.success(page.props.flash.success);
+          else if (page.props.flash?.error) toast.error(page.props.flash.error);
+        },
+        onError: () => {
+          setIsCopying(false);
+          toast.dismiss();
+          toast.error(t('Failed to copy salary components'));
+        },
+      });
+    } else {
+      router.post(route('hr.salary-components.copy-to-branches', currentItem.id), {
+        branch_ids: branchIds,
+      }, {
+        onSuccess: (page: any) => {
+          setIsCopying(false);
+          setIsCopyModalOpen(false);
+          toast.dismiss();
+          if (page.props.flash?.success) toast.success(page.props.flash.success);
+          else if (page.props.flash?.error) toast.error(page.props.flash.error);
+        },
+        onError: () => {
+          setIsCopying(false);
+          toast.dismiss();
+          toast.error(t('Failed to copy salary component'));
+        },
+      });
+    }
+  };
+
+  const openCopyModal = (item?: any, bulk = false) => {
+    if (item) setCurrentItem(item);
+    setIsBulkCopy(bulk);
+    setIsCopyModalOpen(true);
+  };
+
+  const toggleSelectAll = (checked: boolean) => {
+    setSelectedIds(checked ? items.map((item) => item.id) : []);
+  };
+
+  const toggleSelectOne = (id: number, checked: boolean) => {
+    setSelectedIds((prev) => (checked ? [...prev, id] : prev.filter((x) => x !== id)));
   };
 
   const openCreateForm = () => {
@@ -298,37 +364,48 @@ export default function SalaryComponents() {
   const activeCount = items.filter((i) => i.status === 'active').length;
   const earningCount = items.filter((i) => i.type === 'earning').length;
   const deductionCount = items.filter((i) => i.type === 'deduction').length;
-  const primaryItems = useMemo(
-    () => items.filter((item) => item.component_group === 'primary' || item.assign_to_all),
-    [items],
-  );
-  const customItems = useMemo(
-    () => items.filter((item) => item.component_group !== 'primary' && !item.assign_to_all),
-    [items],
-  );
 
   const structureSummary = useMemo(() => {
-    const activeItems = items.filter((i) => i.status === 'active');
+    const activeItems = structureSummaryItems;
     const onGrossEarnings = activeItems.filter(
-      (i) => i.type === 'earning' && i.calculation_type === 'percentage_of_gross',
+      (i: any) => i.type === 'earning' && i.calculation_type === 'percentage_of_gross',
     );
-    const onBasicItems = activeItems.filter((i) => i.calculation_type === 'percentage');
+    const onBasicItems = activeItems.filter((i: any) => i.calculation_type === 'percentage');
     const totalGrossPct = onGrossEarnings.reduce(
-      (sum, i) => sum + Number(i.percentage_of_gross_pay || 0),
+      (sum: number, i: any) => sum + Number(i.percentage_of_gross_pay || 0),
       0,
     );
     const totalBasicPct = onBasicItems.reduce(
-      (sum, i) => sum + Number(i.percentage_of_basic || 0),
+      (sum: number, i: any) => sum + Number(i.percentage_of_basic || 0),
       0,
     );
 
     return { activeItems, onGrossEarnings, onBasicItems, totalGrossPct, totalBasicPct };
-  }, [items]);
+  }, [structureSummaryItems]);
 
   const getItemRate = (item: any) =>
     item.calculation_type === 'percentage_of_gross'
       ? Number(item.percentage_of_gross_pay || 0)
       : Number(item.percentage_of_basic || 0);
+
+  const pageActions: any[] = [];
+  if (canCopy && selectedIds.length > 0) {
+    pageActions.push({
+      label: `${t('Copy Selected')} (${selectedIds.length})`,
+      icon: <Copy className="h-4 w-4" />,
+      variant: 'secondary',
+      className: 'bg-purple-600 hover:bg-purple-700 text-white border-none',
+      onClick: () => openCopyModal(undefined, true),
+    });
+  }
+  if (canCreate) {
+    pageActions.push({
+      label: t('Add Component'),
+      icon: <Plus className="h-4 w-4" />,
+      variant: 'default',
+      onClick: () => openCreateForm(),
+    });
+  }
 
   return (
     <PageTemplate
@@ -345,14 +422,7 @@ export default function SalaryComponents() {
         { title: t('Masters') },
         { title: t('Salary Component Master') },
       ]}
-      actions={canCreate ? [
-        {
-          label: t('Add Component'),
-          icon: <Plus className="h-4 w-4" />,
-          variant: 'default',
-          onClick: () => openCreateForm(),
-        },
-      ] : []}
+      actions={pageActions}
     >
       <div className="mx-auto max-w-6xl space-y-3 px-1 pb-6">
         {/* Dynamic summary from table data */}
@@ -458,6 +528,20 @@ export default function SalaryComponents() {
               </SelectContent>
             </Select>
 
+            <Select
+              value={String(perPage)}
+              onValueChange={(value) => fetchList({ page: 1, per_page: parseInt(value, 10) })}
+            >
+              <SelectTrigger className="h-8 w-[72px] border-slate-200 bg-white text-xs shadow-none">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[10, 25, 50, 100].map((n) => (
+                  <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
             <div className="ml-auto flex items-center gap-2 text-[11px] text-slate-500">
               {isSearching && (
                 <span className="flex items-center gap-1 text-indigo-600">
@@ -466,7 +550,7 @@ export default function SalaryComponents() {
                 </span>
               )}
               <span className="hidden sm:inline">
-                {items.length} {t('items')} · {earningCount} {t('earn')} · {deductionCount} {t('ded')} · {activeCount} {t('active')}
+                {totalItems} {t('items')} · {earningCount} {t('earn')} · {deductionCount} {t('ded')} · {activeCount} {t('active')}
               </span>
             </div>
           </div>
@@ -475,6 +559,15 @@ export default function SalaryComponents() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 bg-white text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  {canCopy && (
+                    <th className="w-10 px-2 py-2">
+                      <Checkbox
+                        checked={items.length > 0 && selectedIds.length === items.length}
+                        onCheckedChange={(v) => toggleSelectAll(Boolean(v))}
+                        aria-label={t('Select all')}
+                      />
+                    </th>
+                  )}
                   <th className="w-10 px-2 py-2">#</th>
                   <th className="px-3 py-2">{t('Component')}</th>
                   <th className="px-3 py-2">{t('Group')}</th>
@@ -482,13 +575,13 @@ export default function SalaryComponents() {
                   <th className="hidden px-3 py-2 sm:table-cell">{t('Calculation')}</th>
                   <th className="px-3 py-2">{t('Rate (%)')}</th>
                   <th className="w-16 px-3 py-2 text-center">{t('Status')}</th>
-                  <th className="w-20 px-2 py-2 text-right">{t('Actions')}</th>
+                  <th className="w-28 px-2 py-2 text-right">{t('Actions')}</th>
                 </tr>
               </thead>
               <tbody>
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-14 text-center">
+                    <td colSpan={canCopy ? 9 : 8} className="px-4 py-14 text-center">
                       <p className="text-sm font-medium text-slate-500">{t('No salary components found')}</p>
                       {canCreate && (
                         <Button
@@ -509,8 +602,17 @@ export default function SalaryComponents() {
                     key={item.id}
                     className="group border-b border-slate-50 transition-colors last:border-0 hover:bg-slate-50/80"
                   >
+                    {canCopy && (
+                      <td className="w-10 px-2 py-1.5">
+                        <Checkbox
+                          checked={selectedIds.includes(item.id)}
+                          onCheckedChange={(v) => toggleSelectOne(item.id, Boolean(v))}
+                          aria-label={t('Select row')}
+                        />
+                      </td>
+                    )}
                     <td className="px-2 py-1.5 text-xs font-medium tabular-nums text-slate-400">
-                      {index + 1}
+                      {rowOffset + index + 1}
                     </td>
                     <td className="px-3 py-1.5">
                       <div className="font-semibold text-slate-800">{item.name}</div>
@@ -594,8 +696,20 @@ export default function SalaryComponents() {
                       )}
                     </td>
                     <td className="px-2 py-1.5">
-                      {(canEdit || canDelete) && (
+                      {(canEdit || canDelete || canCopy) && (
                         <div className="flex items-center justify-end gap-0.5 opacity-70 transition-opacity group-hover:opacity-100">
+                          {canCopy && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-purple-600 hover:bg-purple-50 hover:text-purple-700"
+                              onClick={() => openCopyModal(item, false)}
+                              title={t('Copy to Branches')}
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
                           {canEdit && (
                             <Button
                               type="button"
@@ -628,8 +742,40 @@ export default function SalaryComponents() {
               </tbody>
             </table>
           </div>
+
+          <Pagination
+            from={salaryComponents?.from || 0}
+            to={salaryComponents?.to || 0}
+            total={salaryComponents?.total || 0}
+            links={salaryComponents?.links}
+            entityName={t('salary components')}
+            onPageChange={(url) => router.get(url, {}, { preserveState: true, preserveScroll: true })}
+            className="border-t border-slate-100 bg-slate-50/40"
+          />
         </div>
       </div>
+
+      <CopyToBranchesModal
+        open={isCopyModalOpen}
+        onClose={() => {
+          if (!isCopying) {
+            setIsCopyModalOpen(false);
+            if (isBulkCopy) setSelectedIds([]);
+          }
+        }}
+        onConfirm={handleCopyConfirm}
+        branches={branches}
+        excludeBranchId={activeBranchId && activeBranchId !== 'all' ? Number(activeBranchId) : currentItem?.branch_id}
+        title={
+          isBulkCopy
+            ? t('Copy {{count}} Salary Component(s) to Branches', { count: selectedIds.length })
+            : currentItem?.name
+              ? t("Copy '{{name}}' to Branches", { name: currentItem.name })
+              : t('Copy to Branches')
+        }
+        description={t('Existing component names in the target branch will be skipped.')}
+        isLoading={isCopying}
+      />
 
       <Dialog open={isFormModalOpen} onOpenChange={setIsFormModalOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">

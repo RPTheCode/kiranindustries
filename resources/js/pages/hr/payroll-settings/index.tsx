@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from '@/components/custom-toast';
 import { Save, Plus, Trash2, IndianRupee, Percent, ShieldCheck, Users } from 'lucide-react';
+import { canEditPayrollSettings } from '@/utils/authorization';
 
 function sanitizeNonNegativeNumber(value: string): string {
     if (value === '') return '';
@@ -38,7 +39,10 @@ export default function PayrollSettings() {
         defaultFinancialYear,
         nextFinancialYear,
         financialYearOptions = [],
+        auth,
     } = usePage().props as any;
+    const permissions = auth?.permissions || [];
+    const canEdit = canEditPayrollSettings(permissions);
 
     const yearOptionLabel = (year: string) => {
         if (year === defaultFinancialYear) {
@@ -249,10 +253,12 @@ export default function PayrollSettings() {
                                         {t('Configure employee & employer contribution rates for')} {financialYear}
                                     </CardDescription>
                                 </div>
+                                {canEdit && (
                                 <Button onClick={saveParameters} size="sm" className="h-8 bg-primary hover:bg-primary/90 text-xs">
                                     <Save className="w-3.5 h-3.5 mr-1.5" />
                                     {t('Save Changes')}
                                 </Button>
+                                )}
                             </div>
                         </CardHeader>
                         <CardContent className="p-4">
@@ -354,6 +360,8 @@ export default function PayrollSettings() {
                                 <CardDescription className="text-[10px]">{t('Define PT amounts based on salary ranges')}</CardDescription>
                             </div>
                             <div className="flex gap-1.5">
+                                {canEdit && (
+                                <>
                                 <Button variant="outline" size="sm" onClick={() => addSlab('pt')} className="h-8 border-primary text-primary hover:bg-primary/5 text-xs">
                                     <Plus className="w-3.5 h-3.5 mr-1.5" />
                                     {t('Add Slab')}
@@ -362,6 +370,8 @@ export default function PayrollSettings() {
                                     <Save className="w-3.5 h-3.5 mr-1.5" />
                                     {t('Save Slabs')}
                                 </Button>
+                                </>
+                                )}
                             </div>
                         </CardHeader>
                         <CardContent className="p-0">
@@ -415,9 +425,11 @@ export default function PayrollSettings() {
                                                 />
                                             </TableCell>
                                             <TableCell className="text-right py-1 px-3">
+                                                {canEdit && (
                                                 <Button variant="ghost" size="icon" onClick={() => removeSlab('pt', index)} className="h-7 w-7 text-red-400 hover:text-red-600 hover:bg-red-50">
                                                     <Trash2 className="w-3.5 h-3.5" />
                                                 </Button>
+                                                )}
                                             </TableCell>
                                         </TableRow>
                                     ))}
@@ -436,6 +448,8 @@ export default function PayrollSettings() {
                                 <CardDescription className="text-[10px]">{t('Define IT percentages based on annual salary ranges')}</CardDescription>
                             </div>
                             <div className="flex gap-1.5">
+                                {canEdit && (
+                                <>
                                 <Button variant="outline" size="sm" onClick={() => addSlab('it')} className="h-8 border-primary text-primary hover:bg-primary/5 text-xs">
                                     <Plus className="w-3.5 h-3.5 mr-1.5" />
                                     {t('Add Slab')}
@@ -444,6 +458,8 @@ export default function PayrollSettings() {
                                     <Save className="w-3.5 h-3.5 mr-1.5" />
                                     {t('Save Slabs')}
                                 </Button>
+                                </>
+                                )}
                             </div>
                         </CardHeader>
                         <CardContent className="p-0">
@@ -498,9 +514,11 @@ export default function PayrollSettings() {
                                                 />
                                             </TableCell>
                                             <TableCell className="text-right py-1 px-3">
+                                                {canEdit && (
                                                 <Button variant="ghost" size="icon" onClick={() => removeSlab('it', index)} className="h-7 w-7 text-red-400 hover:text-red-600 hover:bg-red-50">
                                                     <Trash2 className="w-3.5 h-3.5" />
                                                 </Button>
+                                                )}
                                             </TableCell>
                                         </TableRow>
                                     ))}
