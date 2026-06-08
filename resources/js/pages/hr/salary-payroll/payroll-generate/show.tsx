@@ -47,6 +47,12 @@ function formatRupee(value: number) {
   return Number(value).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
+function formatDays(value: number) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '0';
+  return n % 1 === 0 ? String(n) : n.toFixed(1);
+}
+
 function AttendanceDaysCell({
   entry,
   t,
@@ -54,11 +60,14 @@ function AttendanceDaysCell({
   entry: any;
   t: (key: string, opts?: Record<string, unknown>) => string;
 }) {
-  const working = Number(entry.working_days ?? 26);
+  const working = Math.max(26, Number(entry.working_days ?? 26) || 26);
   const paid = Number(entry.paid_days ?? 0);
   const present = Number(entry.present_days ?? 0);
+  const halfDays = Number(entry.half_days ?? 0);
+  const weekOffWorkedDays = Number(entry.week_off_worked_days ?? 0);
   const incentiveDays = Number(entry.incentive_days ?? 0);
   const otEnabled = Boolean(entry.ot_enabled);
+  const halfDayCredit = halfDays * 0.5;
 
   return (
     <div className="flex flex-col items-center gap-0.5">
@@ -67,12 +76,30 @@ function AttendanceDaysCell({
           'rounded-md px-2 py-0.5 text-[11px] font-bold tabular-nums leading-tight',
           paid >= working ? 'bg-emerald-100 text-emerald-800' : paid > 0 ? 'bg-sky-100 text-sky-800' : 'bg-slate-100 text-slate-500',
         )}
-        title={t('Paid {{paid}} of {{working}} working days', { paid, working })}
+        title={halfDays > 0
+          ? t('Paid {{paid}} of {{working}} — includes {{half}} half days (×0.5)', { paid: formatDays(paid), working, half: halfDays })
+          : t('Paid {{paid}} of {{working}} working days', { paid: formatDays(paid), working })}
       >
-        {paid}/{working}
+        {formatDays(paid)}/{working}
       </div>
       <div className="flex flex-wrap items-center justify-center gap-1 text-[9px] text-slate-500">
-        <span title={t('Present days')}>{t('Present')} {present}</span>
+        <span title={t('Present days (incl. half)')}>{t('Present')} {formatDays(present)}</span>
+        {halfDays > 0 && (
+          <span
+            className="rounded bg-amber-100 px-1 py-px font-bold text-amber-800"
+            title={t('{{count}} half days × 0.5 = {{credit}} paid days', { count: halfDays, credit: formatDays(halfDayCredit) })}
+          >
+            {t('HD')} {halfDays}
+          </span>
+        )}
+        {weekOffWorkedDays > 0 && (
+          <span
+            className="rounded bg-indigo-100 px-1 py-px font-bold text-indigo-800"
+            title={t('Week-off days worked — included in paid salary')}
+          >
+            {t('WO')} {formatDays(weekOffWorkedDays)}
+          </span>
+        )}
         <span
           className={cn(
             'rounded px-1 py-px font-bold uppercase',

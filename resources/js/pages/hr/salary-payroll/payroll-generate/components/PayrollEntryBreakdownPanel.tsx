@@ -11,6 +11,8 @@ export interface PayrollEntryBreakdown {
   total_earnings: number;
   working_days?: number;
   present_days?: number;
+  half_days?: number;
+  week_off_worked_days?: number;
   paid_days?: number;
   ot_enabled?: boolean;
   incentive_days?: number;
@@ -43,12 +45,30 @@ export interface PayrollEntryBreakdown {
   esi_employee: number;
   esi_employer?: number;
   pt_amount: number;
+  pt_breakdown?: {
+    gross: number;
+    min_amt: number | null;
+    max_amt: number | null;
+    pt_amount: number;
+  } | null;
   earnings_breakdown?: Record<string, number>;
   deductions_breakdown?: Record<string, number>;
 }
 
 function formatRupee(value: number) {
   return Number(value).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function formatDays(value: number) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '0';
+  return n % 1 === 0 ? String(n) : n.toFixed(1);
+}
+
+function formatPtSlabRange(min: number | null, max: number | null, formatRupee: (v: number) => string) {
+  if (min === null && max === null) return '—';
+  if (max === null) return `≥ ₹${formatRupee(min ?? 0)}`;
+  return `₹${formatRupee(min ?? 0)} – ₹${formatRupee(max)}`;
 }
 
 const COMPONENT_ORDER = ['BASIC', 'HRA', 'LTA', 'ALLOWANCE', 'SPECIAL ALLOWANCE'];
@@ -168,7 +188,7 @@ function EarningsBreakdownPanel({
   const componentLines = componentEarningLines(entry.earnings_breakdown);
   const incentiveDays = Number(entry.incentive_days ?? 0);
   const incentiveAmount = Number(entry.incentive_amount ?? 0);
-  const workingDays = Number(entry.working_days ?? 26);
+  const workingDays = Math.max(26, Number(entry.working_days ?? 26) || 26);
   const monthlyGross = Number(entry.monthly_gross ?? 0);
   const perDayRate = Number(entry.incentive_per_day_rate ?? 0) || (workingDays > 0 ? Math.round((monthlyGross / workingDays) * 100) / 100 : 0);
   const regularEarnings = Number(entry.regular_earnings ?? 0) || componentLines.reduce((sum, [, amt]) => sum + Number(amt), 0);
@@ -238,15 +258,19 @@ export function PayrollEntryBreakdownPanel({ entry, runUsesAttendance = true, on
   const deductions = breakdownLines(entry.deductions_breakdown);
   const componentLines = componentEarningLines(entry.earnings_breakdown);
   const hasBreakdown = componentLines.length > 0 || deductions.length > 0 || Number(entry.incentive_amount ?? 0) > 0;
-  const workingDays = Number(entry.working_days ?? 26);
+  const workingDays = Math.max(26, Number(entry.working_days ?? 26) || 26);
   const presentDays = Number(entry.present_days ?? 0);
+  const halfDays = Number(entry.half_days ?? 0);
+  const weekOffWorkedDays = Number(entry.week_off_worked_days ?? 0);
   const paidDays = Number(entry.paid_days ?? 0);
   const incentiveDays = Number(entry.incentive_days ?? 0);
   const incentiveAmount = Number(entry.incentive_amount ?? 0);
   const otEnabled = Boolean(entry.ot_enabled);
   const isProRated = runUsesAttendance && paidDays > 0 && paidDays < workingDays;
   const hasIncentive = incentiveDays > 0 && incentiveAmount > 0;
-  const showAttendanceNote = runUsesAttendance && (entry.has_mispunch || isProRated || paidDays === 0 || hasIncentive || otEnabled);
+  const hasHalfDays = halfDays > 0;
+  const hasWeekOffWorked = weekOffWorkedDays > 0;
+  const showAttendanceNote = runUsesAttendance && (entry.has_mispunch || isProRated || paidDays === 0 || hasIncentive || otEnabled || hasHalfDays || hasWeekOffWorked);
   const salaryMeta = salaryDisplayMeta(entry);
 
   return (
@@ -275,14 +299,20 @@ export function PayrollEntryBreakdownPanel({ entry, runUsesAttendance = true, on
         )}>
           <span>
             {t('Working')} <strong>{workingDays}</strong>
-            {' → '}{t('Present')} <strong>{presentDays}</strong>
-            {' → '}{t('Paid')} <strong>{paidDays}</strong>
+            {' → '}{t('Present')} <strong>{formatDays(presentDays)}</strong>
+            {hasHalfDays && (
+              <> · <strong>{halfDays}</strong> {t('half days')} (×0.5 = <strong>{formatDays(halfDays * 0.5)}</strong>)</>
+            )}
+            {hasWeekOffWorked && (
+              <> · {t('Week-off worked')} <strong>{formatDays(weekOffWorkedDays)}</strong></>
+            )}
+            {' → '}{t('Paid')} <strong>{formatDays(paidDays)}</strong>
             {' · '}{t('OT')} <strong>{otEnabled ? t('Yes') : t('No')}</strong>
             {hasIncentive && (
               <> · {t('Incentive Days')} <strong>{incentiveDays}</strong> · {t('Incentive Amount')} <strong>₹{formatRupee(incentiveAmount)}</strong></>
             )}
             {isProRated && paidDays > 0 && !hasIncentive && (
-              <> · {t('Total Salary')} ₹{formatRupee(entry.total_earnings)} ({paidDays}/{workingDays} {t('days')})</>
+              <> · {t('Total Salary')} ₹{formatRupee(entry.total_earnings)} ({formatDays(paidDays)}/{workingDays} {t('days')})</>
             )}
             {!isProRated && paidDays > 0 && !hasIncentive && (
               <> · {t('Full month pay')}</>
@@ -349,6 +379,39 @@ export function PayrollEntryBreakdownPanel({ entry, runUsesAttendance = true, on
               eps: entry.pf_breakdown.eps_pct,
               epf: entry.pf_breakdown.epf_employer_pct,
             })}
+          </p>
+        </div>
+      )}
+
+      {entry.pt_breakdown && entry.pt_breakdown.pt_amount > 0 && (
+        <div className="mb-2 rounded-md border border-violet-200 bg-violet-50/60 px-2.5 py-2 text-[10px] text-slate-700">
+          <p className="mb-1.5 font-bold uppercase tracking-wide text-violet-900">{t('Professional Tax (P.Tax)')}</p>
+          <div className="grid gap-1 sm:grid-cols-2">
+            <div className="flex justify-between gap-2 rounded bg-white/80 px-2 py-1">
+              <span>{t('Earned gross (Total Salary)')}</span>
+              <strong className="tabular-nums">₹{formatRupee(entry.pt_breakdown.gross)}</strong>
+            </div>
+            <div className="flex justify-between gap-2 rounded bg-white/80 px-2 py-1">
+              <span>{t('PT slab (monthly)')}</span>
+              <strong className="tabular-nums text-violet-900">
+                {formatPtSlabRange(entry.pt_breakdown.min_amt, entry.pt_breakdown.max_amt, formatRupee)}
+              </strong>
+            </div>
+            <div className="flex justify-between gap-2 rounded bg-white/80 px-2 py-1 sm:col-span-2">
+              <span>{t('Professional Tax deducted')}</span>
+              <strong className="tabular-nums text-red-700">₹{formatRupee(entry.pt_breakdown.pt_amount)}</strong>
+            </div>
+          </div>
+          <p className="mt-1.5 text-[9px] text-violet-800/90">
+            {entry.pt_breakdown.min_amt !== null ? (
+              t('PT is a fixed monthly amount from Payroll Settings slabs — not a % of salary. Earned gross ₹{{gross}} falls in slab {{slab}} → PT ₹{{pt}}.', {
+                gross: formatRupee(entry.pt_breakdown.gross),
+                slab: formatPtSlabRange(entry.pt_breakdown.min_amt, entry.pt_breakdown.max_amt, formatRupee),
+                pt: formatRupee(entry.pt_breakdown.pt_amount),
+              })
+            ) : (
+              t('PT is deducted as per slabs configured in Payroll Settings based on this month\'s Total Salary.')
+            )}
           </p>
         </div>
       )}

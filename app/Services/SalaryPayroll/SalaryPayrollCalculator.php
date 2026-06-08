@@ -42,8 +42,12 @@ class SalaryPayrollCalculator
 
         $emp = $employee->employee;
         $useAttendance = (bool) ($context['use_attendance'] ?? false);
-        $workingDays = ($emp && (float) $emp->working_days > 0) ? (float) $emp->working_days : 26.0;
+        $empWorkingDays = ($emp && (float) $emp->working_days > 0) ? (float) $emp->working_days : 26.0;
         $dailyOption = (bool) ($emp?->daily_option ?? false);
+        $isDayRateWorker = $dailyOption && $empWorkingDays <= 1;
+        $salaryStandardDays = 26.0;
+        $structureGross = $isDayRateWorker ? ($rateGross * $salaryStandardDays) : $rateGross;
+        $workingDays = $salaryStandardDays;
 
         $attendance = [
             'working_days' => $workingDays,
@@ -64,7 +68,6 @@ class SalaryPayrollCalculator
                 Carbon::parse($context['pay_period_end']),
                 $context['branch_id'] ?? null
             );
-            $workingDays = $attendance['working_days'];
         }
 
         $regularPresentDays = (float) $attendance['present_days'];
@@ -76,37 +79,25 @@ class SalaryPayrollCalculator
         $incentiveDays = 0.0;
         $incentiveAmount = 0.0;
 
-        $isMonthlySalaryStaff = ! ($dailyOption && $workingDays <= 1);
-        $salaryStandardDays = 26.0;
-
-        if ($isMonthlySalaryStaff) {
-            $workingDays = $salaryStandardDays;
-        }
-
         if (! $useAttendance) {
-            $regularPresentDays = $isMonthlySalaryStaff ? $salaryStandardDays : $workingDays;
+            $regularPresentDays = $salaryStandardDays;
             $totalWorkedDays = $regularPresentDays;
             $presentDays = $totalWorkedDays;
-            $paidDays = $regularPresentDays;
-        } elseif ($isMonthlySalaryStaff) {
+            $paidDays = $salaryStandardDays;
+        } else {
             $regularPaidDays = min($regularPresentDays, $salaryStandardDays);
-            $paidDays = $regularPaidDays;
+            $paidDays = $regularPaidDays + $weekOffWorkedDays;
 
             if ($otEnabled) {
                 $incentiveDays = max(0.0, $totalWorkedDays - $salaryStandardDays);
             }
         }
 
-        $proRataBaseDays = $isMonthlySalaryStaff
-            ? ($useAttendance ? min($regularPresentDays, $salaryStandardDays) : $salaryStandardDays)
-            : $paidDays;
+        $proRataBaseDays = $useAttendance
+            ? (min($regularPresentDays, $salaryStandardDays) + $weekOffWorkedDays)
+            : $salaryStandardDays;
 
-        $proRataFactor = $this->proRataFactor(
-            $rateGross,
-            $isMonthlySalaryStaff ? $salaryStandardDays : $workingDays,
-            $proRataBaseDays,
-            $dailyOption
-        );
+        $proRataFactor = $this->proRataFactor($structureGross, $salaryStandardDays, $proRataBaseDays);
 
         $components = $this->componentAssignment->resolveForEmployee($branchComponents, $emp);
         $options = [
@@ -114,7 +105,7 @@ class SalaryPayrollCalculator
             'apply_esi' => (bool) ($emp?->esic_flag ?? false),
         ];
 
-        $split = $this->structureCalculator->splitFromGross($rateGross, $components, $options);
+        $split = $this->structureCalculator->splitFromGross($structureGross, $components, $options);
         $params = PayrollParameter::forFinancialYear($financialYear);
 
         $earningsBreakdown = [];
@@ -126,11 +117,11 @@ class SalaryPayrollCalculator
             }
         }
 
-        $targetRegularEarnings = round($rateGross * $proRataFactor, 0);
+        $targetRegularEarnings = round($structureGross * $proRataFactor, 0);
         $earningsBreakdown = $this->reconcileEarningsToTarget($earningsBreakdown, $targetRegularEarnings);
 
-        if ($isMonthlySalaryStaff && $incentiveDays > 0) {
-            $incentiveAmount = round(($rateGross / $salaryStandardDays) * $incentiveDays, 0);
+        if ($incentiveDays > 0) {
+            $incentiveAmount = round(($structureGross / $salaryStandardDays) * $incentiveDays, 0);
         }
 
         $deductionsBreakdown = [];
@@ -163,12 +154,8 @@ class SalaryPayrollCalculator
             $adminPct = PayrollParameter::pfAdminChargePct($params);
             $maxPf = (float) ($params?->max_pf_amount ?? 15000);
             $pfBasic = ($emp->pf_basic_salary > 0) ? (float) $emp->pf_basic_salary : (float) $split['basic_amount'];
-            if ($useAttendance && $isMonthlySalaryStaff) {
+            if ($useAttendance) {
                 $pfBasic = ($pfBasic / $salaryStandardDays) * $proRataBaseDays;
-            } elseif ($useAttendance && $workingDays > 0 && ! ($dailyOption && $workingDays <= 1)) {
-                $pfBasic = ($pfBasic / $workingDays) * $paidDays;
-            } elseif ($dailyOption && $workingDays <= 1) {
-                $pfBasic = $pfBasic * $paidDays;
             }
             $pfWages = round(min($pfBasic, $maxPf), 0);
             $pfEmployee = round($pfWages * $pfPct / 100, 0);
@@ -222,11 +209,13 @@ class SalaryPayrollCalculator
             'working_days' => $workingDays,
             'present_days' => $presentDays,
             'paid_days' => $paidDays,
+            'week_off_worked_days' => round($weekOffWorkedDays, 2),
+            'half_days' => round((float) ($attendance['half_days'] ?? 0), 2),
             'ot_enabled' => $otEnabled,
             'incentive_days' => round($incentiveDays, 2),
             'incentive_amount' => round($incentiveAmount, 2),
-            'incentive_per_day_rate' => ($isMonthlySalaryStaff && $incentiveDays > 0)
-                ? round($rateGross / $salaryStandardDays, 2)
+            'incentive_per_day_rate' => ($incentiveDays > 0)
+                ? round($structureGross / $salaryStandardDays, 2)
                 : 0.0,
             'regular_earnings' => round($targetRegularEarnings, 0),
             'mispunch_count' => (int) $attendance['mispunch_count'],
@@ -236,17 +225,14 @@ class SalaryPayrollCalculator
         ];
     }
 
-    private function proRataFactor(float $rateGross, float $workingDays, float $paidDays, bool $dailyOption): float
+    private function proRataFactor(float $structureGross, float $workingDays, float $paidDays): float
     {
-        if ($workingDays <= 0) {
+        if ($workingDays <= 0 || $structureGross <= 0) {
             return 0.0;
         }
 
-        if ($dailyOption && $workingDays <= 1) {
-            return $paidDays;
-        }
-
-        return min(1.0, max(0.0, $paidDays / $workingDays));
+        // Week-off worked days are paid on top of the 26-day standard (can exceed 1.0).
+        return max(0.0, $paidDays / $workingDays);
     }
 
     /**
@@ -308,6 +294,7 @@ class SalaryPayrollCalculator
             'working_days' => 26,
             'present_days' => 0,
             'paid_days' => 0,
+            'half_days' => 0,
             'ot_enabled' => false,
             'incentive_days' => 0,
             'incentive_amount' => 0,

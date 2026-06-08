@@ -24,8 +24,7 @@ class SalaryPayrollAttendanceService
     public function summarize(User $employee, Carbon $periodStart, Carbon $periodEnd, ?int $branchId = null): array
     {
         $emp = $employee->employee;
-        $workingDays = ($emp && (float) $emp->working_days > 0) ? (float) $emp->working_days : 26.0;
-        $dailyOption = (bool) ($emp?->daily_option ?? false);
+        $salaryStandardDays = 26.0;
 
         $codes = array_values(array_unique(array_filter([
             trim((string) ($emp?->emy_code ?? '')),
@@ -33,7 +32,7 @@ class SalaryPayrollAttendanceService
         ])));
 
         if (empty($codes)) {
-            return $this->emptySummary($workingDays, $dailyOption);
+            return $this->emptySummary();
         }
 
         $startDate = $periodStart->copy()->startOfDay();
@@ -72,10 +71,10 @@ class SalaryPayrollAttendanceService
 
         $regularWorkedDays = $presentDays + ($halfDays * 0.5);
         $totalWorkedDays = $regularWorkedDays + $weekOffWorkedDays;
-        $paidDays = $this->resolvePaidDays($regularWorkedDays, $weekOffWorkedDays, $workingDays, $dailyOption);
+        $paidDays = $this->resolvePaidDays($regularWorkedDays, $weekOffWorkedDays, $salaryStandardDays);
 
         return [
-            'working_days' => $workingDays,
+            'working_days' => $salaryStandardDays,
             'present_days' => round($regularWorkedDays, 2),
             'half_days' => round($halfDays, 2),
             'week_off_worked_days' => round($weekOffWorkedDays, 2),
@@ -90,15 +89,15 @@ class SalaryPayrollAttendanceService
     /**
      * @return array{working_days: float, present_days: float, half_days: float, week_off_worked_days: float, total_worked_days: float, paid_days: float, mispunch_count: int, has_mispunch: bool, mispunch_dates: array<int, string>}
      */
-    private function emptySummary(float $workingDays, bool $dailyOption): array
+    private function emptySummary(): array
     {
         return [
-            'working_days' => $workingDays,
+            'working_days' => 26.0,
             'present_days' => 0.0,
             'half_days' => 0.0,
             'week_off_worked_days' => 0.0,
             'total_worked_days' => 0.0,
-            'paid_days' => $dailyOption ? 0.0 : 0.0,
+            'paid_days' => 0.0,
             'mispunch_count' => 0,
             'has_mispunch' => false,
             'mispunch_dates' => [],
@@ -108,14 +107,9 @@ class SalaryPayrollAttendanceService
     private function resolvePaidDays(
         float $regularWorkedDays,
         float $weekOffWorkedDays,
-        float $workingDays,
-        bool $dailyOption
+        float $salaryStandardDays
     ): float {
-        if ($dailyOption && $workingDays <= 1) {
-            return $regularWorkedDays + $weekOffWorkedDays;
-        }
-
-        $normalPayable = min($regularWorkedDays, $workingDays);
+        $normalPayable = min($regularWorkedDays, $salaryStandardDays);
 
         return $normalPayable + $weekOffWorkedDays;
     }

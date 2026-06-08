@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Category;
 use App\Models\Department;
 use App\Models\PayrollParameter;
+use App\Models\ProfessionalTaxSlab;
 use App\Models\SalaryPayroll\SalaryPayrollEntry;
 use App\Models\SalaryPayroll\SalaryPayrollRun;
 use App\Models\Shift;
@@ -519,8 +520,10 @@ class SalaryPayrollGenerateController extends Controller
             'monthly_gross' => (float) $entry->monthly_gross,
             'daily_option' => (bool) ($entry->employee?->employee?->daily_option ?? false),
             'employee_working_days' => (float) ($entry->employee?->employee?->working_days ?? 0),
-            'working_days' => (float) ($entry->working_days ?? 26),
+            'working_days' => $this->payrollStandardWorkingDays($entry),
             'present_days' => (float) ($entry->present_days ?? 0),
+            'half_days' => (float) ($entry->half_days ?? 0),
+            'week_off_worked_days' => (float) ($entry->week_off_worked_days ?? 0),
             'paid_days' => (float) ($entry->paid_days ?? 0),
             'ot_enabled' => (bool) ($entry->ot_enabled ?? $entry->employee?->employee?->ot_flag ?? false),
             'incentive_days' => (float) ($entry->incentive_days ?? 0),
@@ -542,6 +545,7 @@ class SalaryPayrollGenerateController extends Controller
             'esi_employee' => (float) $entry->esi_employee,
             'esi_employer' => (float) $entry->esi_employer,
             'pt_amount' => (float) $entry->pt_amount,
+            'pt_breakdown' => $this->ptBreakdownForEntry($entry, $run),
             'earnings_breakdown' => $this->componentEarningsBreakdown($entry->earnings_breakdown ?? []),
             'deductions_breakdown' => $entry->deductions_breakdown ?? [],
             'status' => $entry->status,
@@ -553,6 +557,14 @@ class SalaryPayrollGenerateController extends Controller
             'has_payslip' => (bool) $entry->payslip,
             'can_download_payslip' => $entry->isLocked(),
         ];
+    }
+
+    private function payrollStandardWorkingDays(SalaryPayrollEntry $entry): float
+    {
+        $stored = (float) ($entry->working_days ?? 26);
+
+        // Salary payroll always uses 26-day month; legacy rows may have stored emp working_days (e.g. 1).
+        return $stored >= 26 ? $stored : 26.0;
     }
 
     /**
@@ -587,6 +599,59 @@ class SalaryPayrollGenerateController extends Controller
             'epf_employer_pct' => $epfPct,
             'epf_employer' => $epfEmployer,
         ];
+    }
+
+    /**
+     * @return array<string, float|int|string|null>|null
+     */
+    private function ptBreakdownForEntry(SalaryPayrollEntry $entry, ?SalaryPayrollRun $run = null): ?array
+    {
+        $ptAmount = (float) $entry->pt_amount;
+        if ($ptAmount <= 0) {
+            return null;
+        }
+
+        $gross = (float) $entry->total_earnings;
+        $financialYear = $run?->financial_year ?? $entry->run?->financial_year;
+        $slab = $this->matchingPtSlab($gross, $financialYear);
+
+        if (! $slab) {
+            return [
+                'gross' => $gross,
+                'min_amt' => null,
+                'max_amt' => null,
+                'pt_amount' => $ptAmount,
+            ];
+        }
+
+        return [
+            'gross' => $gross,
+            'min_amt' => (float) $slab->min_amt,
+            'max_amt' => $slab->max_amt !== null ? (float) $slab->max_amt : null,
+            'pt_amount' => $ptAmount,
+        ];
+    }
+
+    private function matchingPtSlab(float $gross, ?string $financialYear): ?ProfessionalTaxSlab
+    {
+        $slabs = ProfessionalTaxSlab::where('financial_year', $financialYear)
+            ->orderBy('min_amt')
+            ->get();
+
+        if ($slabs->isEmpty()) {
+            $slabs = ProfessionalTaxSlab::orderBy('min_amt')->get();
+        }
+
+        foreach ($slabs as $slab) {
+            $min = (float) $slab->min_amt;
+            $max = $slab->max_amt !== null ? (float) $slab->max_amt : null;
+
+            if ($gross >= $min && ($max === null || $gross <= $max)) {
+                return $slab;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -625,13 +690,17 @@ class SalaryPayrollGenerateController extends Controller
             return 0.0;
         }
 
-        $workingDays = (float) ($entry->working_days ?? 26);
+        $workingDays = $this->payrollStandardWorkingDays($entry);
         $monthlyGross = (float) $entry->monthly_gross;
-        if ($workingDays <= 0 || $monthlyGross <= 0) {
+        $dailyOption = (bool) ($entry->daily_option ?? $entry->employee?->employee?->daily_option ?? false);
+        $empWorkingDays = (float) ($entry->employee_working_days ?? $entry->employee?->employee?->working_days ?? 26);
+        $structureGross = ($dailyOption && $empWorkingDays <= 1) ? ($monthlyGross * $workingDays) : $monthlyGross;
+
+        if ($workingDays <= 0 || $structureGross <= 0) {
             return 0.0;
         }
 
-        return round($monthlyGross / $workingDays, 2);
+        return round($structureGross / $workingDays, 2);
     }
 
     private function regularEarningsForEntry(SalaryPayrollEntry $entry): float

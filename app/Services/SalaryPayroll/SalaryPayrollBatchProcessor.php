@@ -142,6 +142,8 @@ class SalaryPayrollBatchProcessor
             'monthly_gross' => $result['monthly_gross'],
             'working_days' => $result['working_days'] ?? 26,
             'present_days' => $result['present_days'] ?? 0,
+            'half_days' => $result['half_days'] ?? 0,
+            'week_off_worked_days' => $result['week_off_worked_days'] ?? 0,
             'paid_days' => $result['paid_days'] ?? 0,
             'incentive_days' => $result['incentive_days'] ?? 0,
             'incentive_amount' => $result['incentive_amount'] ?? 0,
