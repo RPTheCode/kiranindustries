@@ -748,12 +748,10 @@ export default function SalaryPayrollEmployeeSalaries() {
                   <th className="hidden px-3 py-2 md:table-cell">{t('Category')}</th>
                   <th className="hidden px-3 py-2 lg:table-cell">{t('Department')}</th>
                   <th className="hidden px-3 py-2 sm:table-cell">{t('Shift')}</th>
-                  <th className="min-w-[188px] px-3 py-2">
+                  <th className="min-w-[148px] px-3 py-2">
                     <div>{t('Gross Salary')}</div>
-                    <div className="mt-1 flex items-center gap-1 text-[9px] font-normal normal-case tracking-normal text-muted-foreground">
-                      <span className="rounded-sm bg-amber-500 px-1.5 py-0.5 font-bold text-white">{t('Daily')}</span>
-                      <span className="text-[8px]">{t('or')}</span>
-                      <span className="rounded-sm bg-blue-600 px-1.5 py-0.5 font-bold text-white">{t('Monthly')}</span>
+                    <div className="mt-0.5 text-[9px] font-normal normal-case tracking-normal text-muted-foreground">
+                      {t('/day or /mo')}
                     </div>
                   </th>
                   {tableComponents.map((comp) => (
@@ -814,88 +812,62 @@ export default function SalaryPayrollEmployeeSalaries() {
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex flex-col gap-0.5">
-                        <div className="flex items-center gap-1.5">
-                          {/* Day | Month segmented control */}
-                          <div
-                            className="flex shrink-0 flex-col rounded-md border border-slate-200 bg-slate-100 p-0.5 shadow-inner"
-                            role="group"
-                            aria-label={t('Salary entry type')}
+                        <div
+                          className="relative flex h-8 w-full min-w-[118px] max-w-[148px] items-stretch overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm"
+                          title={dailyOption ? t('Amount per day') : t('Amount per month')}
+                        >
+                          <span className="flex shrink-0 items-center pl-2 text-[10px] font-bold text-slate-400">₹</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            step={isDayWise ? '0.01' : '1'}
+                            disabled={grossDisabled}
+                            value={grossValue}
+                            onChange={(e) => handleGrossChange(emp.id, e.target.value)}
+                            onBlur={() => handleGrossBlur(emp)}
+                            onKeyDown={handleGrossKeyDown}
+                            placeholder="0"
+                            aria-label={dailyOption ? t('Daily gross amount') : t('Monthly gross amount')}
+                            className="h-8 min-w-0 flex-1 rounded-none border-0 bg-transparent px-1 text-sm font-bold tabular-nums shadow-none focus-visible:ring-0"
+                          />
+                          <Select
+                            value={dailyOption ? 'day' : 'month'}
+                            disabled={grossDisabled}
+                            onValueChange={(value) => {
+                              const nextDaily = value === 'day';
+                              if (nextDaily !== dailyOption) {
+                                handleDailyOptionToggle(emp, nextDaily);
+                              }
+                            }}
                           >
-                            <button
-                              type="button"
-                              disabled={grossDisabled}
-                              aria-pressed={dailyOption}
-                              title={t('Enter per-day wage')}
-                              onClick={() => !dailyOption && handleDailyOptionToggle(emp, true)}
+                            <SelectTrigger
+                              aria-label={t('Salary entry type')}
                               className={cn(
-                                'rounded px-1.5 py-0.5 text-[9px] font-bold leading-tight transition-all',
-                                dailyOption
-                                  ? 'bg-amber-500 text-white shadow-sm'
-                                  : 'text-slate-600 hover:bg-white hover:text-slate-900',
-                                grossDisabled && 'cursor-not-allowed opacity-60',
+                                'h-8 w-[54px] shrink-0 gap-0 rounded-none border-0 border-l border-slate-200 bg-slate-50/90 px-1.5 text-[10px] font-bold shadow-none focus:ring-0',
+                                dailyOption ? 'text-amber-700' : 'text-blue-700',
+                                grossDisabled && 'opacity-60',
                               )}
                             >
-                              {t('Daily')}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={grossDisabled}
-                              aria-pressed={!dailyOption}
-                              title={t('Enter full month salary')}
-                              onClick={() => dailyOption && handleDailyOptionToggle(emp, false)}
-                              className={cn(
-                                'rounded px-1.5 py-0.5 text-[9px] font-bold leading-tight transition-all',
-                                !dailyOption
-                                  ? 'bg-blue-600 text-white shadow-sm'
-                                  : 'text-slate-600 hover:bg-white hover:text-slate-900',
-                                grossDisabled && 'cursor-not-allowed opacity-60',
-                              )}
-                            >
-                              {t('Monthly')}
-                            </button>
-                          </div>
-
-                          <div
-                            className="relative flex h-8 min-w-[80px] flex-1 items-center rounded-md border border-slate-200 bg-white pl-1.5 pr-7 shadow-sm"
-                            title={dailyOption ? t('Amount per day') : t('Amount per month')}
-                          >
-                            <span className="text-[10px] font-bold text-slate-400">₹</span>
-                            <Input
-                              type="number"
-                              min="0"
-                              step={isDayWise ? '0.01' : '1'}
-                              disabled={grossDisabled}
-                              value={grossValue}
-                              onChange={(e) => handleGrossChange(emp.id, e.target.value)}
-                              onBlur={() => handleGrossBlur(emp)}
-                              onKeyDown={handleGrossKeyDown}
-                              placeholder={dailyOption ? t('Per day') : t('Per month')}
-                              aria-label={dailyOption ? t('Daily gross amount') : t('Monthly gross amount')}
-                              className="h-full min-w-0 flex-1 border-0 bg-transparent p-0 pl-0.5 text-sm font-bold tabular-nums shadow-none focus-visible:ring-0"
-                            />
-                            <span className={cn(
-                              'pointer-events-none absolute right-1.5 text-[9px] font-bold',
-                              dailyOption ? 'text-amber-600' : 'text-blue-600',
-                            )}>
-                              {dailyOption ? t('/day') : t('/mo')}
-                            </span>
-                            {(isSaving || isTogglingDaily) && (
-                              <Loader2 className="absolute -right-4 h-3 w-3 animate-spin text-primary" />
-                            )}
-                          </div>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent align="end" className="min-w-[72px]">
+                              <SelectItem value="day" className="text-xs font-semibold">{t('/day')}</SelectItem>
+                              <SelectItem value="month" className="text-xs font-semibold">{t('/mo')}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {(isSaving || isTogglingDaily) && (
+                            <Loader2 className="absolute -right-4 top-1/2 h-3 w-3 -translate-y-1/2 animate-spin text-primary" />
+                          )}
                         </div>
-                        <p className={cn(
-                          'truncate pl-0.5 text-[9px] font-medium leading-tight',
-                          dailyOption ? 'text-amber-700' : 'text-blue-700',
-                        )}>
+                        <p className="truncate text-[9px] leading-tight text-muted-foreground">
                           {dailyOption
                             ? (workingDays === 1
-                              ? t('One day\'s pay → Basic on 1 day')
-                              : t('Daily × {{days}} days = ₹{{total}}/month', {
+                              ? t('Per day wage')
+                              : t('× {{days}} days → ₹{{total}}/mo', {
                                 days: workingDays,
                                 total: grossForSplit > 0 ? formatRupee(grossForSplit) : '—',
                               }))
-                            : t('Full month salary ({{days}} days)', { days: workingDays })}
+                            : t('Full month ({{days}} days)', { days: workingDays })}
                         </p>
                       </div>
                     </td>
