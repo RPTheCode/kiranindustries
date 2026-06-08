@@ -53,6 +53,14 @@ interface AttendanceRecord {
     base_shift?: string;
     log_details?: string;
     employee_display_name?: string;
+    is_manual?: boolean;
+    is_in_manual?: boolean;
+    is_out_manual?: boolean;
+    is_mispunch_cleared?: boolean;
+    manual_by_name?: string | null;
+    manual_remarks?: string | null;
+    shift_start?: string | null;
+    shift_end?: string | null;
     employee: {
         user: { name: string };
     };
@@ -87,6 +95,7 @@ interface Props {
         category_id?: string;
         section_id?: string;
         status?: string;
+        entry_source?: string;
     };
 }
 
@@ -136,6 +145,7 @@ export default function AttendanceSync({
     const [catId, setCatId] = useState(filters.category_id ? String(filters.category_id) : 'all');
     const [secId, setSecId] = useState(filters.section_id ? String(filters.section_id) : 'all');
     const [statusFilter, setStatusFilter] = useState(filters.status || 'MIS');
+    const [entrySourceFilter, setEntrySourceFilter] = useState(filters.entry_source || 'all');
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isSyncControlsOpen, setIsSyncControlsOpen] = useState(false);
     const isFirstRender = React.useRef(true);
@@ -149,6 +159,7 @@ export default function AttendanceSync({
         setCatId(filters.category_id ? String(filters.category_id) : 'all');
         setSecId(filters.section_id ? String(filters.section_id) : 'all');
         setStatusFilter(filters.status || 'MIS');
+        setEntrySourceFilter(filters.entry_source || 'all');
     }, [filters, activeBranchId]);
 
     const { data, setData, post, put, processing } = useForm({
@@ -351,6 +362,47 @@ export default function AttendanceSync({
         }
     };
 
+    const [clearingId, setClearingId] = useState<number | null>(null);
+
+    const handleQuickClear = (record: AttendanceRecord) => {
+        const pairs = recordToPunchPairs(record);
+        const filled = pairs.map((pair, idx) => {
+            if (pairs.length === 1 && idx === 0) {
+                return {
+                    in_time: pair.in_time || record.shift_start || '',
+                    out_time: pair.out_time || record.shift_end || '',
+                };
+            }
+            return {
+                in_time: pair.in_time || record.shift_start || '',
+                out_time: pair.out_time || record.shift_end || '',
+            };
+        });
+
+        if (filled.some(p => !p.in_time || !p.out_time)) {
+            toast.error('Shift times not available — use Edit to enter punches manually.');
+            openEditModal(record);
+            return;
+        }
+
+        const payload = buildAttendancePayloadFromPairs(filled, 'P');
+        const dateStr = record.attendance_date.split('T')[0];
+
+        setClearingId(record.id);
+        router.put(route('hr.attendance.sync.update', record.id), {
+            in_time: payload.in_time ? `${dateStr} ${payload.in_time}` : '',
+            out_time: payload.out_time ? `${dateStr} ${payload.out_time}` : '',
+            status: 'P',
+            log_details: payload.log_details,
+            actual_work_minutes: payload.actual_work_minutes,
+        }, {
+            preserveScroll: true,
+            onSuccess: () => toast.success('Mispunch cleared — marked Present (manual).'),
+            onError: () => toast.error('Failed to clear mispunch.'),
+            onFinish: () => setClearingId(null),
+        });
+    };
+
     const handleFilter = () => {
         setIsRefreshing(true);
         const params: Record<string, string> = {
@@ -360,6 +412,7 @@ export default function AttendanceSync({
             category_id: catId,
             section_id: secId,
             status: statusFilter,
+            entry_source: entrySourceFilter,
         };
         if (filterFrom || filterTo) {
             params.use_dates = '1';
@@ -383,6 +436,7 @@ export default function AttendanceSync({
         setCatId('all');
         setSecId('all');
         setStatusFilter('MIS');
+        setEntrySourceFilter('all');
 
         router.get(route('hr.attendance.sync'), {
             search: '',
@@ -391,6 +445,7 @@ export default function AttendanceSync({
             category_id: 'all',
             section_id: 'all',
             status: 'MIS',
+            entry_source: 'all',
         }, { preserveState: false });
     };
 
@@ -401,7 +456,7 @@ export default function AttendanceSync({
             return;
         }
         handleFilter();
-    }, [branchId, deptId, catId, secId, statusFilter]);
+    }, [branchId, deptId, catId, secId, statusFilter, entrySourceFilter]);
 
     const handleSync = (e: React.FormEvent) => {
         e.preventDefault();
@@ -421,15 +476,22 @@ export default function AttendanceSync({
 
 
     const getStatusBadge = (record: AttendanceRecord) => {
-        const { status, duty_value } = record;
+        const { status, duty_value, is_manual, is_mispunch_cleared } = record;
         const d = parseFloat(duty_value);
         
         const isToday = new Date(record.attendance_date).toDateString() === new Date().toDateString();
+        const isMispunch = status === 'MIS' && !isToday;
 
         const badgeContent = (() => {
-            if (status === 'MIS' && !isToday) return (
+            if (isMispunch) return (
                 <Badge variant="destructive" className="px-2.5 py-1 text-[11px] font-semibold rounded-md border-none bg-red-500 uppercase whitespace-nowrap">
                     Missed
+                </Badge>
+            );
+
+            if (is_mispunch_cleared || (is_manual && status === 'P')) return (
+                <Badge className="bg-indigo-500 text-white border-none px-2.5 py-0.5 text-[10px] font-bold rounded-md uppercase whitespace-nowrap">
+                    Cleared
                 </Badge>
             );
 
@@ -459,13 +521,28 @@ export default function AttendanceSync({
         })();
 
         return (
-            <div className="flex items-center justify-end gap-1 shrink-0">
+            <div className="flex items-center justify-end gap-0.5 shrink-0">
+                {isMispunch && (
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        className="h-7 px-1.5 text-[9px] font-bold text-emerald-700 hover:bg-emerald-50"
+                        title="Clear mispunch using shift IN/OUT (manual)"
+                        disabled={clearingId === record.id}
+                        onClick={(e) => { e.stopPropagation(); handleQuickClear(record); }}
+                    >
+                        {clearingId === record.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
+                        <span className="ml-0.5 hidden sm:inline">Clear</span>
+                    </Button>
+                )}
                 {badgeContent}
                 <Button 
                     variant="ghost" 
                     size="icon" 
                     className="h-7 w-7 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-md shrink-0"
                     onClick={() => openEditModal(record)}
+                    title="Manual edit"
                 >
                     <Pencil className="h-3.5 w-3.5" />
                 </Button>
@@ -479,10 +556,16 @@ export default function AttendanceSync({
     const secOptions = [{ label: "All", value: "all" }, ...sections.map(s => ({ label: s.name, value: s.id.toString() }))];
     const statusOptions = [
         { label: "All", value: "all" },
+        { label: "Missed Punch", value: "MIS" },
+        { label: "Manual Cleared", value: "manual_cleared" },
         { label: "Present", value: "P" },
         { label: "Half Day", value: "HD" },
         { label: "Absent", value: "A" },
-        { label: "Missed Punch", value: "MIS" },
+    ];
+    const entrySourceOptions = [
+        { label: "All entries", value: "all" },
+        { label: "Manual only", value: "manual" },
+        { label: "Device / Sync", value: "auto" },
     ];
 
     const formatRecordDate = (dateStr: string) =>
@@ -631,7 +714,18 @@ export default function AttendanceSync({
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 p-3 bg-slate-50/80 rounded-lg border border-slate-100">
+                            <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-3 p-3 bg-slate-50/80 rounded-lg border border-slate-100">
+                                <div className="space-y-1.5 min-w-0">
+                                    <Label className="text-xs font-medium text-slate-600">Branch</Label>
+                                    <Combobox 
+                                        options={branchOptions}
+                                        value={branchId}
+                                        onChange={setBranchId}
+                                        placeholder="All"
+                                        searchPlaceholder="Search branch..."
+                                        className="h-10 bg-white border-slate-200 text-sm font-normal"
+                                    />
+                                </div>
                                 <div className="space-y-1.5 min-w-0">
                                     <Label className="text-xs font-medium text-slate-600">Department</Label>
                                     <Combobox 
@@ -673,6 +767,19 @@ export default function AttendanceSync({
                                         </SelectTrigger>
                                         <SelectContent>
                                             {statusOptions.map(opt => (
+                                                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-1.5 min-w-0">
+                                    <Label className="text-xs font-medium text-slate-600">Entry type</Label>
+                                    <Select value={entrySourceFilter} onValueChange={setEntrySourceFilter}>
+                                        <SelectTrigger className="h-10 bg-white border-slate-200 text-sm font-normal">
+                                            <SelectValue placeholder="All" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {entrySourceOptions.map(opt => (
                                                 <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                                             ))}
                                         </SelectContent>
@@ -747,7 +854,7 @@ export default function AttendanceSync({
                                         <TableHead className="font-semibold text-xs text-slate-600 text-center px-3 py-2.5 min-w-[200px]">Punches</TableHead>
                                         <TableHead className="font-semibold text-xs text-slate-600 text-center px-2 py-2.5 w-[140px]">Work · Late · OT</TableHead>
                                         <TableHead className="font-semibold text-xs text-slate-600 text-center px-2 py-2.5 w-[52px]">Duty</TableHead>
-                                        <TableHead className="font-semibold text-xs text-slate-600 text-right px-3 py-2.5 w-[120px]">Action</TableHead>
+                                        <TableHead className="font-semibold text-xs text-slate-600 text-right px-3 py-2.5 w-[148px]">Action</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -755,13 +862,16 @@ export default function AttendanceSync({
                                         const punchEvents = getDisplayPunchEventsFromRecord(record);
                                         const pairs = recordToPunchPairs(record);
                                         const misHint = record.status === 'MIS' ? mispunchSummaryText(pairs) : '';
+                                        const isPastMispunch = record.status === 'MIS' && new Date(record.attendance_date).toDateString() !== new Date().toDateString();
 
                                         return (
                                         <TableRow
                                             key={record.id}
                                             className={cn(
                                                 "border-slate-100 transition-colors",
-                                                record.status === 'MIS' && "border-l-2 border-l-red-400",
+                                                isPastMispunch && "border-l-2 border-l-red-400",
+                                                record.is_manual && "border-l-2 border-l-indigo-300",
+                                                record.is_mispunch_cleared && "border-l-2 border-l-indigo-400 bg-indigo-50/20",
                                                 selectedIds.includes(record.id) ? "bg-primary/5" : "even:bg-slate-50/40 hover:bg-slate-50"
                                             )}
                                         >
@@ -792,6 +902,19 @@ export default function AttendanceSync({
                                                         >
                                                             {record.employee_display_name || record.employee?.user?.name || '—'}
                                                         </span>
+                                                        {record.is_manual && (
+                                                            <Badge
+                                                                className="text-[9px] font-black bg-indigo-600 text-white border-none px-1.5 py-0 shrink-0"
+                                                                title={record.manual_by_name ? `Manual entry by ${record.manual_by_name}` : 'Manual entry'}
+                                                            >
+                                                                M
+                                                            </Badge>
+                                                        )}
+                                                        {record.is_mispunch_cleared && (
+                                                            <Badge variant="outline" className="text-[9px] font-semibold text-indigo-700 border-indigo-200 bg-indigo-50 shrink-0">
+                                                                Manual cleared
+                                                            </Badge>
+                                                        )}
                                                         {misHint && (
                                                             <Badge variant="outline" className="text-[10px] font-semibold text-red-600 border-red-200 bg-red-50 shrink-0">
                                                                 {misHint}
@@ -808,19 +931,27 @@ export default function AttendanceSync({
                                             <TableCell className="text-center align-middle px-3 py-2.5">
                                                 <div className="flex flex-wrap items-center justify-center gap-1">
                                                     {punchEvents.length > 0 ? (
-                                                        punchEvents.map((ev, idx) => (
+                                                        punchEvents.map((ev, idx) => {
+                                                            const isManualPunch =
+                                                                (ev.type === 'IN' && record.is_in_manual) ||
+                                                                (ev.type === 'OUT' && record.is_out_manual);
+                                                            return (
                                                             <span
                                                                 key={idx}
                                                                 className={cn(
-                                                                    'inline-block text-xs font-semibold px-2 py-0.5 rounded-md border uppercase whitespace-nowrap',
+                                                                    'inline-flex items-center gap-0.5 text-xs font-semibold px-2 py-0.5 rounded-md border uppercase whitespace-nowrap',
                                                                     ev.type === 'IN'
                                                                         ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                                                        : 'bg-orange-50 text-orange-700 border-orange-200'
+                                                                        : 'bg-orange-50 text-orange-700 border-orange-200',
+                                                                    isManualPunch && 'ring-1 ring-indigo-300'
                                                                 )}
+                                                                title={isManualPunch ? 'Manual punch' : undefined}
                                                             >
                                                                 {ev.time} {ev.type}
+                                                                {isManualPunch && <span className="text-[8px] font-black text-indigo-600">(M)</span>}
                                                             </span>
-                                                        ))
+                                                            );
+                                                        })
                                                     ) : (
                                                         <span className="text-xs text-slate-400">No punches</span>
                                                     )}
@@ -912,6 +1043,9 @@ export default function AttendanceSync({
                             <DialogTitle className="text-xl font-black italic uppercase tracking-tight">Manual Punch Update</DialogTitle>
                             <DialogDescription className="text-xs">
                                 Correct missed punches or update attendance status for <strong>{selectedRecord?.employee_code}</strong> on {selectedRecord && new Date(selectedRecord.attendance_date).toLocaleDateString()}
+                                {selectedRecord?.is_manual && (
+                                    <span className="ml-1 inline-flex items-center rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-800">Manual entry</span>
+                                )}
                             </DialogDescription>
                         </DialogHeader>
                         

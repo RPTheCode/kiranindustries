@@ -28,7 +28,7 @@ class BiometricAttendanceSyncController extends Controller
             ->pluck('id');
 
         $query = BiometricAttendance::query()
-            ->with(['employee.user', 'employee.department', 'employee.designation', 'employee.branch', 'employee.shift.slots', 'logs'])
+            ->with(['employee.user', 'employee.department', 'employee.designation', 'employee.branch', 'employee.shift.slots', 'logs', 'manualUser'])
             ->whereIn('employee_id', $activeEmployeeIds)
             ->where('punch_count', '>', 0)
             ->orderByDesc('attendance_date')
@@ -74,6 +74,9 @@ class BiometricAttendanceSyncController extends Controller
             if ($status === 'MIS') {
                 $query->where('status', 'MIS')
                     ->where('attendance_date', '<', now()->format('Y-m-d'));
+            } elseif ($status === 'manual_cleared') {
+                $query->where('is_manual', true)
+                    ->where('status', 'P');
             } elseif ($status === 'P') {
                 $query->where(function ($q) {
                     $q->where('status', 'P')
@@ -89,6 +92,16 @@ class BiometricAttendanceSyncController extends Controller
             } else {
                 $query->where('status', $status);
             }
+        }
+
+        // Entry source: device sync vs manual correction
+        $entrySource = $request->get('entry_source', 'all');
+        if ($entrySource === 'manual') {
+            $query->where('is_manual', true);
+        } elseif ($entrySource === 'auto') {
+            $query->where(function ($q) {
+                $q->where('is_manual', false)->orWhereNull('is_manual');
+            });
         }
 
         // Date Range Filter — only when user explicitly applied dates (use_dates=1)
@@ -135,6 +148,34 @@ class BiometricAttendanceSyncController extends Controller
                 }
                 $record->setAttribute('employee_display_name', getEmployeeDisplayNameForRecord($record));
 
+                $isInManual = false;
+                $isOutManual = false;
+                if ($record->is_manual) {
+                    if ($record->logs && $record->logs->isNotEmpty()) {
+                        $isInManual = $record->logs->where('punch_type', 'IN')->where('is_manual', true)->isNotEmpty();
+                        $isOutManual = $record->logs->where('punch_type', 'OUT')->where('is_manual', true)->isNotEmpty();
+                    } elseif ($record->status === 'MIS') {
+                        $isInManual = (bool) ($record->in_time && $record->in_count > 0);
+                        $isOutManual = (bool) ($record->out_time && $record->out_count > 0);
+                    } else {
+                        $isInManual = (bool) $record->in_time;
+                        $isOutManual = (bool) $record->out_time;
+                    }
+                }
+
+                $record->setAttribute('is_in_manual', $isInManual);
+                $record->setAttribute('is_out_manual', $isOutManual);
+                $record->setAttribute('manual_by_name', $record->manualUser?->name);
+                $record->setAttribute('is_mispunch_cleared', $record->is_manual && $record->status === 'P');
+
+                $shiftSlot = $record->shift_slot_id
+                    ? \App\Models\ShiftSlot::find($record->shift_slot_id)
+                    : null;
+                $shiftStart = $shiftSlot?->start_time ?? $record->employee?->shift?->slots?->first()?->start_time;
+                $shiftEnd = $shiftSlot?->end_time ?? $record->employee?->shift?->slots?->last()?->end_time;
+                $record->setAttribute('shift_start', $shiftStart ? substr((string) $shiftStart, 0, 5) : null);
+                $record->setAttribute('shift_end', $shiftEnd ? substr((string) $shiftEnd, 0, 5) : null);
+
                 return $record;
             })->withQueryString(),
             'filters' => [
@@ -147,6 +188,7 @@ class BiometricAttendanceSyncController extends Controller
                 'category_id' => $request->input('category_id', 'all'),
                 'section_id' => $request->input('section_id', 'all'),
                 'status' => $status,
+                'entry_source' => $entrySource,
             ],
         ]);
     }
@@ -405,6 +447,9 @@ class BiometricAttendanceSyncController extends Controller
                 (bool) $outTime
             );
             $record->is_manual = true;
+            if (auth()->id()) {
+                $record->manual_by = auth()->id();
+            }
             if ($request->has('log_details')) {
                 $record->log_details = $request->log_details;
             }
@@ -636,12 +681,13 @@ class BiometricAttendanceSyncController extends Controller
 
                     $record->refresh();
                     $record->status = resolveManualMispunchStatus(
-                        $editData['log_details'] ?? null,
+                        null,
                         $status,
                         (bool) $inTime,
                         (bool) $outTime
                     );
                     $record->is_manual = true;
+                    $record->manual_by = auth()->id();
                     $record->save();
                 });
 
