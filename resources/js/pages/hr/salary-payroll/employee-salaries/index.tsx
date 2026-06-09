@@ -10,6 +10,7 @@ import {
   History,
   TrendingUp,
   Layers,
+  ChevronDown,
 } from 'lucide-react';
 import { toast } from '@/components/custom-toast';
 import { useTranslation } from 'react-i18next';
@@ -748,10 +749,10 @@ export default function SalaryPayrollEmployeeSalaries() {
                   <th className="hidden px-3 py-2 md:table-cell">{t('Category')}</th>
                   <th className="hidden px-3 py-2 lg:table-cell">{t('Department')}</th>
                   <th className="hidden px-3 py-2 sm:table-cell">{t('Shift')}</th>
-                  <th className="min-w-[148px] px-3 py-2">
+                  <th className="min-w-[168px] px-3 py-2">
                     <div>{t('Gross Salary')}</div>
                     <div className="mt-0.5 text-[9px] font-normal normal-case tracking-normal text-muted-foreground">
-                      {t('/day or /mo')}
+                      {t('Per day or per month')}
                     </div>
                   </th>
                   {tableComponents.map((comp) => (
@@ -811,64 +812,74 @@ export default function SalaryPayrollEmployeeSalaries() {
                       {emp.employee?.shift?.name || '—'}
                     </td>
                     <td className="px-3 py-2">
-                      <div className="flex flex-col gap-0.5">
+                      <div className="inline-flex w-full min-w-[168px] max-w-[180px] flex-col gap-1">
                         <div
-                          className="relative flex h-8 w-full min-w-[118px] max-w-[148px] items-stretch overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm"
-                          title={dailyOption ? t('Amount per day') : t('Amount per month')}
+                          className={cn(
+                            'relative flex h-8 w-full items-stretch rounded-lg border bg-white shadow-sm transition-shadow',
+                            dailyOption
+                              ? 'border-amber-200/90 focus-within:border-amber-400 focus-within:ring-2 focus-within:ring-amber-400/20'
+                              : 'border-blue-200/90 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-400/20',
+                            grossDisabled && 'opacity-60',
+                          )}
+                          title={grossValue ? `₹${formatRupee(Number(grossValue))} ${dailyOption ? t('/day') : t('/mo')}` : undefined}
                         >
-                          <span className="flex shrink-0 items-center pl-2 text-[10px] font-bold text-slate-400">₹</span>
-                          <Input
-                            type="number"
-                            min="0"
-                            step={isDayWise ? '0.01' : '1'}
-                            disabled={grossDisabled}
-                            value={grossValue}
-                            onChange={(e) => handleGrossChange(emp.id, e.target.value)}
-                            onBlur={() => handleGrossBlur(emp)}
-                            onKeyDown={handleGrossKeyDown}
-                            placeholder="0"
-                            aria-label={dailyOption ? t('Daily gross amount') : t('Monthly gross amount')}
-                            className="h-8 min-w-0 flex-1 rounded-none border-0 bg-transparent px-1 text-sm font-bold tabular-nums shadow-none focus-visible:ring-0"
-                          />
-                          <Select
-                            value={dailyOption ? 'day' : 'month'}
-                            disabled={grossDisabled}
-                            onValueChange={(value) => {
-                              const nextDaily = value === 'day';
-                              if (nextDaily !== dailyOption) {
-                                handleDailyOptionToggle(emp, nextDaily);
-                              }
-                            }}
+                          <span className="flex w-5 shrink-0 items-center justify-center text-[11px] font-medium text-muted-foreground">₹</span>
+                          <div className="min-w-[64px] flex-1 overflow-hidden">
+                            <Input
+                              type="number"
+                              min="0"
+                              step={isDayWise ? '0.01' : '1'}
+                              disabled={grossDisabled}
+                              value={grossValue}
+                              onChange={(e) => handleGrossChange(emp.id, e.target.value)}
+                              onBlur={() => handleGrossBlur(emp)}
+                              onKeyDown={handleGrossKeyDown}
+                              placeholder="0"
+                              aria-label={dailyOption ? t('Daily gross amount') : t('Monthly gross amount')}
+                              className="h-8 w-full min-w-[64px] rounded-none border-0 bg-transparent px-0 text-sm font-semibold tabular-nums shadow-none focus-visible:ring-0"
+                            />
+                          </div>
+                          <div
+                            className={cn(
+                              'relative shrink-0 border-l',
+                              dailyOption ? 'border-amber-200/80 bg-amber-50/60' : 'border-blue-200/80 bg-blue-50/60',
+                            )}
                           >
-                            <SelectTrigger
+                            <select
+                              disabled={grossDisabled}
+                              value={dailyOption ? 'day' : 'month'}
                               aria-label={t('Salary entry type')}
+                              onChange={(e) => {
+                                const nextDaily = e.target.value === 'day';
+                                if (nextDaily !== dailyOption) {
+                                  handleDailyOptionToggle(emp, nextDaily);
+                                }
+                              }}
                               className={cn(
-                                'h-8 w-[54px] shrink-0 gap-0 rounded-none border-0 border-l border-slate-200 bg-slate-50/90 px-1.5 text-[10px] font-bold shadow-none focus:ring-0',
-                                dailyOption ? 'text-amber-700' : 'text-blue-700',
-                                grossDisabled && 'opacity-60',
+                                'h-8 w-[50px] cursor-pointer appearance-none border-0 bg-transparent py-0 pl-1.5 pr-4 text-[10px] font-semibold outline-none',
+                                dailyOption ? 'text-amber-800' : 'text-blue-800',
+                                grossDisabled && 'cursor-not-allowed',
                               )}
                             >
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent align="end" className="min-w-[72px]">
-                              <SelectItem value="day" className="text-xs font-semibold">{t('/day')}</SelectItem>
-                              <SelectItem value="month" className="text-xs font-semibold">{t('/mo')}</SelectItem>
-                            </SelectContent>
-                          </Select>
+                              <option value="day">{t('/day')}</option>
+                              <option value="month">{t('/mo')}</option>
+                            </select>
+                            <ChevronDown
+                              className="pointer-events-none absolute right-0.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60"
+                              aria-hidden
+                            />
+                          </div>
                           {(isSaving || isTogglingDaily) && (
                             <Loader2 className="absolute -right-4 top-1/2 h-3 w-3 -translate-y-1/2 animate-spin text-primary" />
                           )}
                         </div>
-                        <p className="truncate text-[9px] leading-tight text-muted-foreground">
-                          {dailyOption
-                            ? (workingDays === 1
-                              ? t('Per day wage')
-                              : t('× {{days}} days → ₹{{total}}/mo', {
-                                days: workingDays,
-                                total: grossForSplit > 0 ? formatRupee(grossForSplit) : '—',
-                              }))
-                            : t('Full month ({{days}} days)', { days: workingDays })}
-                        </p>
+                        {dailyOption && workingDays === 1 && grossForSplit > 0 ? (
+                          <span className="inline-flex w-fit rounded bg-amber-100/80 px-1.5 py-px text-[9px] font-medium tabular-nums text-amber-800">
+                            {t('≈ ₹{{total}}/mo', { total: formatRupee(grossForSplit) })}
+                          </span>
+                        ) : !dailyOption ? (
+                          <span className="text-[9px] text-muted-foreground">{t('Full month (26 days)')}</span>
+                        ) : null}
                       </div>
                     </td>
                     {tableComponents.map((comp) => {
