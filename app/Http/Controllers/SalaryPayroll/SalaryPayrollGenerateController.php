@@ -224,6 +224,7 @@ class SalaryPayrollGenerateController extends Controller
 
         return Inertia::render('hr/salary-payroll/payroll-generate/show', [
             'run' => $this->formatRun($salaryPayrollRun),
+            'statutory_challan' => $this->runService->statutoryChallanSummary($salaryPayrollRun),
             'entries' => $entries,
             'mispunch_count' => $mispunchCount,
             'filters' => $request->only(['search', 'per_page', 'category_id', 'shift_id', 'department_id', 'lock_status']),
@@ -243,6 +244,7 @@ class SalaryPayrollGenerateController extends Controller
 
         return Inertia::render('hr/salary-payroll/payroll-generate/register', [
             'run' => $this->formatRun($salaryPayrollRun),
+            'statutory_challan' => $this->runService->statutoryChallanSummary($salaryPayrollRun),
             'register' => $register,
             'filters' => $filters,
             'categories' => $this->branchCategories(session('active_branch_id')),
@@ -377,6 +379,24 @@ class SalaryPayrollGenerateController extends Controller
         }
 
         return redirect()->back()->with('success', __('Employee payroll locked and payslip generated.'));
+    }
+
+    public function unlockEntry(SalaryPayrollRun $salaryPayrollRun, SalaryPayrollEntry $salaryPayrollEntry)
+    {
+        $this->assertBranchAccess($salaryPayrollRun);
+
+        if ((int) $salaryPayrollEntry->salary_payroll_run_id !== (int) $salaryPayrollRun->id) {
+            abort(404);
+        }
+
+        try {
+            $this->runService->unlockEntry($salaryPayrollEntry);
+            $this->payslipService->removePayslipForEntry($salaryPayrollEntry);
+        } catch (\InvalidArgumentException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
+
+        return redirect()->back()->with('success', __('Employee unlocked. You can regenerate or edit before locking again.'));
     }
 
     public function downloadPayslip(SalaryPayrollRun $salaryPayrollRun, SalaryPayrollEntry $salaryPayrollEntry)
@@ -527,6 +547,14 @@ class SalaryPayrollGenerateController extends Controller
 
         if ($salaryPayrollRun->isFinalized()) {
             return redirect()->back()->with('error', __('Locked payroll runs cannot be deleted.'));
+        }
+
+        if ($this->runService->hasLockedEntries($salaryPayrollRun)) {
+            $lockedCount = $this->runService->lockedEntryCount($salaryPayrollRun);
+
+            return redirect()->back()->with('error', __('Cannot delete payroll while :count employee(s) are locked. Unlock all employees first.', [
+                'count' => $lockedCount,
+            ]));
         }
 
         $salaryPayrollRun->entries()->delete();
@@ -796,14 +824,35 @@ class SalaryPayrollGenerateController extends Controller
             $epfEmployer = round($wages * $epfPct / 100, 0);
         }
 
+        $adminPct = PayrollParameter::pfAdminChargePct($params);
+        $admin = max(0, round((float) $entry->pf_employer - $eps - $epfEmployer, 0));
+        if ($admin <= 0 && $wages > 0) {
+            $admin = round($wages * $adminPct / 100, 0);
+        }
+
+        $employerTotal = (float) $entry->pf_employer;
+        if ($employerTotal <= 0) {
+            $employerTotal = $eps + $epfEmployer + $admin;
+        }
+
+        $employeePf = (float) $entry->pf_employee;
+        $ac1 = $employeePf + $epfEmployer;
+
         return [
             'wages' => $wages,
             'employee_pct' => $employeePct,
-            'employee' => (float) $entry->pf_employee,
+            'employee' => $employeePf,
             'eps_pct' => $epsPct,
             'eps' => $eps,
             'epf_employer_pct' => $epfPct,
             'epf_employer' => $epfEmployer,
+            'admin_pct' => $adminPct,
+            'admin' => $admin,
+            'employer_total' => $employerTotal,
+            'challan_ac1' => $ac1,
+            'challan_ac2' => $eps,
+            'challan_ac10' => $admin,
+            'challan_total' => $ac1 + $eps + $admin,
         ];
     }
 

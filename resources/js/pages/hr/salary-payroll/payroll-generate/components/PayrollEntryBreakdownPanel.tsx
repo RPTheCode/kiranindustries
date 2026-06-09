@@ -64,6 +64,13 @@ export interface PayrollEntryBreakdown {
     eps: number;
     epf_employer_pct: number;
     epf_employer: number;
+    admin_pct?: number;
+    admin?: number;
+    employer_total?: number;
+    challan_ac1?: number;
+    challan_ac2?: number;
+    challan_ac10?: number;
+    challan_total?: number;
   } | null;
   esi_employee: number;
   esi_employer?: number;
@@ -716,7 +723,42 @@ export function PayrollEntryBreakdownPanel({ entry, runUsesAttendance = true, to
               <span>{t('Employer EPF')} ({entry.pf_breakdown.epf_employer_pct}%)</span>
               <strong className="tabular-nums">₹{formatRupee(entry.pf_breakdown.epf_employer)}</strong>
             </div>
+            {(entry.pf_breakdown.admin ?? 0) > 0 && (
+              <div className="flex justify-between gap-2 rounded bg-white/80 px-2 py-1">
+                <span>{t('PF Admin')} ({entry.pf_breakdown.admin_pct ?? 1}%)</span>
+                <strong className="tabular-nums">₹{formatRupee(entry.pf_breakdown.admin ?? 0)}</strong>
+              </div>
+            )}
+            {(entry.pf_breakdown.employer_total ?? 0) > 0 && (
+              <div className="flex justify-between gap-2 rounded bg-orange-100/80 px-2 py-1 sm:col-span-2">
+                <span>{t('Total employer PF (not deducted from salary)')}</span>
+                <strong className="tabular-nums">₹{formatRupee(entry.pf_breakdown.employer_total ?? 0)}</strong>
+              </div>
+            )}
           </div>
+          {(entry.pf_breakdown.challan_total ?? 0) > 0 && (
+            <div className="mt-2 rounded border border-orange-200 bg-white/60 px-2 py-1.5">
+              <p className="mb-1 text-[9px] font-bold uppercase text-orange-900">{t('PF challan (this employee)')}</p>
+              <div className="grid gap-0.5 sm:grid-cols-2">
+                <div className="flex justify-between gap-2 text-[9px]">
+                  <span>{t('A/C 1 (Emp PF + Empr EPF)')}</span>
+                  <strong className="tabular-nums">₹{formatRupee(entry.pf_breakdown.challan_ac1 ?? 0)}</strong>
+                </div>
+                <div className="flex justify-between gap-2 text-[9px]">
+                  <span>{t('A/C 2 (EPS)')}</span>
+                  <strong className="tabular-nums">₹{formatRupee(entry.pf_breakdown.challan_ac2 ?? 0)}</strong>
+                </div>
+                <div className="flex justify-between gap-2 text-[9px]">
+                  <span>{t('A/C 10 (Admin)')}</span>
+                  <strong className="tabular-nums">₹{formatRupee(entry.pf_breakdown.challan_ac10 ?? 0)}</strong>
+                </div>
+                <div className="flex justify-between gap-2 text-[9px] font-semibold">
+                  <span>{t('Challan total')}</span>
+                  <strong className="tabular-nums text-orange-900">₹{formatRupee(entry.pf_breakdown.challan_total ?? 0)}</strong>
+                </div>
+              </div>
+            </div>
+          )}
           <p className="mt-1.5 text-[9px] text-orange-800/80">
             {entry.govt_wage_salary_applied
               ? t('PF wages = govt salary ({{days}} × ₹{{rate}} = ₹{{wages}}). Employee {{empPct}}% = ₹{{empPf}}; EPS {{eps}}% + EPF {{epf}}%.', {

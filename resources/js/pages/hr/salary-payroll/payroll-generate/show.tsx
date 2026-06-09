@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
   Lock,
+  LockOpen,
   Loader2,
   Users,
   Search,
@@ -48,6 +49,7 @@ import {
   getAttendanceDaysBadgeTone,
   attendanceDaysBadgeDescription,
 } from './components/PayrollEntryBreakdownPanel';
+import { StatutoryChallanPanel } from './components/StatutoryChallanPanel';
 import { cn } from '@/lib/utils';
 
 function formatRupee(value: number) {
@@ -354,6 +356,7 @@ export default function PayrollGenerateShow() {
     shifts = [],
     flash,
     mispunch_count: mispunchCount = 0,
+    statutory_challan: statutoryChallan,
   } = usePage().props as any;
   const permissions = auth?.permissions || [];
   const canFinalize = canFinalizeSalaryPayrollRuns(permissions);
@@ -363,10 +366,12 @@ export default function PayrollGenerateShow() {
   const [regenerateConfirmOpen, setRegenerateConfirmOpen] = useState(false);
   const [entryRegenerateTarget, setEntryRegenerateTarget] = useState<{ id: number; name: string } | null>(null);
   const [entryLockTarget, setEntryLockTarget] = useState<{ id: number; name: string } | null>(null);
+  const [entryUnlockTarget, setEntryUnlockTarget] = useState<{ id: number; name: string } | null>(null);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [regeneratingEntryId, setRegeneratingEntryId] = useState<number | null>(null);
   const [lockingEntryId, setLockingEntryId] = useState<number | null>(null);
+  const [unlockingEntryId, setUnlockingEntryId] = useState<number | null>(null);
   const [togglingAdjustEntryId, setTogglingAdjustEntryId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState(filters.search || '');
   const [expandedEntryIds, setExpandedEntryIds] = useState<Record<number, boolean>>({});
@@ -472,6 +477,24 @@ export default function PayrollGenerateShow() {
         onFinish: () => {
           setLockingEntryId(null);
           setEntryLockTarget(null);
+        },
+      }
+    );
+  };
+
+  const handleUnlockEntry = () => {
+    if (!entryUnlockTarget) return;
+    setUnlockingEntryId(entryUnlockTarget.id);
+    router.post(
+      route('hr.salary-payroll.generate.unlock-entry', {
+        salaryPayrollRun: run.id,
+        salaryPayrollEntry: entryUnlockTarget.id,
+      }),
+      {},
+      {
+        onFinish: () => {
+          setUnlockingEntryId(null);
+          setEntryUnlockTarget(null);
         },
       }
     );
@@ -672,6 +695,8 @@ export default function PayrollGenerateShow() {
         )}
       </div>
 
+      <StatutoryChallanPanel challan={statutoryChallan} t={t} />
+
       {(usesAttendance || !isRunLocked) && (
         <div className={cn(
           'mb-3 rounded-lg border px-3 py-2 text-[11px] leading-snug',
@@ -680,6 +705,7 @@ export default function PayrollGenerateShow() {
           {usesAttendance ? (
             <>
               {t('OT Yes: extra days → Incentive (PI). OT No: extra days → Adjust column (optional in net). PF always on working days max.')}
+              {' '}{t('Lock an employee to generate payslip. Use Unlock (open lock icon) to edit again before final Lock Payroll.')}
               {mispunchCount > 0 && (
                 <> {t('Fix {{n}} mispunch before lock.', { n: mispunchCount })}</>
               )}
@@ -915,6 +941,11 @@ export default function PayrollGenerateShow() {
                                 <FileDown className="h-3.5 w-3.5" />
                               </Button>
                             )}
+                            {canFinalize && entry.is_locked && !isRunLocked && (
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-amber-700" title={t('Unlock — regenerate & edit again')} disabled={unlockingEntryId === entry.id} onClick={() => setEntryUnlockTarget({ id: entry.id, name: entry.name })}>
+                                {unlockingEntryId === entry.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LockOpen className="h-3.5 w-3.5" />}
+                              </Button>
+                            )}
                             {canManage && !entry.is_locked && (
                               <Button variant="ghost" size="icon" className="h-7 w-7 text-primary" title={t('Regenerate')} disabled={regeneratingEntryId === entry.id || isRegenerating} onClick={() => setEntryRegenerateTarget({ id: entry.id, name: entry.name })}>
                                 {regeneratingEntryId === entry.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -1012,6 +1043,21 @@ export default function PayrollGenerateShow() {
         icon={<Lock className="h-6 w-6" />}
         loading={lockingEntryId !== null}
         onConfirm={handleLockEntry}
+      />
+
+      <ConfirmActionDialog
+        open={!!entryUnlockTarget}
+        onOpenChange={(open) => !open && setEntryUnlockTarget(null)}
+        title={t('Unlock Employee?')}
+        description={t('Unlock "{{name}}" to regenerate salary or change adjust settings? The payslip PDF will be removed until you lock again.', {
+          name: entryUnlockTarget?.name || '',
+        })}
+        confirmLabel={t('Unlock Employee')}
+        cancelLabel={t('Cancel')}
+        variant="primary"
+        icon={<LockOpen className="h-6 w-6" />}
+        loading={unlockingEntryId !== null}
+        onConfirm={handleUnlockEntry}
       />
 
       <ConfirmActionDialog

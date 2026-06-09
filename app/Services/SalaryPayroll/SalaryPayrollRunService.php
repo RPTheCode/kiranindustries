@@ -3,6 +3,7 @@
 namespace App\Services\SalaryPayroll;
 
 use App\Models\Branch;
+use App\Models\PayrollParameter;
 use App\Models\SalaryPayroll\SalaryPayrollEntry;
 use App\Models\SalaryPayroll\SalaryPayrollRun;
 use Carbon\Carbon;
@@ -345,6 +346,27 @@ class SalaryPayrollRunService
         return $entry->fresh(['locker']);
     }
 
+    public function unlockEntry(SalaryPayrollEntry $entry): SalaryPayrollEntry
+    {
+        $run = $entry->run;
+
+        if ($run->isFinalized()) {
+            throw new \InvalidArgumentException(__('This payroll run is fully locked. Unlock the entire run is not supported — locked payslips are final.'));
+        }
+
+        if (! $entry->is_locked) {
+            throw new \InvalidArgumentException(__('This employee is not locked.'));
+        }
+
+        $entry->update([
+            'is_locked' => false,
+            'locked_by' => null,
+            'locked_at' => null,
+        ]);
+
+        return $entry->fresh();
+    }
+
     public function lockedEntryCount(SalaryPayrollRun $run): int
     {
         return SalaryPayrollEntry::query()
@@ -427,6 +449,68 @@ class SalaryPayrollRunService
             'total_esi_employer' => round($calculated->sum('esi_employer'), 2),
             'status' => 'calculated',
         ]);
+    }
+
+    /**
+     * EPFO-style PF challan totals for the payroll run (for deposit / ECR filing).
+     *
+     * @return array<string, mixed>
+     */
+    public function statutoryChallanSummary(SalaryPayrollRun $run): array
+    {
+        $entries = SalaryPayrollEntry::query()
+            ->where('salary_payroll_run_id', $run->id)
+            ->where('status', 'calculated')
+            ->get();
+
+        $pfEntries = $entries->filter(fn (SalaryPayrollEntry $e) => (float) $e->pf_employee > 0);
+        $pfEmployee = round((float) $pfEntries->sum('pf_employee'), 0);
+        $pfEps = round((float) $pfEntries->sum('pf_eps_employer'), 0);
+        $pfEpf = round((float) $pfEntries->sum('pf_epf_employer'), 0);
+        $pfEmployerTotal = round((float) $pfEntries->sum('pf_employer'), 0);
+        $pfAdmin = max(0, round($pfEmployerTotal - $pfEps - $pfEpf, 0));
+        $pfWages = round((float) $pfEntries->sum('pf_wages'), 0);
+
+        $ac1 = $pfEmployee + $pfEpf;
+        $ac2 = $pfEps;
+        $ac10 = $pfAdmin;
+
+        $params = PayrollParameter::forFinancialYear($run->financial_year);
+        $esiEmployee = round((float) $entries->sum('esi_employee'), 0);
+        $esiEmployer = round((float) $entries->sum('esi_employer'), 0);
+        $ptTotal = round((float) $entries->sum('pt_amount'), 0);
+
+        return [
+            'pf' => [
+                'employee_count' => $pfEntries->count(),
+                'wages' => $pfWages,
+                'employee_contribution' => $pfEmployee,
+                'employer_eps' => $pfEps,
+                'employer_epf' => $pfEpf,
+                'admin_charges' => $pfAdmin,
+                'employer_total' => $pfEmployerTotal,
+                'challan' => [
+                    'ac1_employees_pf' => $ac1,
+                    'ac2_pension_eps' => $ac2,
+                    'ac10_admin' => $ac10,
+                    'total_deposit' => $ac1 + $ac2 + $ac10,
+                ],
+                'rates' => [
+                    'employee_pct' => PayrollParameter::pfEmployeePct($params),
+                    'eps_pct' => PayrollParameter::pfEpsPct($params),
+                    'epf_employer_pct' => PayrollParameter::pfEpEmployerSharePct($params),
+                    'admin_pct' => PayrollParameter::pfAdminChargePct($params),
+                ],
+            ],
+            'esi' => [
+                'employee' => $esiEmployee,
+                'employer' => $esiEmployer,
+                'total' => $esiEmployee + $esiEmployer,
+            ],
+            'pt' => [
+                'total' => $ptTotal,
+            ],
+        ];
     }
 
     private function monthOption(int $year, int $month): array

@@ -109,7 +109,7 @@ export default function PayrollGenerateIndex() {
       </div>
 
       <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
-        {t('Unlocked runs can be regenerated, customized, or deleted. Lock individual employees on the detail page, or use "Lock Payroll" to finalize. Locked employees are skipped during regenerate.')}
+        {t('Unlocked runs can be regenerated, customized, or deleted. Lock individual employees on the detail page, or use "Lock Payroll" to finalize. Locked employees are skipped during regenerate. Payroll cannot be deleted while any employee is locked.')}
       </div>
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -218,11 +218,17 @@ export default function PayrollGenerateIndex() {
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-red-500 hover:text-red-700 disabled:text-slate-300 disabled:opacity-40"
-                        title={isLocked ? t('Locked — cannot delete') : t('Delete')}
-                        disabled={isLocked}
-                        onClick={() => !isLocked && setPendingAction({ type: 'delete', id: run.id, title: run.title })}
+                        title={
+                          isLocked
+                            ? t('Locked — cannot delete')
+                            : hasPartialLocks
+                              ? t('Cannot delete — :count employee(s) locked', { count: lockedCount })
+                              : t('Delete')
+                        }
+                        disabled={isLocked || hasPartialLocks}
+                        onClick={() => !isLocked && !hasPartialLocks && setPendingAction({ type: 'delete', id: run.id, title: run.title, lockedCount })}
                       >
-                        {isLocked ? <Lock className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+                        {isLocked || hasPartialLocks ? <Lock className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
                       </Button>
                     )}
                   </div>
@@ -268,9 +274,14 @@ export default function PayrollGenerateIndex() {
         onOpenChange={(open) => !open && setPendingAction(null)}
         title={t('Delete Payroll Run?')}
         description={
-          pendingAction?.title
-            ? t('Permanently delete "{{title}}"? Only unlocked payrolls can be deleted. This cannot be undone.', { title: pendingAction.title })
-            : t('Permanently delete this payroll run? Only unlocked payrolls can be deleted.')
+          (pendingAction?.lockedCount ?? 0) > 0
+            ? t('Cannot delete "{{title}}" while :count employee(s) are locked. Unlock all employees on the detail page first.', {
+              title: pendingAction?.title || '',
+              count: pendingAction?.lockedCount ?? 0,
+            })
+            : pendingAction?.title
+              ? t('Permanently delete "{{title}}"? Only unlocked payrolls can be deleted. This cannot be undone.', { title: pendingAction.title })
+              : t('Permanently delete this payroll run? Only unlocked payrolls can be deleted.')
         }
         confirmLabel={t('Delete')}
         cancelLabel={t('Cancel')}

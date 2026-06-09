@@ -353,9 +353,8 @@ class SalaryPayrollCalculator
         }
 
         $totalDeductions = round(array_sum($deductionsBreakdown), 0);
-        $takeHomeRegular = $govtWageSalaryApplied ? $contractRegularEarnings : $regularEarnings;
         $netSalary = round(
-            $takeHomeRegular - $totalDeductions + $incentiveAmount + ($attendanceExtraApplied ? $attendanceExtraAmount : 0),
+            $totalEarnings - $totalDeductions,
             0
         );
 

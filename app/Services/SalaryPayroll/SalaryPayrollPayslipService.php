@@ -2,6 +2,7 @@
 
 namespace App\Services\SalaryPayroll;
 
+use App\Models\EmployeeSalary;
 use App\Models\SalaryPayroll\SalaryPayrollEntry;
 use App\Models\SalaryPayroll\SalaryPayrollPayslip;
 use App\Models\SalaryPayroll\SalaryPayrollRun;
@@ -104,6 +105,23 @@ class SalaryPayrollPayslipService
         return $this->ensurePayslip($entry, true);
     }
 
+    public function removePayslipForEntry(SalaryPayrollEntry $entry): void
+    {
+        $payslip = SalaryPayrollPayslip::query()
+            ->where('salary_payroll_entry_id', $entry->id)
+            ->first();
+
+        if (! $payslip) {
+            return;
+        }
+
+        if ($payslip->file_path) {
+            Storage::disk('public')->delete($payslip->file_path);
+        }
+
+        $payslip->delete();
+    }
+
     public function generateForRun(SalaryPayrollRun $run): int
     {
         $entries = SalaryPayrollEntry::query()
@@ -130,13 +148,11 @@ class SalaryPayrollPayslipService
         $employee = $entry->employee;
         $empDetail = $employee?->employee;
 
-        $earnings = collect($entry->earnings_breakdown ?? [])
-            ->filter(fn ($amount) => (float) $amount > 0)
-            ->sortKeys();
+        $earnings = $this->buildPayslipEarningLines($entry);
 
-        $deductions = collect($entry->deductions_breakdown ?? [])
-            ->filter(fn ($amount) => (float) $amount > 0)
-            ->sortKeys();
+        $deductions = $this->buildPayslipDeductionLines($entry);
+
+        $salaryMeta = $this->buildPayslipSalaryMeta($entry, $employee);
 
         $creatorId = $run?->created_by ?? Auth::id();
 
@@ -148,6 +164,7 @@ class SalaryPayrollPayslipService
             'employeeDetail' => $empDetail,
             'earnings' => $earnings,
             'deductions' => $deductions,
+            'salaryMeta' => $salaryMeta,
             'themeColor' => brandThemeColor($creatorId),
             'currencySymbol' => pdfCurrencySymbol($creatorId),
             'companyName' => config('app.name', 'Kiran Industries'),
@@ -218,5 +235,134 @@ class SalaryPayrollPayslipService
         $zip->close();
 
         return $zipPath;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function buildPayslipSalaryMeta(SalaryPayrollEntry $entry, ?User $employee): array
+    {
+        $salary = $employee
+            ? EmployeeSalary::where('employee_id', $employee->id)->first()
+            : null;
+
+        $grossInputMode = $salary?->gross_input_mode ?? 'month';
+        $workingDays = max(1, (float) ($entry->working_days ?? 26));
+        $dayRate = (float) ($salary?->per_day_salary ?? $entry->monthly_gross ?? 0);
+        $isDayRate = $grossInputMode === 'day';
+
+        $rateAmount = $isDayRate ? $dayRate : (float) $entry->monthly_gross;
+        $ctc = $isDayRate ? round($dayRate * $workingDays, 0) : (float) $entry->monthly_gross;
+
+        return [
+            'is_day_rate' => $isDayRate,
+            'rate_label' => $isDayRate ? 'Day Rate' : 'Monthly Gross',
+            'rate_amount' => $rateAmount,
+            'ctc' => $ctc,
+            'contract_earnings' => $entry->contract_regular_earnings !== null
+                ? (float) $entry->contract_regular_earnings
+                : null,
+            'govt_wage_applied' => (bool) $entry->govt_wage_salary_applied,
+            'govt_wage_adjustment' => (float) ($entry->govt_wage_adjustment_amount ?? 0),
+            'govt_wage_adjustment_type' => $entry->govt_wage_adjustment_type,
+            'govt_wage_paid_days' => $entry->govt_wage_paid_days !== null ? (float) $entry->govt_wage_paid_days : null,
+            'actual_paid_days' => $entry->actual_paid_days !== null ? (float) $entry->actual_paid_days : null,
+            'govt_min_wage_per_day' => (float) ($entry->govt_min_wage_per_day ?? 0),
+            'govt_wage_computed_earnings' => (float) ($entry->govt_wage_computed_earnings ?? 0),
+            'pf_admin_employer' => max(0, round(
+                (float) ($entry->pf_employer ?? 0)
+                - (float) ($entry->pf_eps_employer ?? 0)
+                - (float) ($entry->pf_epf_employer ?? 0),
+                0
+            )),
+        ];
+    }
+
+    /**
+     * Earnings for payslip — one line per component, no duplicates.
+     *
+     * @return array<string, float>
+     */
+    public function buildPayslipEarningLines(SalaryPayrollEntry $entry): array
+    {
+        $lines = collect($entry->earnings_breakdown ?? [])
+            ->filter(fn ($amount) => (float) $amount > 0);
+
+        if ($lines->isNotEmpty()) {
+            return $this->sortPayslipEarnings($lines)->all();
+        }
+
+        if ((float) $entry->basic > 0) {
+            return ['Basic Salary' => (float) $entry->basic];
+        }
+
+        return [];
+    }
+
+    /**
+     * Deductions for payslip — statutory items appear once (from breakdown only).
+     *
+     * @return array<string, float>
+     */
+    public function buildPayslipDeductionLines(SalaryPayrollEntry $entry): array
+    {
+        $lines = collect($entry->deductions_breakdown ?? [])
+            ->filter(fn ($amount) => (float) $amount > 0);
+
+        if ($lines->isNotEmpty()) {
+            return $this->sortPayslipDeductions($lines)->all();
+        }
+
+        // Fallback for older entries without breakdown stored.
+        $fallback = [];
+        if ((float) $entry->pf_employee > 0) {
+            $fallback['Provident Fund (PF)'] = (float) $entry->pf_employee;
+        }
+        if ((float) $entry->esi_employee > 0) {
+            $fallback['ESIC'] = (float) $entry->esi_employee;
+        }
+        if ((float) $entry->pt_amount > 0) {
+            $fallback['Professional Tax'] = (float) $entry->pt_amount;
+        }
+
+        return $fallback;
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<string, float|int|string>  $lines
+     * @return \Illuminate\Support\Collection<string, float>
+     */
+    private function sortPayslipDeductions($lines)
+    {
+        $priority = [
+            'PROVIDENT FUND (PF)' => 1,
+            'PF' => 1,
+            'EPF' => 1,
+            'ESIC' => 2,
+            'ESI' => 2,
+            'PROFESSIONAL TAX' => 3,
+            'PT' => 3,
+            'GOVT WAGE ADJUSTMENT' => 4,
+            'TDS' => 5,
+        ];
+
+        return $lines->sortBy(fn ($amount, $name) => [
+            $priority[strtoupper($name)] ?? 99,
+            strtoupper($name),
+        ]);
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<string, float|int|string>  $lines
+     * @return \Illuminate\Support\Collection<string, float>
+     */
+    private function sortPayslipEarnings($lines)
+    {
+        $priority = ['BASIC' => 1, 'HRA' => 2, 'LTA' => 3, 'ALLOWANCE' => 4, 'SPECIAL ALLOWANCE' => 5];
+
+        return $lines->sortBy(fn ($amount, $name) => [
+            $priority[strtoupper($name)] ?? 99,
+            strtoupper($name),
+        ]);
     }
 }
