@@ -43,6 +43,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ConfirmActionDialog } from './components/ConfirmActionDialog';
+import { PayrollLockMispunchDialog } from './components/PayrollLockMispunchDialog';
 import {
   PayrollEntryBreakdownPanel,
   GovtAttendanceDayChangeBadge,
@@ -357,6 +358,8 @@ export default function PayrollGenerateShow() {
     shifts = [],
     flash,
     mispunch_count: mispunchCount = 0,
+    mispunch_entries: mispunchEntries = [],
+    ready_to_lock_count: readyToLockCount = 0,
     statutory_challan: statutoryChallan,
   } = usePage().props as any;
   const permissions = auth?.permissions || [];
@@ -367,6 +370,8 @@ export default function PayrollGenerateShow() {
   const [regenerateConfirmOpen, setRegenerateConfirmOpen] = useState(false);
   const [entryRegenerateTarget, setEntryRegenerateTarget] = useState<{ id: number; name: string } | null>(null);
   const [entryLockTarget, setEntryLockTarget] = useState<{ id: number; name: string } | null>(null);
+  const [mispunchLockMode, setMispunchLockMode] = useState<'employee' | 'bulk' | null>(null);
+  const [mispunchLockEmployeeId, setMispunchLockEmployeeId] = useState<number | null>(null);
   const [entryUnlockTarget, setEntryUnlockTarget] = useState<{ id: number; name: string } | null>(null);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -416,10 +421,11 @@ export default function PayrollGenerateShow() {
     if (flash?.error) toast.error(flash.error);
   }, [flash]);
 
-  const handleFinalize = () => {
+  const handleFinalize = (skipMispunch = false) => {
     setLockConfirmOpen(false);
+    setMispunchLockMode(null);
     setIsFinalizing(true);
-    router.post(route('hr.salary-payroll.generate.finalize', run.id), {}, {
+    router.post(route('hr.salary-payroll.generate.finalize', run.id), skipMispunch ? { skip_mispunch: true } : {}, {
       onFinish: () => setIsFinalizing(false),
     });
   };
@@ -465,22 +471,57 @@ export default function PayrollGenerateShow() {
     );
   };
 
-  const handleLockEntry = () => {
-    if (!entryLockTarget) return;
-    setLockingEntryId(entryLockTarget.id);
+  const handleLockEntry = (skipMispunch = false) => {
+    const targetId = entryLockTarget?.id ?? mispunchLockEmployeeId;
+    if (!targetId) return;
+    setLockingEntryId(targetId);
     router.post(
       route('hr.salary-payroll.generate.lock-entry', {
         salaryPayrollRun: run.id,
-        salaryPayrollEntry: entryLockTarget.id,
+        salaryPayrollEntry: targetId,
       }),
-      {},
+      skipMispunch ? { skip_mispunch: true } : {},
       {
         onFinish: () => {
           setLockingEntryId(null);
           setEntryLockTarget(null);
+          setMispunchLockMode(null);
+          setMispunchLockEmployeeId(null);
         },
       }
     );
+  };
+
+  const entriesList = entries?.data ?? [];
+  const mispunchLockEmployee = useMemo(() => {
+    if (!mispunchLockEmployeeId) return null;
+    const entry = entriesList.find((e: { id: number }) => e.id === mispunchLockEmployeeId);
+    if (!entry) return null;
+    return {
+      id: entry.id,
+      name: entry.name,
+      has_mispunch: entry.has_mispunch,
+      mispunch_records: entry.mispunch_records ?? [],
+    };
+  }, [mispunchLockEmployeeId, entriesList]);
+
+  const usesAttendance = run?.use_attendance !== false;
+
+  const openEmployeeLock = (entry: { id: number; name: string; has_mispunch?: boolean }) => {
+    if (usesAttendance && entry.has_mispunch) {
+      setMispunchLockEmployeeId(entry.id);
+      setMispunchLockMode('employee');
+      return;
+    }
+    setEntryLockTarget({ id: entry.id, name: entry.name });
+  };
+
+  const openBulkLock = () => {
+    if (usesAttendance && mispunchCount > 0) {
+      setMispunchLockMode('bulk');
+      return;
+    }
+    setLockConfirmOpen(true);
   };
 
   const handleUnlockEntry = () => {
@@ -520,7 +561,6 @@ export default function PayrollGenerateShow() {
 
   const showRowActions = !isRunLocked && (canManage || canFinalize);
   const showPayslipActions = canDownloadAnyPayslip;
-  const usesAttendance = run?.use_attendance !== false;
   const tableColSpan = (usesAttendance ? 5 : 4) + (showRowActions || showPayslipActions ? 1 : 0);
 
   const toggleEntryExpand = (entryId: number) => {
@@ -650,7 +690,7 @@ export default function PayrollGenerateShow() {
             </>
           )}
           {canFinalize && run?.status === 'calculated' && (
-            <Button size="sm" onClick={() => setLockConfirmOpen(true)} disabled={isFinalizing}>
+            <Button size="sm" onClick={openBulkLock} disabled={isFinalizing || unlockedCount === 0}>
               {isFinalizing ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Lock className="mr-1.5 h-4 w-4" />}
               {t('Lock Payroll')}
             </Button>
@@ -714,7 +754,7 @@ export default function PayrollGenerateShow() {
               {t('OT Yes: extra days → Incentive (PI). OT No: extra days → Adjust column (optional in net). PF always on working days max.')}
               {' '}{t('Lock an employee to generate payslip. Use Unlock (open lock icon) to edit again before final Lock Payroll.')}
               {mispunchCount > 0 && (
-                <> {t('Fix {{n}} mispunch before lock.', { n: mispunchCount })}</>
+                <> {t('Clear by date in lock dialog, or Skip & Lock ready employees.')}</>
               )}
             </>
           ) : (
@@ -959,7 +999,14 @@ export default function PayrollGenerateShow() {
                               </Button>
                             )}
                             {canFinalize && !entry.is_locked && (
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-amber-600" title={t('Lock')} disabled={lockingEntryId === entry.id} onClick={() => setEntryLockTarget({ id: entry.id, name: entry.name })}>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-amber-600"
+                                title={usesAttendance && entry.has_mispunch ? t('Review mispunch before lock') : t('Lock')}
+                                disabled={lockingEntryId === entry.id}
+                                onClick={() => openEmployeeLock(entry)}
+                              >
                                 {lockingEntryId === entry.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lock className="h-3.5 w-3.5" />}
                               </Button>
                             )}
@@ -1037,9 +1084,38 @@ export default function PayrollGenerateShow() {
         onConfirm={handleRegenerateEntry}
       />
 
+      <PayrollLockMispunchDialog
+        open={mispunchLockMode === 'employee'}
+        onOpenChange={(open) => {
+          if (!open) {
+            setMispunchLockMode(null);
+            setMispunchLockEmployeeId(null);
+          }
+        }}
+        mode="employee"
+        runId={run.id}
+        employee={mispunchLockEmployee}
+        locking={lockingEntryId !== null}
+        onLockEmployee={() => handleLockEntry(false)}
+        onSkipLockEmployee={() => handleLockEntry(true)}
+      />
+
+      <PayrollLockMispunchDialog
+        open={mispunchLockMode === 'bulk'}
+        onOpenChange={(open) => !open && setMispunchLockMode(null)}
+        mode="bulk"
+        runId={run.id}
+        mispunchEntries={mispunchEntries}
+        readyToLockCount={readyToLockCount || run?.ready_to_lock_count || 0}
+        mispunchCount={mispunchCount}
+        finalizing={isFinalizing}
+        onLockAll={() => handleFinalize(false)}
+        onSkipAndLock={() => handleFinalize(true)}
+      />
+
       <ConfirmActionDialog
-        open={!!entryLockTarget}
         onOpenChange={(open) => !open && setEntryLockTarget(null)}
+        open={!!entryLockTarget}
         title={t('Lock Employee?')}
         description={t('Lock payroll for "{{name}}"? Payslip PDF will be generated automatically.', {
           name: entryLockTarget?.name || '',
@@ -1049,7 +1125,7 @@ export default function PayrollGenerateShow() {
         variant="warning"
         icon={<Lock className="h-6 w-6" />}
         loading={lockingEntryId !== null}
-        onConfirm={handleLockEntry}
+        onConfirm={() => handleLockEntry(false)}
       />
 
       <ConfirmActionDialog
@@ -1082,7 +1158,7 @@ export default function PayrollGenerateShow() {
         variant="warning"
         icon={<Lock className="h-6 w-6" />}
         loading={isFinalizing}
-        onConfirm={handleFinalize}
+        onConfirm={() => handleFinalize(false)}
       />
     </PageTemplate>
   );

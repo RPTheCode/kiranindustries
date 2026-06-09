@@ -16,6 +16,7 @@ use App\Services\SalaryPayroll\BranchPayrollSettingsService;
 use App\Services\SalaryPayroll\SalaryPayrollBatchProcessor;
 use App\Services\SalaryPayroll\SalaryPayrollChallanReportBuilder;
 use App\Services\SalaryPayroll\SalaryPayrollChallanReportExportService;
+use App\Services\SalaryPayroll\SalaryPayrollMispunchService;
 use App\Services\SalaryPayroll\SalaryPayrollPayslipService;
 use App\Services\SalaryPayroll\SalaryPayrollRegisterBuilder;
 use App\Services\SalaryPayroll\SalaryPayrollRegisterExportService;
@@ -35,7 +36,8 @@ class SalaryPayrollGenerateController extends Controller
         private SalaryPayrollRegisterExportService $registerExportService,
         private SalaryPayrollChallanReportBuilder $challanReportBuilder,
         private SalaryPayrollChallanReportExportService $challanReportExportService,
-        private BranchPayrollSettingsService $branchPayrollSettings
+        private BranchPayrollSettingsService $branchPayrollSettings,
+        private SalaryPayrollMispunchService $mispunchService
     ) {}
 
     public function index(Request $request)
@@ -224,13 +226,35 @@ class SalaryPayrollGenerateController extends Controller
         $mispunchCount = SalaryPayrollEntry::query()
             ->where('salary_payroll_run_id', $salaryPayrollRun->id)
             ->where('has_mispunch', true)
+            ->where('is_locked', false)
             ->count();
+
+        $mispunchEntries = SalaryPayrollEntry::query()
+            ->where('salary_payroll_run_id', $salaryPayrollRun->id)
+            ->where('has_mispunch', true)
+            ->where('is_locked', false)
+            ->with(['employee:id,name', 'employee.employee:id,user_id,employee_id'])
+            ->join('users', 'salary_payroll_entries.employee_id', '=', 'users.id')
+            ->select('salary_payroll_entries.*')
+            ->orderBy('users.name')
+            ->get()
+            ->map(fn ($entry) => [
+                'id' => $entry->id,
+                'name' => $entry->employee?->name,
+                'employee_code' => $entry->employee?->employee?->employee_id,
+                'mispunch_count' => (int) ($entry->mispunch_count ?? 0),
+                'mispunch_records' => $this->mispunchService->recordsPayloadForEntry($entry),
+            ])
+            ->values()
+            ->all();
 
         return Inertia::render('hr/salary-payroll/payroll-generate/show', [
             'run' => $this->formatRun($salaryPayrollRun),
             'statutory_challan' => $this->runService->statutoryChallanSummary($salaryPayrollRun),
             'entries' => $entries,
             'mispunch_count' => $mispunchCount,
+            'mispunch_entries' => $mispunchEntries,
+            'ready_to_lock_count' => $this->runService->readyToLockCount($salaryPayrollRun),
             'filters' => $request->only(['search', 'per_page', 'category_id', 'shift_id', 'department_id', 'lock_status']),
             'categories' => $this->branchCategories($branchId),
             'departments' => $this->branchDepartments($branchId),
@@ -408,7 +432,7 @@ class SalaryPayrollGenerateController extends Controller
         return redirect()->back()->with('success', $message);
     }
 
-    public function lockEntry(SalaryPayrollRun $salaryPayrollRun, SalaryPayrollEntry $salaryPayrollEntry)
+    public function lockEntry(Request $request, SalaryPayrollRun $salaryPayrollRun, SalaryPayrollEntry $salaryPayrollEntry)
     {
         $this->assertBranchAccess($salaryPayrollRun);
 
@@ -416,8 +440,10 @@ class SalaryPayrollGenerateController extends Controller
             abort(404);
         }
 
+        $skipMispunch = $request->boolean('skip_mispunch');
+
         try {
-            $this->runService->lockEntry($salaryPayrollEntry);
+            $this->runService->lockEntry($salaryPayrollEntry, $skipMispunch);
             $salaryPayrollEntry->refresh();
             $this->payslipService->generateForEntry($salaryPayrollEntry);
         } catch (\InvalidArgumentException $e) {
@@ -426,7 +452,11 @@ class SalaryPayrollGenerateController extends Controller
             return redirect()->back()->with('error', __('Employee locked but payslip generation failed: :message', ['message' => $e->getMessage()]));
         }
 
-        return redirect()->back()->with('success', __('Employee payroll locked and payslip generated.'));
+        $message = $skipMispunch && $salaryPayrollEntry->has_mispunch
+            ? __('Employee locked with mispunch pending. Payslip generated.')
+            : __('Employee payroll locked and payslip generated.');
+
+        return redirect()->back()->with('success', $message);
     }
 
     public function unlockEntry(SalaryPayrollRun $salaryPayrollRun, SalaryPayrollEntry $salaryPayrollEntry)
@@ -481,6 +511,53 @@ class SalaryPayrollGenerateController extends Controller
         } catch (\Throwable $e) {
             return redirect()->back()->with('error', __('Failed to download payslips: :message', ['message' => $e->getMessage()]));
         }
+    }
+
+    public function clearEntryMispunch(Request $request, SalaryPayrollRun $salaryPayrollRun, SalaryPayrollEntry $salaryPayrollEntry)
+    {
+        $this->assertBranchAccess($salaryPayrollRun);
+
+        if ((int) $salaryPayrollEntry->salary_payroll_run_id !== (int) $salaryPayrollRun->id) {
+            abort(404);
+        }
+
+        if ($salaryPayrollRun->isFinalized()) {
+            return redirect()->back()->with('error', __('Locked payroll runs cannot be changed.'));
+        }
+
+        if ($salaryPayrollEntry->is_locked) {
+            return redirect()->back()->with('error', __('This employee is locked and cannot be changed.'));
+        }
+
+        $validated = $request->validate([
+            'biometric_attendance_id' => 'required|integer',
+            'mode' => 'required|in:shift,manual',
+            'in_time' => 'required_if:mode,manual|nullable|string',
+            'out_time' => 'required_if:mode,manual|nullable|string',
+        ]);
+
+        $record = \App\Models\BiometricAttendance::query()->findOrFail($validated['biometric_attendance_id']);
+
+        try {
+            $this->mispunchService->assertRecordBelongsToEntry($record, $salaryPayrollEntry);
+            if ($validated['mode'] === 'shift') {
+                $this->mispunchService->clearWithShiftTimes($record);
+            } else {
+                $this->mispunchService->clearWithManualTimes(
+                    $record,
+                    (string) $validated['in_time'],
+                    (string) $validated['out_time']
+                );
+            }
+            $this->batchProcessor->processEmployee($salaryPayrollRun, (int) $salaryPayrollEntry->employee_id);
+        } catch (\InvalidArgumentException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
+
+        return redirect()->back()->with('success', __(
+            'Mispunch cleared for :date. Salary recalculated.',
+            ['date' => $record->attendance_date->format('d M Y')]
+        ));
     }
 
     public function regenerateEntry(SalaryPayrollRun $salaryPayrollRun, SalaryPayrollEntry $salaryPayrollEntry)
@@ -569,17 +646,35 @@ class SalaryPayrollGenerateController extends Controller
         return ! $otEnabled && (float) ($entry->attendance_extra_days ?? 0) > 0;
     }
 
-    public function finalize(SalaryPayrollRun $salaryPayrollRun)
+    public function finalize(Request $request, SalaryPayrollRun $salaryPayrollRun)
     {
         $this->assertBranchAccess($salaryPayrollRun);
 
+        $skipMispunch = $request->boolean('skip_mispunch');
+
         try {
-            $this->runService->finalize($salaryPayrollRun);
+            $this->runService->finalize($salaryPayrollRun, $skipMispunch);
             $generated = $this->payslipService->generateForRun($salaryPayrollRun->fresh());
         } catch (\InvalidArgumentException $e) {
             return redirect()->back()->with('error', $e->getMessage());
         } catch (\Throwable $e) {
             return redirect()->back()->with('error', __('Payroll locked but payslip generation failed: :message', ['message' => $e->getMessage()]));
+        }
+
+        $salaryPayrollRun->refresh();
+        $skippedMispunch = $this->runService->unlockedMispunchEntryCount($salaryPayrollRun);
+
+        if ($skipMispunch && $skippedMispunch > 0 && ! $salaryPayrollRun->isFinalized()) {
+            $message = $generated > 0
+                ? __('Locked :count ready employee(s). :skipped still open (mispunch). Payslip(s) generated.', [
+                    'count' => $generated,
+                    'skipped' => $skippedMispunch,
+                ])
+                : __('No ready employees to lock. :skipped employee(s) still have mispunch.', [
+                    'skipped' => $skippedMispunch,
+                ]);
+
+            return redirect()->back()->with('success', $message);
         }
 
         $message = $generated > 0
@@ -697,7 +792,9 @@ class SalaryPayrollGenerateController extends Controller
             'status' => $run->status,
             'is_locked' => $run->isFinalized(),
             'locked_entry_count' => $this->runService->lockedEntryCount($run),
-            'unlocked_entry_count' => max(0, (int) $run->employee_count - $this->runService->lockedEntryCount($run)),
+            'unlocked_entry_count' => $this->runService->unlockedEntryCount($run),
+            'ready_to_lock_count' => $this->runService->readyToLockCount($run),
+            'unlocked_mispunch_count' => $this->runService->unlockedMispunchEntryCount($run),
             'payslip_count' => \App\Models\SalaryPayroll\SalaryPayrollPayslip::query()
                 ->where('salary_payroll_run_id', $run->id)
                 ->count(),
@@ -776,6 +873,9 @@ class SalaryPayrollGenerateController extends Controller
             'can_toggle_attendance_extra' => $this->canToggleAttendanceExtra($entry, $run),
             'mispunch_count' => (int) ($entry->mispunch_count ?? 0),
             'has_mispunch' => (bool) ($entry->has_mispunch ?? false),
+            'mispunch_records' => ($entry->has_mispunch ?? false)
+                ? $this->mispunchService->recordsPayloadForEntry($entry)
+                : [],
             'basic' => (float) $entry->basic,
             'total_earnings' => (float) $entry->total_earnings,
             'total_deductions' => (float) $entry->total_deductions,

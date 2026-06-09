@@ -293,7 +293,7 @@ class SalaryPayrollRunService
         ]);
     }
 
-    public function finalize(SalaryPayrollRun $run): SalaryPayrollRun
+    public function finalize(SalaryPayrollRun $run, bool $skipMispunch = false): SalaryPayrollRun
     {
         if ($run->isFinalized()) {
             throw new \InvalidArgumentException(__('This payroll run is already finalized.'));
@@ -301,6 +301,22 @@ class SalaryPayrollRunService
 
         if ($run->status !== 'calculated') {
             throw new \InvalidArgumentException(__('Generate payroll before locking.'));
+        }
+
+        if ($skipMispunch) {
+            $this->lockReadyEntries($run);
+
+            if ($this->unlockedEntryCount($run) === 0) {
+                $this->markRunFinalized($run);
+            }
+
+            return $run->fresh();
+        }
+
+        if (($run->use_attendance ?? false) && $this->unlockedMispunchEntryCount($run) > 0) {
+            throw new \InvalidArgumentException(__(
+                'Some employees still have mispunch. Clear them here or use Skip & Lock Ready.'
+            ));
         }
 
         SalaryPayrollEntry::query()
@@ -312,16 +328,96 @@ class SalaryPayrollRunService
                 'locked_at' => now(),
             ]);
 
+        $this->markRunFinalized($run);
+
+        return $run->fresh();
+    }
+
+    /**
+     * Lock unlocked employees without mispunch (when attendance is used).
+     *
+     * @return array{locked: int, skipped_mispunch: int}
+     */
+    public function lockReadyEntries(SalaryPayrollRun $run): array
+    {
+        if ($run->isFinalized()) {
+            throw new \InvalidArgumentException(__('This payroll run is already finalized.'));
+        }
+
+        if ($run->status !== 'calculated') {
+            throw new \InvalidArgumentException(__('Generate payroll before locking.'));
+        }
+
+        $query = SalaryPayrollEntry::query()
+            ->where('salary_payroll_run_id', $run->id)
+            ->where('is_locked', false);
+
+        if ($run->use_attendance ?? false) {
+            $query->where('has_mispunch', false);
+        }
+
+        $entries = $query->get();
+        $locked = 0;
+
+        foreach ($entries as $entry) {
+            $entry->update([
+                'is_locked' => true,
+                'locked_by' => Auth::id(),
+                'locked_at' => now(),
+            ]);
+            $locked++;
+        }
+
+        return [
+            'locked' => $locked,
+            'skipped_mispunch' => $this->unlockedMispunchEntryCount($run),
+        ];
+    }
+
+    public function readyToLockCount(SalaryPayrollRun $run): int
+    {
+        $query = SalaryPayrollEntry::query()
+            ->where('salary_payroll_run_id', $run->id)
+            ->where('is_locked', false);
+
+        if ($run->use_attendance ?? false) {
+            $query->where('has_mispunch', false);
+        }
+
+        return $query->count();
+    }
+
+    public function unlockedEntryCount(SalaryPayrollRun $run): int
+    {
+        return SalaryPayrollEntry::query()
+            ->where('salary_payroll_run_id', $run->id)
+            ->where('is_locked', false)
+            ->count();
+    }
+
+    public function unlockedMispunchEntryCount(SalaryPayrollRun $run): int
+    {
+        if (! ($run->use_attendance ?? false)) {
+            return 0;
+        }
+
+        return SalaryPayrollEntry::query()
+            ->where('salary_payroll_run_id', $run->id)
+            ->where('is_locked', false)
+            ->where('has_mispunch', true)
+            ->count();
+    }
+
+    private function markRunFinalized(SalaryPayrollRun $run): void
+    {
         $run->update([
             'status' => 'finalized',
             'finalized_by' => Auth::id(),
             'finalized_at' => now(),
         ]);
-
-        return $run->fresh();
     }
 
-    public function lockEntry(SalaryPayrollEntry $entry): SalaryPayrollEntry
+    public function lockEntry(SalaryPayrollEntry $entry, bool $skipMispunch = false): SalaryPayrollEntry
     {
         $run = $entry->run;
 
@@ -335,6 +431,12 @@ class SalaryPayrollRunService
 
         if ($run->status !== 'calculated') {
             throw new \InvalidArgumentException(__('Generate payroll before locking employees.'));
+        }
+
+        if (! $skipMispunch && ($run->use_attendance ?? false) && $entry->has_mispunch) {
+            throw new \InvalidArgumentException(__(
+                'This employee has mispunch. Clear the dates below, or use Skip & Lock.'
+            ));
         }
 
         $entry->update([
@@ -378,6 +480,14 @@ class SalaryPayrollRunService
     public function hasLockedEntries(SalaryPayrollRun $run): bool
     {
         return $this->lockedEntryCount($run) > 0;
+    }
+
+    public function mispunchEntryCount(SalaryPayrollRun $run): int
+    {
+        return SalaryPayrollEntry::query()
+            ->where('salary_payroll_run_id', $run->id)
+            ->where('has_mispunch', true)
+            ->count();
     }
 
     /**
