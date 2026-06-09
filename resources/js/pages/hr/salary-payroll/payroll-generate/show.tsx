@@ -151,7 +151,7 @@ function AttendanceDaysCell({
         </span>
         {otEnabled && incentiveDays > 0 && (
           <>
-            <span className="rounded bg-amber-100 px-1 py-px font-bold text-amber-800" title={t('Amber — production incentive for {{days}} extra paid days', { days: incentiveDays })}>
+            <span className="rounded bg-amber-100 px-1 py-px font-bold text-amber-800" title={t('Warning — production incentive for {{days}} extra paid days', { days: incentiveDays })}>
               {t('PI')} {incentiveDays}
             </span>
             <span
@@ -165,7 +165,7 @@ function AttendanceDaysCell({
         {halfDays > 0 && (
           <span
             className="rounded bg-amber-100 px-1 py-px font-bold text-amber-800"
-            title={t('Amber — {{count}} half days × 0.5 = {{credit}} paid days', { count: halfDays, credit: formatDays(halfDayCredit) })}
+            title={t('Warning — {{count}} half days × 0.5 = {{credit}} paid days', { count: halfDays, credit: formatDays(halfDayCredit) })}
           >
             {t('HD')} {halfDays}
           </span>
@@ -178,13 +178,13 @@ function AttendanceDaysCell({
             )}
             title={entry.attendance_extra_applied
               ? t('Blue — adjust applied to net salary (OT No)')
-              : t('Amber — adjust pending, not added to net (OT No)')}
+              : t('Warning — adjust pending, not added to net (OT No)')}
           >
             {entry.attendance_extra_applied ? t('Adj') : t('Adj?')} +{formatDays(Number(entry.attendance_extra_days))}
           </span>
         )}
         {entry.has_mispunch ? (
-          <span className="inline-flex items-center rounded bg-amber-500 px-1 py-px font-bold text-white" title={t('Amber — mispunch: fix attendance before lock')}>
+          <span className="inline-flex items-center rounded bg-amber-500 px-1 py-px font-bold text-white" title={t('Warning — mispunch: fix attendance before lock')}>
             <AlertTriangle className="h-2.5 w-2.5" />
             {entry.mispunch_count}
           </span>
@@ -201,7 +201,7 @@ function PayrollColorLegend({ t }: { t: (key: string) => string }) {
     { swatch: 'border-2 border-indigo-400 bg-indigo-100', label: t('Indigo — govt min wage: attendance days changed (e.g. 23 → 22) for salary & PF') },
     { swatch: 'bg-emerald-100', label: t('Green — full paid days (≥ working days) or clean attendance') },
     { swatch: 'bg-sky-100', label: t('Blue — partial month or adjust applied to net') },
-    { swatch: 'bg-amber-100', label: t('Amber — half day, PI incentive, pending adjust, or mispunch warning') },
+    { swatch: 'bg-amber-100', label: t('Warning (yellow) — half day, PI incentive, pending adjust, or mispunch') },
     { swatch: 'bg-violet-100', label: t('Violet — OT Yes (extra days → Incentive)') },
     { swatch: 'bg-red-100', label: t('Red — deductions (PF, PT, govt adjust)') },
   ];
@@ -280,11 +280,11 @@ function SalaryCompactCell({ entry, formatRupee: fmt, t }: { entry: any; formatR
       </div>
       {otEnabled && incentiveAmount > 0 && (
         <div className="flex flex-col items-end gap-0.5 text-[9px] text-amber-700">
-          <div className="flex items-center justify-end gap-1.5" title={t('Amber — production incentive for extra days (OT Yes)')}>
+          <div className="flex items-center justify-end gap-1.5" title={t('Warning — production incentive for extra days (OT Yes)')}>
             <span>{t('PI')} ({incentiveDays} {t('days')})</span>
             <span className="font-semibold">+ ₹{fmt(incentiveAmount)}</span>
           </div>
-          <span className="text-[8px] text-amber-600">{t('Amber — extra days added as Incentive')}</span>
+          <span className="text-[8px] text-amber-600">{t('Warning — extra days added as Incentive')}</span>
         </div>
       )}
       {!otEnabled && attendanceExtraAmount > 0 && (
@@ -296,7 +296,7 @@ function SalaryCompactCell({ entry, formatRupee: fmt, t }: { entry: any; formatR
             )}
             title={attendanceExtraApplied
               ? t('Blue — extra days adjust added to net (OT No)')
-              : t('Amber — extra days adjust pending, not in net (OT No)')}
+              : t('Warning — extra days adjust pending, not in net (OT No)')}
           >
             <span>{t('Adjust')} ({attendanceExtraDays} {t('days')}){!attendanceExtraApplied ? ` · ${t('pending')}` : ''}</span>
             <span className="font-semibold">{attendanceExtraApplied ? '+' : ''} ₹{fmt(attendanceExtraAmount)}</span>
@@ -304,7 +304,7 @@ function SalaryCompactCell({ entry, formatRupee: fmt, t }: { entry: any; formatR
           <span className={cn('text-[8px]', attendanceExtraApplied ? 'text-sky-600' : 'text-amber-600')}>
             {attendanceExtraApplied
               ? t('Blue — adjust included in net salary')
-              : t('Amber — tick "Add adjust to net" in breakdown')}
+              : t('Warning — tick "Add adjust to net" in breakdown')}
           </span>
         </div>
       )}

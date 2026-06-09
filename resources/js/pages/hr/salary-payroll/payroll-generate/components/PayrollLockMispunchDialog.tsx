@@ -109,7 +109,7 @@ function MispunchDateRow({
   entryId: number;
   record: MispunchRecord;
 }) {
-  const [clearingMode, setClearingMode] = useState<'shift' | 'manual' | null>(null);
+  const [saving, setSaving] = useState(false);
   const analysis = useMemo(() => defaultManualTimes(record), [record]);
   const [inTime, setInTime] = useState(analysis.inTime);
   const [outTime, setOutTime] = useState(analysis.outTime);
@@ -120,20 +120,13 @@ function MispunchDateRow({
     setOutTime(next.outTime);
   }, [record.id, record.in_time, record.out_time, record.missing_in, record.missing_out, record.log_details, record.shift_start, record.shift_end]);
 
-  const submitClear = (mode: 'shift' | 'manual') => {
-    const resolvedIn = mode === 'shift'
-      ? (analysis.inTime || record.shift_start || '')
-      : inTime;
-    const resolvedOut = mode === 'shift'
-      ? (analysis.outTime || record.shift_end || '')
-      : outTime;
-
-    if (!resolvedIn || !resolvedOut) {
+  const submitClear = () => {
+    if (!inTime || !outTime) {
       toast.error('Please enter both IN and OUT time.');
       return;
     }
 
-    setClearingMode(mode);
+    setSaving(true);
     router.post(
       route('hr.salary-payroll.generate.clear-entry-mispunch', {
         salaryPayrollRun: runId,
@@ -142,70 +135,35 @@ function MispunchDateRow({
       {
         biometric_attendance_id: record.id,
         mode: 'manual',
-        in_time: resolvedIn,
-        out_time: resolvedOut,
+        in_time: inTime,
+        out_time: outTime,
       },
       {
         ...reloadMispunchProps,
-        onFinish: () => setClearingMode(null),
+        onFinish: () => setSaving(false),
       },
     );
   };
 
-  const applyShiftFillMissing = () => {
-    if (analysis.missingIn && record.shift_start) {
-      setInTime(record.shift_start);
-    }
-    if (analysis.missingOut && record.shift_end) {
-      setOutTime(record.shift_end);
-    }
-  };
-
-  const shiftFillLabel = analysis.missingIn && analysis.missingOut
-    ? 'Fill IN & OUT (shift)'
-    : analysis.missingIn
-      ? 'Fill IN (shift)'
-      : analysis.missingOut
-        ? 'Fill OUT (shift)'
-        : 'Fill missing (shift)';
-
   return (
     <div className="space-y-3 rounded-lg border border-amber-100 bg-white p-3 text-sm">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="font-semibold text-slate-900">{record.display_date}</p>
-            {analysis.summary ? (
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-800">
-                {analysis.summary}
-              </span>
-            ) : null}
-          </div>
-          {record.can_quick_clear ? (
-            <p className="text-xs text-slate-500">
-              Shift: {record.shift_start} – {record.shift_end}
-            </p>
-          ) : (
-            <p className="text-xs text-amber-700">Shift time not set — enter IN/OUT manually below</p>
-          )}
-          {record.log_details ? (
-            <p className="mt-0.5 text-xs text-slate-400">Punch: {record.log_details}</p>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="font-semibold text-slate-900">{record.display_date}</p>
+          {analysis.summary ? (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-800">
+              {analysis.summary}
+            </span>
           ) : null}
         </div>
-        {record.can_quick_clear && (analysis.missingIn || analysis.missingOut) && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 shrink-0 border-emerald-200 text-emerald-800 hover:bg-emerald-50"
-            disabled={clearingMode !== null}
-            onClick={() => submitClear('shift')}
-            title={`Keep existing punch, fill missing with shift time (${record.shift_start} / ${record.shift_end})`}
-          >
-            {clearingMode === 'shift' ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
-            {shiftFillLabel}
-          </Button>
-        )}
+        {record.shift_start && record.shift_end ? (
+          <p className="text-xs text-slate-500">
+            Shift: {record.shift_start} – {record.shift_end}
+          </p>
+        ) : null}
+        {record.log_details ? (
+          <p className="mt-0.5 text-xs text-slate-400">Punch: {record.log_details}</p>
+        ) : null}
       </div>
 
       <div className="rounded-md border border-slate-100 bg-slate-50/80 p-3">
@@ -241,33 +199,20 @@ function MispunchDateRow({
             />
           </div>
           <div className="flex flex-wrap gap-2 sm:flex-col">
-            {record.can_quick_clear && (analysis.missingIn || analysis.missingOut) && (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-9 text-xs text-slate-600"
-                onClick={applyShiftFillMissing}
-              >
-                {shiftFillLabel}
-              </Button>
-            )}
             <Button
               type="button"
               size="sm"
               className="h-9 bg-primary hover:bg-primary/90"
-              disabled={clearingMode !== null}
-              onClick={() => submitClear('manual')}
+              disabled={saving}
+              onClick={submitClear}
             >
-              {clearingMode === 'manual' ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+              {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
               Save Time
             </Button>
           </div>
         </div>
         <p className="mt-2 text-[11px] text-slate-500">
-          {analysis.missingIn || analysis.missingOut
-            ? 'Only missing punch will be filled from shift. Existing punch stays as-is.'
-            : 'Night shift: if OUT is before IN, next day is assumed automatically.'}
+          Enter the missing IN or OUT time, then Save. Night shift: if OUT is before IN, next day is assumed automatically.
         </p>
       </div>
     </div>
@@ -394,7 +339,7 @@ export function PayrollLockMispunchDialog({
               <div>
                 <p className="font-medium">Fix mispunch by date</p>
                 <p className="mt-0.5 text-xs text-amber-800">
-                  Shows what is missing (IN or OUT). <span className="font-medium">Fill OUT (shift)</span> keeps existing punch and fills only the missing one from shift.
+                  Shows what is missing (IN or OUT). Enter the time manually and click Save Time.
                 </p>
               </div>
             </div>

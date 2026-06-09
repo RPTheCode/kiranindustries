@@ -613,7 +613,7 @@ export function PayrollEntryBreakdownPanel({ entry, runUsesAttendance = true, to
                 'mr-1.5 rounded px-1 py-px text-[9px] font-bold uppercase',
                 entry.has_mispunch ? 'bg-amber-500 text-white' : 'bg-indigo-600 text-white',
               )}>
-                {entry.has_mispunch ? t('Amber') : t('Indigo')}
+                {entry.has_mispunch ? t('Warning') : t('Indigo')}
               </span>
             )}
             {govtDayChange && (
