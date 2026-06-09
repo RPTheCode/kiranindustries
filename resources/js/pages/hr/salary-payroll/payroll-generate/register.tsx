@@ -11,6 +11,7 @@ import {
   Lock,
   Eye,
   EyeOff,
+  Landmark,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -264,6 +265,12 @@ export default function PayrollGenerateRegister() {
               <Link href={route('hr.salary-payroll.generate.show', run.id)}>
                 <ArrowLeft className="mr-1.5 h-4 w-4" />
                 {t('Detail View')}
+              </Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link href={route('hr.salary-payroll.generate.challan-report', run.id)}>
+                <Landmark className="mr-1.5 h-4 w-4" />
+                {t('Challan Report')}
               </Link>
             </Button>
             <Button size="sm" onClick={openDownloadDialog}>

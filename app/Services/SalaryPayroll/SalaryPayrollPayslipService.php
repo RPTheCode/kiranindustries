@@ -269,12 +269,11 @@ class SalaryPayrollPayslipService
             'actual_paid_days' => $entry->actual_paid_days !== null ? (float) $entry->actual_paid_days : null,
             'govt_min_wage_per_day' => (float) ($entry->govt_min_wage_per_day ?? 0),
             'govt_wage_computed_earnings' => (float) ($entry->govt_wage_computed_earnings ?? 0),
-            'pf_admin_employer' => max(0, round(
-                (float) ($entry->pf_employer ?? 0)
-                - (float) ($entry->pf_eps_employer ?? 0)
-                - (float) ($entry->pf_epf_employer ?? 0),
-                0
-            )),
+            'pf_admin_employer' => (float) ($entry->pf_admin_employer ?? 0),
+            'pf_challan_ac1' => (float) ($entry->pf_challan_ac1 ?? 0),
+            'pf_challan_ac2' => (float) ($entry->pf_challan_ac2 ?? 0),
+            'pf_challan_ac10' => (float) ($entry->pf_challan_ac10 ?? 0),
+            'pf_challan_total' => (float) ($entry->pf_challan_total ?? 0),
         ];
     }
 

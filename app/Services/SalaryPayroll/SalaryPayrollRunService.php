@@ -445,8 +445,16 @@ class SalaryPayrollRunService
             'total_net' => round($calculated->sum('net_salary'), 2),
             'total_pf_employee' => round($calculated->sum('pf_employee'), 2),
             'total_pf_employer' => round($calculated->sum('pf_employer'), 2),
+            'total_pf_eps_employer' => round($calculated->sum('pf_eps_employer'), 2),
+            'total_pf_epf_employer' => round($calculated->sum('pf_epf_employer'), 2),
+            'total_pf_admin_employer' => round($calculated->sum('pf_admin_employer'), 2),
+            'total_pf_challan_ac1' => round($calculated->sum('pf_challan_ac1'), 2),
+            'total_pf_challan_ac2' => round($calculated->sum('pf_challan_ac2'), 2),
+            'total_pf_challan_ac10' => round($calculated->sum('pf_challan_ac10'), 2),
+            'total_pf_challan_total' => round($calculated->sum('pf_challan_total'), 2),
             'total_esi_employee' => round($calculated->sum('esi_employee'), 2),
             'total_esi_employer' => round($calculated->sum('esi_employer'), 2),
+            'total_pt_amount' => round($calculated->sum('pt_amount'), 2),
             'status' => 'calculated',
         ]);
     }
@@ -464,21 +472,50 @@ class SalaryPayrollRunService
             ->get();
 
         $pfEntries = $entries->filter(fn (SalaryPayrollEntry $e) => (float) $e->pf_employee > 0);
-        $pfEmployee = round((float) $pfEntries->sum('pf_employee'), 0);
-        $pfEps = round((float) $pfEntries->sum('pf_eps_employer'), 0);
-        $pfEpf = round((float) $pfEntries->sum('pf_epf_employer'), 0);
-        $pfEmployerTotal = round((float) $pfEntries->sum('pf_employer'), 0);
-        $pfAdmin = max(0, round($pfEmployerTotal - $pfEps - $pfEpf, 0));
+
+        $useStoredRunTotals = (float) ($run->total_pf_challan_total ?? 0) > 0;
+
+        $pfEmployee = $useStoredRunTotals
+            ? round((float) $run->total_pf_employee, 0)
+            : round((float) $pfEntries->sum('pf_employee'), 0);
+        $pfEps = $useStoredRunTotals
+            ? round((float) $run->total_pf_eps_employer, 0)
+            : round((float) $pfEntries->sum('pf_eps_employer'), 0);
+        $pfEpf = $useStoredRunTotals
+            ? round((float) $run->total_pf_epf_employer, 0)
+            : round((float) $pfEntries->sum('pf_epf_employer'), 0);
+        $pfAdmin = $useStoredRunTotals
+            ? round((float) $run->total_pf_admin_employer, 0)
+            : max(0, round((float) $pfEntries->sum('pf_admin_employer'), 0));
+        $pfEmployerTotal = $useStoredRunTotals
+            ? round((float) $run->total_pf_employer, 0)
+            : round((float) $pfEntries->sum('pf_employer'), 0);
         $pfWages = round((float) $pfEntries->sum('pf_wages'), 0);
 
-        $ac1 = $pfEmployee + $pfEpf;
-        $ac2 = $pfEps;
-        $ac10 = $pfAdmin;
+        $ac1 = $useStoredRunTotals
+            ? round((float) $run->total_pf_challan_ac1, 0)
+            : round((float) $pfEntries->sum('pf_challan_ac1'), 0);
+        $ac2 = $useStoredRunTotals
+            ? round((float) $run->total_pf_challan_ac2, 0)
+            : round((float) $pfEntries->sum('pf_challan_ac2'), 0);
+        $ac10 = $useStoredRunTotals
+            ? round((float) $run->total_pf_challan_ac10, 0)
+            : round((float) $pfEntries->sum('pf_challan_ac10'), 0);
+        $challanTotal = $useStoredRunTotals
+            ? round((float) $run->total_pf_challan_total, 0)
+            : $ac1 + $ac2 + $ac10;
+
+        if (! $useStoredRunTotals && $ac1 <= 0 && $pfEmployee > 0) {
+            $ac1 = $pfEmployee + $pfEpf;
+            $ac2 = $pfEps;
+            $ac10 = max(0, round($pfEmployerTotal - $pfEps - $pfEpf, 0));
+            $challanTotal = $ac1 + $ac2 + $ac10;
+        }
 
         $params = PayrollParameter::forFinancialYear($run->financial_year);
-        $esiEmployee = round((float) $entries->sum('esi_employee'), 0);
-        $esiEmployer = round((float) $entries->sum('esi_employer'), 0);
-        $ptTotal = round((float) $entries->sum('pt_amount'), 0);
+        $esiEmployee = round((float) ($run->total_esi_employee ?: $entries->sum('esi_employee')), 0);
+        $esiEmployer = round((float) ($run->total_esi_employer ?: $entries->sum('esi_employer')), 0);
+        $ptTotal = round((float) ($run->total_pt_amount ?: $entries->sum('pt_amount')), 0);
 
         return [
             'pf' => [
@@ -487,13 +524,13 @@ class SalaryPayrollRunService
                 'employee_contribution' => $pfEmployee,
                 'employer_eps' => $pfEps,
                 'employer_epf' => $pfEpf,
-                'admin_charges' => $pfAdmin,
+                'admin_charges' => $ac10 > 0 ? $ac10 : $pfAdmin,
                 'employer_total' => $pfEmployerTotal,
                 'challan' => [
                     'ac1_employees_pf' => $ac1,
                     'ac2_pension_eps' => $ac2,
-                    'ac10_admin' => $ac10,
-                    'total_deposit' => $ac1 + $ac2 + $ac10,
+                    'ac10_admin' => $ac10 > 0 ? $ac10 : $pfAdmin,
+                    'total_deposit' => $challanTotal,
                 ],
                 'rates' => [
                     'employee_pct' => PayrollParameter::pfEmployeePct($params),

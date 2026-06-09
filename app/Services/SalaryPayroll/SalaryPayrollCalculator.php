@@ -17,7 +17,8 @@ class SalaryPayrollCalculator
         private SalaryComponentAssignmentService $componentAssignment,
         private SalaryPayrollAttendanceService $attendanceService,
         private BranchPayrollSettingsService $branchPayrollSettings,
-        private GovernmentWageSalaryService $govtWageSalary
+        private GovernmentWageSalaryService $govtWageSalary,
+        private PfChallanBreakdownService $pfChallan
     ) {}
 
     /**
@@ -277,6 +278,11 @@ class SalaryPayrollCalculator
         $pfEmployer = 0.0;
         $pfEpsEmployer = 0.0;
         $pfEpEmployer = 0.0;
+        $pfAdminEmployer = 0.0;
+        $pfChallanAc1 = 0.0;
+        $pfChallanAc2 = 0.0;
+        $pfChallanAc10 = 0.0;
+        $pfChallanTotal = 0.0;
         $esiEmployee = 0.0;
         $esiEmployer = 0.0;
         $ptAmount = 0.0;
@@ -319,6 +325,12 @@ class SalaryPayrollCalculator
             $pfEpEmployer = round($pfWages * $epfSharePct / 100, 0);
             $pfAdmin = round($pfWages * $adminPct / 100, 0);
             $pfEmployer = $pfEpsEmployer + $pfEpEmployer + $pfAdmin;
+            $challan = $this->pfChallan->build($pfEmployee, $pfEpsEmployer, $pfEpEmployer, $pfEmployer, $pfAdmin);
+            $pfAdminEmployer = (float) $challan['pf_admin_employer'];
+            $pfChallanAc1 = (float) $challan['pf_challan_ac1'];
+            $pfChallanAc2 = (float) $challan['pf_challan_ac2'];
+            $pfChallanAc10 = (float) $challan['pf_challan_ac10'];
+            $pfChallanTotal = (float) $challan['pf_challan_total'];
             $deductionsBreakdown = $this->replaceStatutoryDeduction($deductionsBreakdown, ['PF', 'PROVIDENT FUND', 'EPF'], 'Provident Fund (PF)', $pfEmployee);
         } else {
             $deductionsBreakdown = $this->removeStatutoryDeduction($deductionsBreakdown, ['PF', 'PROVIDENT FUND', 'EPF']);
@@ -378,6 +390,11 @@ class SalaryPayrollCalculator
             'pf_employer' => $pfEmployer,
             'pf_eps_employer' => $pfEpsEmployer,
             'pf_epf_employer' => $pfEpEmployer,
+            'pf_admin_employer' => $pfAdminEmployer,
+            'pf_challan_ac1' => $pfChallanAc1,
+            'pf_challan_ac2' => $pfChallanAc2,
+            'pf_challan_ac10' => $pfChallanAc10,
+            'pf_challan_total' => $pfChallanTotal,
             'esi_employee' => $esiEmployee,
             'esi_employer' => $esiEmployer,
             'pt_amount' => $ptAmount,
@@ -523,6 +540,11 @@ class SalaryPayrollCalculator
             'pf_employer' => 0,
             'pf_eps_employer' => 0,
             'pf_epf_employer' => 0,
+            'pf_admin_employer' => 0,
+            'pf_challan_ac1' => 0,
+            'pf_challan_ac2' => 0,
+            'pf_challan_ac10' => 0,
+            'pf_challan_total' => 0,
             'esi_employee' => 0,
             'esi_employer' => 0,
             'pt_amount' => 0,

@@ -14,6 +14,8 @@ use App\Models\Shift;
 use App\Models\User;
 use App\Services\SalaryPayroll\BranchPayrollSettingsService;
 use App\Services\SalaryPayroll\SalaryPayrollBatchProcessor;
+use App\Services\SalaryPayroll\SalaryPayrollChallanReportBuilder;
+use App\Services\SalaryPayroll\SalaryPayrollChallanReportExportService;
 use App\Services\SalaryPayroll\SalaryPayrollPayslipService;
 use App\Services\SalaryPayroll\SalaryPayrollRegisterBuilder;
 use App\Services\SalaryPayroll\SalaryPayrollRegisterExportService;
@@ -31,6 +33,8 @@ class SalaryPayrollGenerateController extends Controller
         private SalaryPayrollPayslipService $payslipService,
         private SalaryPayrollRegisterBuilder $registerBuilder,
         private SalaryPayrollRegisterExportService $registerExportService,
+        private SalaryPayrollChallanReportBuilder $challanReportBuilder,
+        private SalaryPayrollChallanReportExportService $challanReportExportService,
         private BranchPayrollSettingsService $branchPayrollSettings
     ) {}
 
@@ -267,6 +271,50 @@ class SalaryPayrollGenerateController extends Controller
         $filters = $this->registerFilters($request);
         $filename = $this->registerExportService->buildFilename($salaryPayrollRun);
         $encrypted = $this->registerExportService->exportEncrypted(
+            $salaryPayrollRun,
+            $filters,
+            (string) $request->input('file_password')
+        );
+
+        return response($encrypted, 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+        ]);
+    }
+
+    public function challanReport(Request $request, SalaryPayrollRun $salaryPayrollRun)
+    {
+        $this->assertBranchAccess($salaryPayrollRun);
+        $salaryPayrollRun->load(['branch:id,name']);
+
+        $filters = $this->registerFilters($request);
+        $report = $this->challanReportBuilder->build($salaryPayrollRun, $filters);
+
+        return Inertia::render('hr/salary-payroll/payroll-generate/challan-report', [
+            'run' => $this->formatRun($salaryPayrollRun),
+            'report' => $report,
+            'summary' => $this->runService->statutoryChallanSummary($salaryPayrollRun),
+            'filters' => $filters,
+            'categories' => $this->branchCategories(session('active_branch_id')),
+            'departments' => $this->branchDepartments(session('active_branch_id')),
+            'shifts' => $this->branchShifts(session('active_branch_id')),
+        ]);
+    }
+
+    public function downloadChallanReport(Request $request, SalaryPayrollRun $salaryPayrollRun)
+    {
+        $this->assertBranchAccess($salaryPayrollRun);
+        $salaryPayrollRun->load('branch:id,name');
+
+        $request->validate([
+            'current_password' => ['required', 'current_password'],
+            'file_password' => ['required', 'string', 'min:4', 'max:255'],
+            'file_password_confirmation' => ['required', 'same:file_password'],
+        ]);
+
+        $filters = $this->registerFilters($request);
+        $filename = $this->challanReportExportService->buildFilename($salaryPayrollRun);
+        $encrypted = $this->challanReportExportService->exportEncrypted(
             $salaryPayrollRun,
             $filters,
             (string) $request->input('file_password')
@@ -658,8 +706,16 @@ class SalaryPayrollGenerateController extends Controller
             'total_net' => (float) $run->total_net,
             'total_pf_employee' => (float) $run->total_pf_employee,
             'total_pf_employer' => (float) $run->total_pf_employer,
+            'total_pf_eps_employer' => (float) ($run->total_pf_eps_employer ?? 0),
+            'total_pf_epf_employer' => (float) ($run->total_pf_epf_employer ?? 0),
+            'total_pf_admin_employer' => (float) ($run->total_pf_admin_employer ?? 0),
+            'total_pf_challan_ac1' => (float) ($run->total_pf_challan_ac1 ?? 0),
+            'total_pf_challan_ac2' => (float) ($run->total_pf_challan_ac2 ?? 0),
+            'total_pf_challan_ac10' => (float) ($run->total_pf_challan_ac10 ?? 0),
+            'total_pf_challan_total' => (float) ($run->total_pf_challan_total ?? 0),
             'total_esi_employee' => (float) $run->total_esi_employee,
             'total_esi_employer' => (float) $run->total_esi_employer,
+            'total_pt_amount' => (float) ($run->total_pt_amount ?? 0),
             'branch' => $run->branch ? ['id' => $run->branch->id, 'name' => $run->branch->name] : null,
             'creator' => $run->creator ? ['id' => $run->creator->id, 'name' => $run->creator->name] : null,
             'finalizer' => $run->finalizer ? ['id' => $run->finalizer->id, 'name' => $run->finalizer->name] : null,
@@ -729,6 +785,11 @@ class SalaryPayrollGenerateController extends Controller
             'pf_employer' => (float) $entry->pf_employer,
             'pf_eps_employer' => (float) ($entry->pf_eps_employer ?? 0),
             'pf_epf_employer' => (float) ($entry->pf_epf_employer ?? 0),
+            'pf_admin_employer' => (float) ($entry->pf_admin_employer ?? 0),
+            'pf_challan_ac1' => (float) ($entry->pf_challan_ac1 ?? 0),
+            'pf_challan_ac2' => (float) ($entry->pf_challan_ac2 ?? 0),
+            'pf_challan_ac10' => (float) ($entry->pf_challan_ac10 ?? 0),
+            'pf_challan_total' => (float) ($entry->pf_challan_total ?? 0),
             'pf_breakdown' => $this->pfBreakdownForEntry($entry, $run),
             'esi_employee' => (float) $entry->esi_employee,
             'esi_employer' => (float) $entry->esi_employer,
@@ -825,7 +886,10 @@ class SalaryPayrollGenerateController extends Controller
         }
 
         $adminPct = PayrollParameter::pfAdminChargePct($params);
-        $admin = max(0, round((float) $entry->pf_employer - $eps - $epfEmployer, 0));
+        $storedAdmin = (float) ($entry->pf_admin_employer ?? 0);
+        $admin = $storedAdmin > 0
+            ? $storedAdmin
+            : max(0, round((float) $entry->pf_employer - $eps - $epfEmployer, 0));
         if ($admin <= 0 && $wages > 0) {
             $admin = round($wages * $adminPct / 100, 0);
         }
@@ -836,7 +900,15 @@ class SalaryPayrollGenerateController extends Controller
         }
 
         $employeePf = (float) $entry->pf_employee;
-        $ac1 = $employeePf + $epfEmployer;
+        $storedAc1 = (float) ($entry->pf_challan_ac1 ?? 0);
+        $storedAc2 = (float) ($entry->pf_challan_ac2 ?? 0);
+        $storedAc10 = (float) ($entry->pf_challan_ac10 ?? 0);
+        $storedChallanTotal = (float) ($entry->pf_challan_total ?? 0);
+
+        $ac1 = $storedAc1 > 0 ? $storedAc1 : ($employeePf + $epfEmployer);
+        $ac2 = $storedAc2 > 0 ? $storedAc2 : $eps;
+        $ac10 = $storedAc10 > 0 ? $storedAc10 : $admin;
+        $challanTotal = $storedChallanTotal > 0 ? $storedChallanTotal : ($ac1 + $ac2 + $ac10);
 
         return [
             'wages' => $wages,
@@ -847,12 +919,12 @@ class SalaryPayrollGenerateController extends Controller
             'epf_employer_pct' => $epfPct,
             'epf_employer' => $epfEmployer,
             'admin_pct' => $adminPct,
-            'admin' => $admin,
+            'admin' => $ac10,
             'employer_total' => $employerTotal,
             'challan_ac1' => $ac1,
-            'challan_ac2' => $eps,
-            'challan_ac10' => $admin,
-            'challan_total' => $ac1 + $eps + $admin,
+            'challan_ac2' => $ac2,
+            'challan_ac10' => $ac10,
+            'challan_total' => $challanTotal,
         ];
     }
 

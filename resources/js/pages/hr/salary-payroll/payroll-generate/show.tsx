@@ -18,6 +18,7 @@ import {
   FileDown,
   AlertTriangle,
   LayoutGrid,
+  Landmark,
 } from 'lucide-react';
 import { toast } from '@/components/custom-toast';
 import { Button } from '@/components/ui/button';
@@ -658,6 +659,12 @@ export default function PayrollGenerateShow() {
             <Link href={route('hr.salary-payroll.generate.register', run.id)}>
               <LayoutGrid className="mr-1.5 h-4 w-4" />
               {t('Excel View')}
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href={route('hr.salary-payroll.generate.challan-report', run.id)}>
+              <Landmark className="mr-1.5 h-4 w-4" />
+              {t('Challan Report')}
             </Link>
           </Button>
           {canDownloadAnyPayslip && (
