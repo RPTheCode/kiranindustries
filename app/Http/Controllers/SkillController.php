@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\Skill;
+use App\Models\SkillWageRate;
 use App\Models\Branch;
+use App\Models\WageZone;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Auth;
@@ -124,12 +126,81 @@ class SkillController extends Controller
             $filters['branch_id'] = $branchId ? (string) $branchId : 'all';
         }
 
+        $tab = $request->string('tab')->toString();
+        if (! in_array($tab, ['skills', 'zones', 'rates'], true)) {
+            $tab = 'skills';
+        }
+
+        $wageZones = WageZone::query()
+            ->whereIn('created_by', $companyUserIds)
+            ->orderBy('state')
+            ->orderBy('region')
+            ->orderBy('name')
+            ->get()
+            ->map(fn (WageZone $zone) => [
+                'id' => $zone->id,
+                'name' => $zone->name,
+                'code' => $zone->code,
+                'state' => $zone->state,
+                'region' => $zone->region,
+                'country' => $zone->country,
+                'working_days' => (int) $zone->working_days,
+                'status' => (bool) $zone->status,
+                'notes' => $zone->notes,
+                'display_label' => $zone->displayLabel(),
+                'branches_count' => $zone->branches()->count(),
+            ]);
+
+        $selectedWageZoneId = $request->integer('wage_zone_id')
+            ?: ($wageZones->firstWhere('status', true)['id'] ?? null)
+            ?: ($wageZones->first()['id'] ?? null);
+
+        $zoneRates = [];
+        $selectedWageZone = $wageZones->firstWhere('id', $selectedWageZoneId);
+
+        if ($selectedWageZoneId) {
+            $rateSkillsQuery = Skill::query()
+                ->whereIn('created_by', $companyUserIds)
+                ->where('status', true)
+                ->orderBy('name');
+
+            if ($activeBranchId) {
+                $rateSkillsQuery->where('branch_id', $activeBranchId);
+            }
+
+            $rateSkills = $rateSkillsQuery->get(['id', 'name', 'code', 'branch_id']);
+            $existingRates = SkillWageRate::query()
+                ->where('wage_zone_id', $selectedWageZoneId)
+                ->whereIn('skill_id', $rateSkills->pluck('id'))
+                ->get()
+                ->keyBy('skill_id');
+
+            $zoneRates = $rateSkills->map(function (Skill $skill) use ($existingRates) {
+                $rate = $existingRates->get($skill->id);
+
+                return [
+                    'skill_id' => $skill->id,
+                    'skill_name' => $skill->name,
+                    'skill_code' => $skill->code,
+                    'wage_per_day' => $rate?->wage_per_day,
+                    'wage_per_month' => $rate?->wage_per_month,
+                    'effective_from' => $rate?->effective_from?->format('Y-m-d'),
+                ];
+            })->values();
+        }
+
         return Inertia::render('hr/skills/index', [
             'skills' => $skills,
             'branches' => $branches,
             'stats' => $stats,
             'activeBranchId' => $activeBranchId,
+            'activeBranchName' => $activeBranchId ? Branch::find($activeBranchId)?->name : null,
             'filters' => $filters,
+            'tab' => $tab,
+            'wageZones' => $wageZones,
+            'selectedWageZoneId' => $selectedWageZoneId,
+            'selectedWageZone' => $selectedWageZone,
+            'zoneRates' => $zoneRates,
         ]);
     }
 
@@ -403,5 +474,120 @@ class SkillController extends Controller
     public function importTemplate()
     {
         return \Maatwebsite\Excel\Facades\Excel::download(new \App\Exports\SkillsTemplateExport, 'skills_template.xlsx');
+    }
+
+    public function saveWageRates(Request $request)
+    {
+        $companyUserIds = getCompanyAndUsersId();
+        $activeBranchId = session('active_branch_id');
+
+        $validated = $request->validate([
+            'wage_zone_id' => 'required|exists:wage_zones,id',
+            'rates' => 'required|array|min:1',
+            'rates.*.skill_id' => 'required|exists:skills,id',
+            'rates.*.wage_per_day' => 'nullable|numeric|min:0',
+            'rates.*.wage_per_month' => 'nullable|numeric|min:0',
+            'rates.*.effective_from' => 'nullable|date',
+            'copy_to_all_branches' => 'nullable|boolean',
+        ]);
+
+        $zone = WageZone::query()
+            ->whereIn('created_by', $companyUserIds)
+            ->findOrFail($validated['wage_zone_id']);
+
+        $copyToAllBranches = $request->boolean('copy_to_all_branches');
+        $branchesUpdated = [];
+
+        DB::transaction(function () use ($validated, $zone, $copyToAllBranches, $companyUserIds, $activeBranchId, &$branchesUpdated) {
+            foreach ($validated['rates'] as $row) {
+                $wages = WageZone::syncWageFields(
+                    isset($row['wage_per_day']) && $row['wage_per_day'] !== '' ? (float) $row['wage_per_day'] : null,
+                    isset($row['wage_per_month']) && $row['wage_per_month'] !== '' ? (float) $row['wage_per_month'] : null,
+                    (int) $zone->working_days
+                );
+
+                $skillIds = $this->skillIdsForWageRateCopy(
+                    (int) $row['skill_id'],
+                    $copyToAllBranches,
+                    $companyUserIds,
+                    $activeBranchId ? (int) $activeBranchId : null
+                );
+
+                foreach ($skillIds as $skillId) {
+                    if (! $wages['wage_per_day'] && ! $wages['wage_per_month']) {
+                        SkillWageRate::query()
+                            ->where('skill_id', $skillId)
+                            ->where('wage_zone_id', $zone->id)
+                            ->delete();
+
+                        continue;
+                    }
+
+                    SkillWageRate::updateOrCreate(
+                        [
+                            'skill_id' => $skillId,
+                            'wage_zone_id' => $zone->id,
+                        ],
+                        [
+                            'wage_per_day' => $wages['wage_per_day'],
+                            'wage_per_month' => $wages['wage_per_month'],
+                            'effective_from' => $row['effective_from'] ?? null,
+                            'created_by' => creatorId(),
+                        ]
+                    );
+
+                    $branchId = Skill::query()->whereKey($skillId)->value('branch_id');
+                    if ($branchId) {
+                        $branchesUpdated[(int) $branchId] = true;
+                    }
+                }
+            }
+        });
+
+        $branchCount = count($branchesUpdated);
+        $message = $copyToAllBranches && $branchCount > 1
+            ? __('Wage rates saved and copied to :count branches (matched by skill code).', ['count' => $branchCount])
+            : __('Wage rates saved successfully.');
+
+        return redirect()->back()->with('success', $message);
+    }
+
+    /**
+     * @param  array<int, int>  $companyUserIds
+     * @return array<int, int>
+     */
+    private function skillIdsForWageRateCopy(
+        int $sourceSkillId,
+        bool $copyToAllBranches,
+        array $companyUserIds,
+        ?int $activeBranchId
+    ): array {
+        $sourceSkill = Skill::query()
+            ->whereIn('created_by', $companyUserIds)
+            ->find($sourceSkillId);
+
+        if (! $sourceSkill) {
+            return [$sourceSkillId];
+        }
+
+        if ($activeBranchId && (int) $sourceSkill->branch_id !== $activeBranchId) {
+            return [$sourceSkillId];
+        }
+
+        $skillIds = [$sourceSkillId];
+
+        if (! $copyToAllBranches || ! $sourceSkill->code) {
+            return $skillIds;
+        }
+
+        $otherSkillIds = Skill::query()
+            ->whereIn('created_by', $companyUserIds)
+            ->where('code', $sourceSkill->code)
+            ->where('branch_id', '!=', $sourceSkill->branch_id)
+            ->where('status', true)
+            ->pluck('id')
+            ->all();
+
+        return array_values(array_unique([...$skillIds, ...$otherSkillIds]));
     }
 }

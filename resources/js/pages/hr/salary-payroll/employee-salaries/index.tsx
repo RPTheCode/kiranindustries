@@ -48,6 +48,12 @@ import {
   resolveComponentsForEmployee,
   storedCustomComponentIds,
 } from '@/utils/salary-component-assignment';
+import {
+  grossDisplayAfterModeToggle,
+  resolveGrossForSplit as resolveSplitBase,
+  resolveMonthlyGross,
+  type GrossInputMode,
+} from '@/utils/salary-gross-split';
 
 interface SkippedRow {
   id: number;
@@ -189,46 +195,50 @@ function formatRupee(value: number) {
   return Number(value).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
-type GrossInputMode = 'day' | 'month';
-
-function getEmployeeWorkingDays(emp: any): number {
-  const daily = Boolean(emp?.employee?.daily_option ?? emp?.daily_option);
-  const days = Number(emp?.employee?.working_days ?? emp?.working_days);
-  if (days > 0) return days;
-  return daily ? 1 : 26;
+function branchStandardWorkingDays(branchPayrollSettings: any): number {
+  const days = Number(branchPayrollSettings?.working_days ?? 0);
+  return days > 0 ? days : 26;
 }
 
-/** Day/month follows employee profile (Daily Option + Working Days). */
+function getEmployeeWorkingDays(emp: any, branchPayrollSettings: any): number {
+  return branchStandardWorkingDays(branchPayrollSettings);
+}
+
+/** Day/month from salary record (not employee profile). */
 function grossInputModeFromEmployee(emp: any): GrossInputMode {
-  return (emp?.employee?.daily_option ?? emp?.daily_option) ? 'day' : 'month';
+  const mode = emp?.salary_record?.gross_input_mode;
+  return mode === 'day' ? 'day' : 'month';
 }
 
-function grossDisplayAfterDailyToggle(emp: any, currentInput: string, newDailyOption: boolean): string {
-  const amount = Number(currentInput);
-  if (!amount || amount <= 0) return currentInput;
-  const monthlyGross = resolveGrossForSplit(amount, emp);
-  const newDays = newDailyOption ? 1 : 26;
-  if (newDailyOption) {
-    return String(Math.round((monthlyGross / newDays) * 100) / 100);
-  }
-  return String(Math.round(monthlyGross));
+function grossDisplayAfterDailyToggle(
+  emp: any,
+  currentInput: string,
+  newDailyOption: boolean,
+  branchPayrollSettings: any,
+): string {
+  const fromMode: GrossInputMode = grossInputModeFromEmployee(emp);
+  const toMode: GrossInputMode = newDailyOption ? 'day' : 'month';
+  return grossDisplayAfterModeToggle(
+    currentInput,
+    fromMode,
+    toMode,
+    branchStandardWorkingDays(branchPayrollSettings),
+  );
 }
 
 function resolveGrossForSplit(amount: number, emp: any): number {
-  if (!amount || amount <= 0) return 0;
-  if (grossInputModeFromEmployee(emp) === 'day') {
-    return amount * getEmployeeWorkingDays(emp);
-  }
-  return amount;
+  return resolveSplitBase(amount, grossInputModeFromEmployee(emp));
 }
 
-function grossDisplayForEmployee(emp: any): string {
+function grossDisplayForEmployee(emp: any, branchPayrollSettings: any): string {
   const record = emp?.salary_record;
   if (!record) return '';
+  const display = Number(record.gross_display_amount ?? 0);
+  if (display > 0) return String(display);
   const monthly = Number(record.monthly_gross ?? 0);
   if (monthly <= 0) return '';
   if (grossInputModeFromEmployee(emp) === 'day') {
-    const perDay = monthly / getEmployeeWorkingDays(emp);
+    const perDay = monthly / branchStandardWorkingDays(branchPayrollSettings);
     return String(Math.round(perDay * 100) / 100);
   }
   return String(Math.round(monthly));
@@ -247,6 +257,7 @@ export default function SalaryPayrollEmployeeSalaries() {
     shifts = [],
     activeBranchId,
     activeBranchName,
+    branchPayrollSettings,
     filters: pageFilters = {},
     defaultEffectiveFrom,
   } = usePage().props as any;
@@ -300,10 +311,10 @@ export default function SalaryPayrollEmployeeSalaries() {
     setIsSearching(false);
     const drafts: Record<number, string> = {};
     data.forEach((emp: any) => {
-      drafts[emp.id] = grossDisplayForEmployee(emp);
+      drafts[emp.id] = grossDisplayForEmployee(emp, branchPayrollSettings);
     });
     setGrossInputs(drafts);
-  }, [employees]);
+  }, [employees, branchPayrollSettings]);
 
   const branchLabel = activeBranchName || t('Selected Branch');
 
@@ -363,6 +374,8 @@ export default function SalaryPayrollEmployeeSalaries() {
     fetchList({ ...filterParams(), per_page: value }, true);
   };
 
+  const standardWorkingDays = branchStandardWorkingDays(branchPayrollSettings);
+
   const getSplitForEmployee = useCallback((emp: any, grossValue: string) => {
     const grossForSplit = resolveGrossForSplit(Number(grossValue), emp);
     if (!grossForSplit || grossForSplit <= 0 || salaryComponents.length === 0) return null;
@@ -371,13 +384,13 @@ export default function SalaryPayrollEmployeeSalaries() {
       applyPf: Boolean(emp.pf_applicable),
       applyEsi: Boolean(emp.esi_applicable),
     });
-  }, [salaryComponents]);
+  }, [salaryComponents, branchPayrollSettings]);
 
   const saveEmployeeGross = (emp: any, grossValue: string) => {
     const gross = Number(grossValue);
     if (!gross || gross <= 0) return;
 
-    const savedDisplay = grossDisplayForEmployee(emp);
+    const savedDisplay = grossDisplayForEmployee(emp, branchPayrollSettings);
     if (savedDisplay && Number(savedDisplay) === gross) return;
 
     setSavingIds((prev) => new Set(prev).add(emp.id));
@@ -392,6 +405,7 @@ export default function SalaryPayrollEmployeeSalaries() {
     router[method](route(routeName, routeParams), {
       employee_id: emp.id,
       gross_amount: grossValue,
+      gross_input_mode: grossInputModeFromEmployee(emp),
     }, {
       preserveScroll: true,
       preserveState: true,
@@ -425,15 +439,12 @@ export default function SalaryPayrollEmployeeSalaries() {
     }
   };
 
-  const patchEmployeeDailyProfile = (empId: number, dailyOption: boolean, workingDays: number) => {
+  const patchEmployeeGrossInputMode = (empId: number, mode: GrossInputMode) => {
     setItems((prev) => prev.map((e) => (e.id === empId ? {
       ...e,
-      daily_option: dailyOption,
-      working_days: workingDays,
-      employee: {
-        ...e.employee,
-        daily_option: dailyOption,
-        working_days: workingDays,
+      salary_record: {
+        ...(e.salary_record || {}),
+        gross_input_mode: mode,
       },
     } : e)));
   };
@@ -441,17 +452,18 @@ export default function SalaryPayrollEmployeeSalaries() {
   const handleDailyOptionToggle = (emp: any, checked: boolean) => {
     if (!canSave) return;
 
-    const workingDays = checked ? 1 : 26;
     const currentInput = grossInputs[emp.id] ?? '';
-    const newDisplay = grossDisplayAfterDailyToggle(emp, currentInput, checked);
+    const newDisplay = grossDisplayAfterDailyToggle(emp, currentInput, checked, branchPayrollSettings);
+    const mode: GrossInputMode = checked ? 'day' : 'month';
     const updatedEmp = {
       ...emp,
-      daily_option: checked,
-      working_days: workingDays,
-      employee: { ...emp.employee, daily_option: checked, working_days: workingDays },
+      salary_record: {
+        ...(emp.salary_record || {}),
+        gross_input_mode: mode,
+      },
     };
 
-    patchEmployeeDailyProfile(emp.id, checked, workingDays);
+    patchEmployeeGrossInputMode(emp.id, mode);
     if (newDisplay !== currentInput) {
       setGrossInputs((prev) => ({ ...prev, [emp.id]: newDisplay }));
     }
@@ -460,6 +472,7 @@ export default function SalaryPayrollEmployeeSalaries() {
 
     router.patch(route('hr.salary-payroll.employee-salary.daily-option', emp.id), {
       daily_option: checked,
+      gross_input_mode: mode,
     }, {
       preserveScroll: true,
       preserveState: true,
@@ -467,13 +480,13 @@ export default function SalaryPayrollEmployeeSalaries() {
         if (newDisplay && Number(newDisplay) > 0 && emp.salary_record) {
           saveEmployeeGross(updatedEmp, newDisplay);
         } else {
-          toast.success(t('Daily option updated'));
+          toast.success(t('Salary entry mode updated'));
         }
       },
       onError: () => {
-        patchEmployeeDailyProfile(emp.id, !checked, !checked ? 1 : 26);
+        patchEmployeeGrossInputMode(emp.id, checked ? 'month' : 'day');
         setGrossInputs((prev) => ({ ...prev, [emp.id]: currentInput }));
-        toast.error(t('Failed to update daily option'));
+        toast.error(t('Failed to update salary entry mode'));
       },
       onFinish: () => {
         setTogglingDailyIds((prev) => {
@@ -512,14 +525,15 @@ export default function SalaryPayrollEmployeeSalaries() {
 
   const incrementPreviewGross = useMemo(() => {
     if (!incrementEmployee || !incrementValue) return null;
-    const displayAmount = Number(grossInputs[incrementEmployee.id] ?? grossDisplayForEmployee(incrementEmployee) ?? 0);
-    const current = resolveGrossForSplit(displayAmount, incrementEmployee);
+    const displayAmount = Number(grossInputs[incrementEmployee.id] ?? grossDisplayForEmployee(incrementEmployee, branchPayrollSettings) ?? 0);
+    const workingDays = branchStandardWorkingDays(branchPayrollSettings);
+    const current = resolveMonthlyGross(displayAmount, grossInputModeFromEmployee(incrementEmployee), workingDays);
     const value = Number(incrementValue);
     if (!value || value <= 0) return null;
     if (incrementMode === 'percentage') return Math.round(current * (1 + value / 100));
     if (incrementMode === 'fixed') return Math.round(current + value);
     return Math.round(value);
-  }, [incrementEmployee, incrementValue, incrementMode, grossInputs]);
+  }, [incrementEmployee, incrementValue, incrementMode, grossInputs, branchPayrollSettings]);
 
   const submitIncrement = () => {
     if (!incrementEmployee || !incrementValue || !effectiveFrom) return;
@@ -785,12 +799,12 @@ export default function SalaryPayrollEmployeeSalaries() {
                 ) : items.map((emp, index) => {
                   const grossValue = grossInputs[emp.id] ?? '';
                   const isDayWise = grossInputModeFromEmployee(emp) === 'day';
-                  const workingDays = getEmployeeWorkingDays(emp);
+                  const workingDays = standardWorkingDays;
                   const grossForSplit = resolveGrossForSplit(Number(grossValue), emp);
                   const split = getSplitForEmployee(emp, grossValue);
                   const isSaving = savingIds.has(emp.id);
                   const isTogglingDaily = togglingDailyIds.has(emp.id);
-                  const dailyOption = Boolean(emp.employee?.daily_option ?? emp.daily_option);
+                  const dailyOption = isDayWise;
                   const grossDisabled = !canSave || isSaving || isTogglingDaily;
 
                   return (
@@ -873,12 +887,17 @@ export default function SalaryPayrollEmployeeSalaries() {
                             <Loader2 className="absolute -right-4 top-1/2 h-3 w-3 -translate-y-1/2 animate-spin text-primary" />
                           )}
                         </div>
-                        {dailyOption && workingDays === 1 && grossForSplit > 0 ? (
+                        {dailyOption && Number(grossValue) > 0 ? (
                           <span className="inline-flex w-fit rounded bg-amber-100/80 px-1.5 py-px text-[9px] font-medium tabular-nums text-amber-800">
-                            {t('≈ ₹{{total}}/mo', { total: formatRupee(grossForSplit) })}
+                            {t('≈ ₹{{total}}/mo ({{days}} days)', {
+                              total: formatRupee(resolveMonthlyGross(Number(grossValue), 'day', workingDays)),
+                              days: workingDays,
+                            })}
                           </span>
                         ) : !dailyOption ? (
-                          <span className="text-[9px] text-muted-foreground">{t('Full month (26 days)')}</span>
+                          <span className="text-[9px] text-muted-foreground">
+                            {t('Full month ({{days}} days from payroll settings)', { days: workingDays })}
+                          </span>
                         ) : null}
                       </div>
                     </td>
@@ -1019,9 +1038,10 @@ export default function SalaryPayrollEmployeeSalaries() {
                 <p className="font-semibold text-foreground">{incrementEmployee.name}</p>
                 <p className="text-xs text-muted-foreground">
                   {t('Current gross')}: ₹{formatRupee(
-                    resolveGrossForSplit(
-                      Number(grossInputs[incrementEmployee.id] ?? grossDisplayForEmployee(incrementEmployee) ?? 0),
-                      incrementEmployee,
+                    resolveMonthlyGross(
+                      Number(grossInputs[incrementEmployee.id] ?? grossDisplayForEmployee(incrementEmployee, branchPayrollSettings) ?? 0),
+                      grossInputModeFromEmployee(incrementEmployee),
+                      branchStandardWorkingDays(branchPayrollSettings),
                     ),
                   )} {t('monthly')}
                 </p>

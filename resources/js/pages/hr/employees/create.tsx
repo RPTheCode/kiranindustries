@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { PageTemplate } from '@/components/page-template';
 import { usePage, router } from '@inertiajs/react';
 import {
@@ -30,6 +30,8 @@ import {
   resolveComponentsForEmployee,
   storedCustomComponentIds,
 } from '@/utils/salary-component-assignment';
+import { EmployeeGrossSalarySection } from '@/pages/hr/employees/components/EmployeeGrossSalarySection';
+import type { GrossInputMode } from '@/utils/salary-gross-split';
 
 export default function CreateEmployee() {
   const { t } = useTranslation();
@@ -45,6 +47,7 @@ export default function CreateEmployee() {
     skills = [],
     banks = [],
     salaryComponents = [],
+    branchPayrollSettings = null,
     auth,
     nextEmployeeId,
     resignReasons = [],
@@ -89,7 +92,8 @@ export default function CreateEmployee() {
     confirm_date: '',
     employment_status: 'active',
     daily_option: false,
-    working_days: '26',
+    gross_input_mode: 'month' as GrossInputMode,
+    gross_amount: '',
     hod_flag: false,
     education: '',
     experience: '',
@@ -148,6 +152,8 @@ export default function CreateEmployee() {
     skills: skills || [],
   });
 
+  const [branchPayroll, setBranchPayroll] = useState(branchPayrollSettings);
+
   const loadBranchMasters = async (branchId: string, resetDependents = false) => {
     if (!branchId) return;
     try {
@@ -161,6 +167,13 @@ export default function CreateEmployee() {
         shifts: data.shifts || [],
         skills: data.skills || [],
       });
+      if (data.payroll_working_days) {
+        setBranchPayroll((prev: any) => ({
+          ...(prev || {}),
+          working_days: data.payroll_working_days,
+          working_days_source: data.payroll_working_days_source ?? prev?.working_days_source,
+        }));
+      }
       if (resetDependents) {
         setFormData((prev: any) => ({
           ...prev,
@@ -324,6 +337,23 @@ export default function CreateEmployee() {
       };
     });
   };
+
+  const handleSalaryComputed = useCallback((payload: {
+    gross_salary: string;
+    basic_salary: string;
+    salary_components: Record<string, string>;
+    gross_input_mode: GrossInputMode;
+  }) => {
+    setFormData((prev: any) => ({
+      ...prev,
+      gross_salary: payload.gross_salary,
+      basic_salary: payload.basic_salary,
+      salary_components: payload.salary_components,
+      gross_input_mode: payload.gross_input_mode,
+    }));
+  }, []);
+
+  const standardWorkingDays = Number(branchPayroll?.working_days ?? 26) || 26;
 
   // Helper to calculate totals
   const calculateTotals = () => {
@@ -1090,6 +1120,11 @@ export default function CreateEmployee() {
                           <Switch checked={formData.ptax_flag} onCheckedChange={(v) => handleChange('ptax_flag', v)} />
                           <Label className="text-xs font-bold text-slate-700">{t('Professional Tax (P.Tax)')}</Label>
                         </div>
+                        <div className="h-8 w-px bg-slate-100" />
+                        <div className="flex items-center gap-3">
+                          <Switch checked={formData.hod_flag} onCheckedChange={(v) => handleChange('hod_flag', v)} />
+                          <Label className="text-xs font-bold text-slate-700">{t('HOD')}</Label>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1187,168 +1222,19 @@ export default function CreateEmployee() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    {/* Increment Components (Earnings) */}
-                    <div className="space-y-6 p-6 bg-green-50/20 rounded-3xl border border-green-100/50 shadow-sm transition-all hover:shadow-md">
-                      <div className="flex items-center gap-3 text-green-700 mb-2">
-                        <div className="p-2 bg-green-100 rounded-xl">
-                          <Plus className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <h3 className="font-bold text-sm tracking-tight">{t('Increment (Earnings)')}</h3>
-                          <p className="text-[10px] text-green-600/70 font-medium">{t('Add to gross salary')}</p>
-                        </div>
-                      </div>
-
-                      {/* Daily Option / HOD / Working Days */}
-                      <div className="flex items-center justify-between gap-4 bg-white p-3 px-4 rounded-2xl border border-green-100 shadow-sm">
-                        <div className="flex items-center gap-5">
-                          <div className="flex items-center gap-2">
-                            <Switch
-                              checked={formData.daily_option}
-                              onCheckedChange={(v) => {
-                                setFormData((prev: any) => ({
-                                  ...prev,
-                                  daily_option: v,
-                                  working_days: v ? '1' : '26'
-                                }));
-                              }}
-                            />
-                            <Label className="text-xs font-bold text-slate-700">{t('Daily Option')}</Label>
-                          </div>
-                          <div className="h-6 w-px bg-slate-200" />
-                          <div className="flex items-center gap-2">
-                            <Switch checked={formData.hod_flag} onCheckedChange={(v) => handleChange('hod_flag', v)} />
-                            <Label className="text-xs font-bold text-slate-700">{t('HOD')}</Label>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 bg-slate-50 p-1.5 px-3 rounded-xl border border-slate-100 shadow-inner">
-                          <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">{t('Working Days')}</Label>
-                          <Input
-                            type="number"
-                            min="1"
-                            max="31"
-                            className="h-7 w-14 text-center border-none bg-transparent font-black text-primary text-sm focus:ring-0 p-0"
-                            value={formData.working_days}
-                            onChange={(e) => handleChange('working_days', e.target.value)}
-                          />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                        {applicableSalaryComponents.filter((c: any) => c.type === 'earning').map((comp: any) => (
-                          <div key={comp.id} className="space-y-2 group">
-                            <Label className="text-slate-600 text-xs font-bold px-1 transition-colors group-focus-within:text-green-600">{comp.name}</Label>
-                            <div className="relative">
-                              <Input
-                                type="number"
-                                min="0"
-                                placeholder="0.00"
-                                className="h-11 border-slate-200 bg-white/80 backdrop-blur-sm transition-all focus:ring-green-500/20 focus:border-green-500 rounded-xl pl-8"
-                                value={formData.salary_components[comp.id] || ''}
-                                onChange={(e) => handleSalaryComponentChange(comp.id, e.target.value)}
-                              />
-                              <span className="absolute left-3 top-3 text-slate-400 font-mono text-sm">₹</span>
-                            </div>
-                          </div>
-                        ))}
-                        {applicableSalaryComponents.filter((c: any) => c.type === 'earning').length === 0 && (
-                          <div className="col-span-full py-8 text-center bg-white/40 rounded-2xl border border-dashed border-green-200/50">
-                            <Plus className="h-6 w-6 text-green-200 mx-auto mb-2" />
-                            <p className="text-[10px] text-green-600/40 italic">{t('No earning components defined.')}</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Decrement Components (Deductions) */}
-                    <div className="space-y-6 p-6 bg-red-50/20 rounded-3xl border border-red-100/50 shadow-sm transition-all hover:shadow-md">
-                      <div className="flex items-center gap-3 text-red-700 mb-2">
-                        <div className="p-2 bg-red-100 rounded-xl">
-                          <Trash2 className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <h3 className="font-bold text-sm tracking-tight">{t('Decrement (Deductions)')}</h3>
-                          <p className="text-[10px] text-red-600/70 font-medium">{t('Subtract from gross salary')}</p>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                        {applicableSalaryComponents.filter((c: any) => c.type === 'deduction').map((comp: any) => (
-                          <div key={comp.id} className="space-y-2 group">
-                            <Label className="text-slate-600 text-xs font-bold px-1 transition-colors group-focus-within:text-red-600">{comp.name}</Label>
-                            <div className="relative">
-                              <Input
-                                type="number"
-                                min="0"
-                                placeholder="0.00"
-                                className="h-11 border-slate-200 bg-white/80 backdrop-blur-sm transition-all focus:ring-red-500/20 focus:border-red-500 rounded-xl pl-8"
-                                value={formData.salary_components[comp.id] || ''}
-                                onChange={(e) => handleSalaryComponentChange(comp.id, e.target.value)}
-                              />
-                              <span className="absolute left-3 top-3 text-slate-400 font-mono text-sm">₹</span>
-                            </div>
-                          </div>
-                        ))}
-                        {applicableSalaryComponents.filter((c: any) => c.type === 'deduction').length === 0 && (
-                          <div className="col-span-full py-8 text-center bg-white/40 rounded-2xl border border-dashed border-red-200/50">
-                            <Trash2 className="h-6 w-6 text-red-200 mx-auto mb-2" />
-                            <p className="text-[10px] text-red-600/40 italic">{t('No deduction components defined.')}</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm mt-8">
-                    <div className="space-y-2">
-                      <Label className="text-xs font-bold text-slate-700">{t('Gross Salary (Calculated)')}</Label>
-                      <div className="relative">
-                        <Input
-                          type="number"
-                          placeholder="0.00"
-                          className="h-11 border-slate-200 rounded-xl pl-8 bg-slate-50 font-bold text-slate-700 cursor-not-allowed"
-                          value={formData.gross_salary}
-                          disabled={true}
-                          readOnly={true}
-                        />
-                        <span className="absolute left-3 top-3 text-slate-400 font-mono text-sm">₹</span>
-                      </div>
-                      <p className="text-[9px] text-slate-400 font-medium">{t('Auto-calculated from earnings above')}</p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs font-bold text-slate-700">{t('I.T. Amount (Monthly)')}</Label>
-                      <div className="relative">
-                        <Input type="number" placeholder="0.00" className="h-11 border-slate-200 rounded-xl pl-8" value={formData.it_amount} onChange={(e) => handleChange('it_amount', e.target.value)} />
-                        <span className="absolute left-3 top-3 text-slate-400 font-mono text-sm">₹</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Summary Bar */}
-                  <div className="flex items-center justify-between gap-4 p-4 bg-slate-900 rounded-3xl shadow-xl border border-slate-800">
-                    <div className="flex items-center gap-8 px-4">
-                      <div className="space-y-1">
-                        <Label className="text-slate-500 text-[10px] font-black uppercase tracking-wider">{t('Gross Salary')}</Label>
-                        <div className="text-2xl font-black text-white flex items-center gap-1">
-                          <span className="text-slate-600 text-sm">₹</span>
-                          {totals.gross.toLocaleString()}
-                        </div>
-                      </div>
-                      <div className="h-10 w-px bg-slate-800" />
-                      <div className="space-y-1">
-                        <Label className="text-slate-500 text-[10px] font-black uppercase tracking-wider">{t('Net Payable')}</Label>
-                        <div className="text-2xl font-black text-white flex items-center gap-1">
-                          <span className="text-slate-600 text-sm">₹</span>
-                          {totals.net.toLocaleString()}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 pr-4">
-                      <div className="px-4 py-2 bg-slate-800/50 rounded-2xl border border-slate-700/50">
-                        <p className="text-[10px] text-slate-400 font-bold leading-tight">{t('Ready to proceed?')}</p>
-                        <p className="text-[9px] text-slate-500">{t('Verify all components before next step')}</p>
-                      </div>
-                    </div>
-                  </div>
+                  <EmployeeGrossSalarySection
+                    grossAmount={formData.gross_amount ?? ''}
+                    grossInputMode={(formData.gross_input_mode as GrossInputMode) || 'month'}
+                    workingDays={standardWorkingDays}
+                    workingDaysSource={branchPayroll?.working_days_source}
+                    salaryComponents={salaryComponents}
+                    extraComponentIds={extraComponentIds}
+                    pfApplicable={Boolean(formData.pf_flag)}
+                    esiApplicable={Boolean(formData.esic_flag)}
+                    onGrossAmountChange={(v) => handleChange('gross_amount', v)}
+                    onGrossInputModeChange={(mode) => handleChange('gross_input_mode', mode)}
+                    onComputedChange={handleSalaryComputed}
+                  />
                 </div>
               )}
 

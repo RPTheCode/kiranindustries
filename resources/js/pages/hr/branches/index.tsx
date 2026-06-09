@@ -27,7 +27,7 @@ type BranchStats = {
 
 export default function Branches() {
   const { t } = useTranslation();
-  const { auth, branches, stats = {} as BranchStats, activeBranchId, filters: pageFilters = {} } = usePage().props as any;
+  const { auth, branches, stats = {} as BranchStats, activeBranchId, wageZones = [], filters: pageFilters = {} } = usePage().props as any;
   const permissions = auth?.permissions || [];
 
   const [searchTerm, setSearchTerm] = useState(pageFilters.search || '');
@@ -118,7 +118,10 @@ export default function Branches() {
   };
 
   const handleAction = (action: string, item: any) => {
-    setCurrentItem(item);
+    setCurrentItem({
+      ...item,
+      wage_zone_id: item?.wage_zone_id ? String(item.wage_zone_id) : '',
+    });
     switch (action) {
       case 'view':
         setFormMode('view');
@@ -153,9 +156,13 @@ export default function Branches() {
   };
 
   const handleFormSubmit = (formData: any) => {
+    const payload = {
+      ...formData,
+      wage_zone_id: formData.wage_zone_id ? Number(formData.wage_zone_id) : null,
+    };
     if (formMode === 'create') {
       toast.loading(t('Creating branch...'));
-      router.post(route('hr.branches.store'), formData, {
+      router.post(route('hr.branches.store'), payload, {
         onSuccess: (page: any) => {
           setIsFormModalOpen(false);
           toast.dismiss();
@@ -174,7 +181,7 @@ export default function Branches() {
       });
     } else if (formMode === 'edit') {
       toast.loading(t('Updating branch...'));
-      router.put(route('hr.branches.update', currentItem.id), formData, {
+      router.put(route('hr.branches.update', currentItem.id), payload, {
         onSuccess: (page: any) => {
           setIsFormModalOpen(false);
           toast.dismiss();
@@ -509,6 +516,20 @@ export default function Branches() {
     { name: 'address', label: t('Address'), type: 'textarea' as const, colSpan: 2, row: 2 },
     { name: 'city', label: t('City'), type: 'text' as const, row: 3 },
     { name: 'state', label: t('State/Province'), type: 'text' as const, row: 3 },
+    {
+      name: 'wage_zone_id',
+      label: t('Wage Zone'),
+      type: 'select' as const,
+      options: [
+        { value: '', label: t('None') },
+        ...wageZones.map((zone: { id: number; display_label: string }) => ({
+          value: String(zone.id),
+          label: zone.display_label,
+        })),
+      ],
+      row: 3,
+      colSpan: 2,
+    },
     { name: 'country', label: t('Country'), type: 'text' as const, row: 4 },
     { name: 'zip_code', label: t('ZIP/Postal Code'), type: 'text' as const, row: 4 },
     { name: 'phone', label: t('Phone'), type: 'text' as const, validation: { pattern: '^[0-9]*$' }, row: 5 },

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\SalaryPayroll;
 
 use App\Http\Controllers\Controller;
+use App\Models\EmployeeSalary;
 use App\Models\Category;
 use App\Models\Department;
 use App\Models\PayrollParameter;
@@ -11,8 +12,11 @@ use App\Models\SalaryPayroll\SalaryPayrollEntry;
 use App\Models\SalaryPayroll\SalaryPayrollRun;
 use App\Models\Shift;
 use App\Models\User;
+use App\Services\SalaryPayroll\BranchPayrollSettingsService;
 use App\Services\SalaryPayroll\SalaryPayrollBatchProcessor;
 use App\Services\SalaryPayroll\SalaryPayrollPayslipService;
+use App\Services\SalaryPayroll\SalaryPayrollRegisterBuilder;
+use App\Services\SalaryPayroll\SalaryPayrollRegisterExportService;
 use App\Services\SalaryPayroll\SalaryPayrollRunService;
 use App\Services\SalaryPayroll\SalaryPayrollScopeService;
 use Illuminate\Http\Request;
@@ -24,7 +28,10 @@ class SalaryPayrollGenerateController extends Controller
         private SalaryPayrollScopeService $scopeService,
         private SalaryPayrollRunService $runService,
         private SalaryPayrollBatchProcessor $batchProcessor,
-        private SalaryPayrollPayslipService $payslipService
+        private SalaryPayrollPayslipService $payslipService,
+        private SalaryPayrollRegisterBuilder $registerBuilder,
+        private SalaryPayrollRegisterExportService $registerExportService,
+        private BranchPayrollSettingsService $branchPayrollSettings
     ) {}
 
     public function index(Request $request)
@@ -226,6 +233,66 @@ class SalaryPayrollGenerateController extends Controller
         ]);
     }
 
+    public function register(Request $request, SalaryPayrollRun $salaryPayrollRun)
+    {
+        $this->assertBranchAccess($salaryPayrollRun);
+        $salaryPayrollRun->load(['branch:id,name']);
+
+        $filters = $this->registerFilters($request);
+        $register = $this->registerBuilder->build($salaryPayrollRun, $filters);
+
+        return Inertia::render('hr/salary-payroll/payroll-generate/register', [
+            'run' => $this->formatRun($salaryPayrollRun),
+            'register' => $register,
+            'filters' => $filters,
+            'categories' => $this->branchCategories(session('active_branch_id')),
+            'departments' => $this->branchDepartments(session('active_branch_id')),
+            'shifts' => $this->branchShifts(session('active_branch_id')),
+        ]);
+    }
+
+    public function downloadRegister(Request $request, SalaryPayrollRun $salaryPayrollRun)
+    {
+        $this->assertBranchAccess($salaryPayrollRun);
+        $salaryPayrollRun->load('branch:id,name');
+
+        $request->validate([
+            'current_password' => ['required', 'current_password'],
+            'file_password' => ['required', 'string', 'min:4', 'max:255'],
+            'file_password_confirmation' => ['required', 'same:file_password'],
+        ]);
+
+        $filters = $this->registerFilters($request);
+        $filename = $this->registerExportService->buildFilename($salaryPayrollRun);
+        $encrypted = $this->registerExportService->exportEncrypted(
+            $salaryPayrollRun,
+            $filters,
+            (string) $request->input('file_password')
+        );
+
+        return response($encrypted, 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function registerFilters(Request $request): array
+    {
+        $search = $request->filled('search') ? trim((string) $request->search) : null;
+        $lockStatus = $request->string('lock_status')->toString();
+
+        return [
+            'search' => $search,
+            'category_id' => $request->integer('category_id') ?: null,
+            'shift_id' => $request->integer('shift_id') ?: null,
+            'department_id' => $request->integer('department_id') ?: null,
+            'lock_status' => in_array($lockStatus, ['locked', 'unlocked'], true) ? $lockStatus : null,
+        ];
+    }
+
     public function edit(SalaryPayrollRun $salaryPayrollRun)
     {
         $this->assertBranchAccess($salaryPayrollRun);
@@ -373,6 +440,67 @@ class SalaryPayrollGenerateController extends Controller
         return redirect()->back()->with('success', __('Employee payroll recalculated with latest salary data.'));
     }
 
+    public function toggleApplyAttendanceExtra(Request $request, SalaryPayrollRun $salaryPayrollRun, SalaryPayrollEntry $salaryPayrollEntry)
+    {
+        $this->assertBranchAccess($salaryPayrollRun);
+
+        if ((int) $salaryPayrollEntry->salary_payroll_run_id !== (int) $salaryPayrollRun->id) {
+            abort(404);
+        }
+
+        if (! auth()->user()?->can('apply-salary-payroll-attendance-extra')) {
+            abort(403);
+        }
+
+        if ($salaryPayrollRun->isFinalized()) {
+            return redirect()->back()->with('error', __('Locked payroll runs cannot be changed.'));
+        }
+
+        if ($salaryPayrollEntry->is_locked) {
+            return redirect()->back()->with('error', __('This employee is locked and cannot be changed.'));
+        }
+
+        $otEnabled = (bool) ($salaryPayrollEntry->ot_enabled ?? $salaryPayrollEntry->employee?->employee?->ot_flag ?? false);
+        if ($otEnabled) {
+            return redirect()->back()->with('error', __('Adjust toggle applies to OT No employees only.'));
+        }
+
+        $extraDays = (float) ($salaryPayrollEntry->attendance_extra_days ?? 0);
+        if ($extraDays <= 0) {
+            return redirect()->back()->with('error', __('This employee has no extra days to adjust.'));
+        }
+
+        $apply = $request->boolean('apply');
+
+        try {
+            $salaryPayrollEntry->update(['apply_attendance_extra' => $apply]);
+            $this->batchProcessor->processEmployee($salaryPayrollRun, (int) $salaryPayrollEntry->employee_id);
+        } catch (\InvalidArgumentException $e) {
+            return redirect()->back()->with('error', $e->getMessage());
+        }
+
+        $message = $apply
+            ? __('Adjust amount added to net salary for :name.', ['name' => $salaryPayrollEntry->employee?->name ?? 'employee'])
+            : __('Adjust amount removed from net salary for :name.', ['name' => $salaryPayrollEntry->employee?->name ?? 'employee']);
+
+        return redirect()->back()->with('success', $message);
+    }
+
+    private function canToggleAttendanceExtra(SalaryPayrollEntry $entry, ?SalaryPayrollRun $run = null): bool
+    {
+        if (! auth()->user()?->can('apply-salary-payroll-attendance-extra')) {
+            return false;
+        }
+
+        if ($run?->isFinalized() || $entry->isLocked()) {
+            return false;
+        }
+
+        $otEnabled = (bool) ($entry->ot_enabled ?? $entry->employee?->employee?->ot_flag ?? false);
+
+        return ! $otEnabled && (float) ($entry->attendance_extra_days ?? 0) > 0;
+    }
+
     public function finalize(SalaryPayrollRun $salaryPayrollRun)
     {
         $this->assertBranchAccess($salaryPayrollRun);
@@ -428,7 +556,14 @@ class SalaryPayrollGenerateController extends Controller
             'department_ids.*' => 'integer',
             'search' => 'nullable|string|max:100',
             'use_attendance' => 'nullable|boolean',
+            'apply_attendance_extra' => 'nullable|boolean',
         ]);
+
+        if (! empty($validated['apply_attendance_extra']) && ! auth()->user()?->can('apply-salary-payroll-attendance-extra')) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'apply_attendance_extra' => [__('You do not have permission to add extra days salary for OT No employees.')],
+            ]);
+        }
 
         if ($validated['scope_mode'] === 'category' && empty($validated['category_ids'])) {
             throw \Illuminate\Validation\ValidationException::withMessages([
@@ -482,6 +617,7 @@ class SalaryPayrollGenerateController extends Controller
             'scope_label' => $run->scopeLabel(),
             'scope_filters' => $run->scope_filters,
             'use_attendance' => (bool) ($run->use_attendance ?? true),
+            'apply_attendance_extra' => (bool) ($run->apply_attendance_extra ?? false),
             'status' => $run->status,
             'is_locked' => $run->isFinalized(),
             'locked_entry_count' => $this->runService->lockedEntryCount($run),
@@ -506,6 +642,8 @@ class SalaryPayrollGenerateController extends Controller
 
     private function formatEntry(SalaryPayrollEntry $entry, ?SalaryPayrollRun $run = null): array
     {
+        $attendanceExtra = $this->attendanceExtraForEntry($entry, $run);
+
         return [
             'id' => $entry->id,
             'employee_id' => $entry->employee_id,
@@ -518,9 +656,25 @@ class SalaryPayrollGenerateController extends Controller
             'esi_enabled' => (bool) ($entry->employee?->employee?->esic_flag ?? false),
             'pf_basic_salary' => (float) ($entry->employee?->employee?->pf_basic_salary ?? 0),
             'monthly_gross' => (float) $entry->monthly_gross,
-            'daily_option' => (bool) ($entry->employee?->employee?->daily_option ?? false),
-            'employee_working_days' => (float) ($entry->employee?->employee?->working_days ?? 0),
-            'working_days' => $this->payrollStandardWorkingDays($entry),
+            'gross_input_mode' => $this->grossInputModeForEntry($entry),
+            'daily_option' => $this->grossInputModeForEntry($entry) === 'day',
+            'employee_working_days' => $this->payrollStandardWorkingDays($entry, $run),
+            'working_days' => (float) ($entry->working_days ?: $this->payrollStandardWorkingDays($entry, $run)),
+            'working_days_source' => $entry->working_days_source,
+            'use_government_wage_rules' => $this->branchUsesGovtWageRules($entry, $run),
+            'govt_min_wage_per_day' => $entry->govt_min_wage_per_day !== null ? (float) $entry->govt_min_wage_per_day : null,
+            'govt_min_wage_used' => $entry->govt_min_wage_used !== null ? (float) $entry->govt_min_wage_used : null,
+            'govt_wage_rate_for_salary' => ($entry->govt_wage_salary_applied ?? false) && $entry->govt_min_wage_per_day !== null
+                ? (float) round((float) $entry->govt_min_wage_per_day, 0)
+                : null,
+            'actual_paid_days' => $entry->actual_paid_days !== null ? (float) $entry->actual_paid_days : (float) ($entry->paid_days ?? 0),
+            'govt_wage_equiv_days_raw' => $entry->govt_wage_equiv_days_raw !== null ? (float) $entry->govt_wage_equiv_days_raw : null,
+            'govt_wage_paid_days' => $entry->govt_wage_paid_days !== null ? (float) $entry->govt_wage_paid_days : null,
+            'contract_regular_earnings' => $entry->contract_regular_earnings !== null ? (float) $entry->contract_regular_earnings : null,
+            'govt_wage_computed_earnings' => $entry->govt_wage_computed_earnings !== null ? (float) $entry->govt_wage_computed_earnings : null,
+            'govt_wage_adjustment_amount' => (float) ($entry->govt_wage_adjustment_amount ?? 0),
+            'govt_wage_adjustment_type' => $entry->govt_wage_adjustment_type,
+            'govt_wage_missing_reason' => $this->govtWageMissingReasonForEntry($entry, $run),
             'present_days' => (float) ($entry->present_days ?? 0),
             'half_days' => (float) ($entry->half_days ?? 0),
             'week_off_worked_days' => (float) ($entry->week_off_worked_days ?? 0),
@@ -528,8 +682,14 @@ class SalaryPayrollGenerateController extends Controller
             'ot_enabled' => (bool) ($entry->ot_enabled ?? $entry->employee?->employee?->ot_flag ?? false),
             'incentive_days' => (float) ($entry->incentive_days ?? 0),
             'incentive_amount' => (float) ($entry->incentive_amount ?? 0),
-            'incentive_per_day_rate' => $this->incentivePerDayRateForEntry($entry),
+            'incentive_per_day_rate' => $this->incentivePerDayRateForEntry($entry, $run),
             'regular_earnings' => $this->regularEarningsForEntry($entry),
+            'attendance_extra_days' => (float) ($entry->attendance_extra_days ?? $attendanceExtra['days']),
+            'attendance_extra_amount' => (float) ($entry->attendance_extra_amount ?? $attendanceExtra['amount']),
+            'apply_attendance_extra' => (bool) ($entry->apply_attendance_extra ?? false),
+            'attendance_extra_applied' => (bool) ($entry->attendance_extra_applied ?? false),
+            'run_apply_attendance_extra' => (bool) ($run?->apply_attendance_extra ?? false),
+            'can_toggle_attendance_extra' => $this->canToggleAttendanceExtra($entry, $run),
             'mispunch_count' => (int) ($entry->mispunch_count ?? 0),
             'has_mispunch' => (bool) ($entry->has_mispunch ?? false),
             'basic' => (float) $entry->basic,
@@ -559,12 +719,58 @@ class SalaryPayrollGenerateController extends Controller
         ];
     }
 
-    private function payrollStandardWorkingDays(SalaryPayrollEntry $entry): float
+    private function payrollStandardWorkingDays(SalaryPayrollEntry $entry, ?SalaryPayrollRun $run = null): float
     {
-        $stored = (float) ($entry->working_days ?? 26);
+        $stored = (float) ($entry->working_days ?? 0);
+        if ($stored > 0) {
+            return $stored;
+        }
 
-        // Salary payroll always uses 26-day month; legacy rows may have stored emp working_days (e.g. 1).
-        return $stored >= 26 ? $stored : 26.0;
+        $branchId = $run?->branch_id ?? $entry->run?->branch_id;
+        if ($branchId) {
+            return $this->branchPayrollSettings->resolveWorkingDays(
+                (int) $branchId,
+                $run?->financial_year ?? $entry->run?->financial_year
+            );
+        }
+
+        return BranchPayrollSettingsService::DEFAULT_WORKING_DAYS;
+    }
+
+    private function branchUsesGovtWageRules(SalaryPayrollEntry $entry, ?SalaryPayrollRun $run = null): bool
+    {
+        $branchId = $run?->branch_id ?? $entry->run?->branch_id;
+        if (! $branchId) {
+            return false;
+        }
+
+        return (bool) \App\Models\Branch::find($branchId)?->use_government_wage_rules;
+    }
+
+    private function govtWageMissingReasonForEntry(SalaryPayrollEntry $entry, ?SalaryPayrollRun $run = null): ?string
+    {
+        if ($entry->govt_min_wage_per_day !== null || $entry->govt_min_wage_used !== null) {
+            return null;
+        }
+
+        $branchId = $run?->branch_id ?? $entry->run?->branch_id;
+        if (! $branchId || ! $entry->employee) {
+            return null;
+        }
+
+        $branch = \App\Models\Branch::find($branchId);
+        if (! $branch?->use_government_wage_rules) {
+            return null;
+        }
+
+        $asOf = $run?->pay_period_end ?? $entry->run?->pay_period_end;
+        $govtWage = $this->branchPayrollSettings->resolveGovtMinWageForEmployee(
+            $entry->employee,
+            (int) $branchId,
+            $asOf ? \Carbon\Carbon::parse($asOf) : null
+        );
+
+        return $govtWage['missing_reason'] ?? null;
     }
 
     /**
@@ -683,18 +889,16 @@ class SalaryPayrollGenerateController extends Controller
             || str_contains($upper, 'EXTRA DAYS');
     }
 
-    private function incentivePerDayRateForEntry(SalaryPayrollEntry $entry): float
+    private function incentivePerDayRateForEntry(SalaryPayrollEntry $entry, ?SalaryPayrollRun $run = null): float
     {
         $incentiveDays = (float) ($entry->incentive_days ?? 0);
         if ($incentiveDays <= 0) {
             return 0.0;
         }
 
-        $workingDays = $this->payrollStandardWorkingDays($entry);
-        $monthlyGross = (float) $entry->monthly_gross;
-        $dailyOption = (bool) ($entry->daily_option ?? $entry->employee?->employee?->daily_option ?? false);
-        $empWorkingDays = (float) ($entry->employee_working_days ?? $entry->employee?->employee?->working_days ?? 26);
-        $structureGross = ($dailyOption && $empWorkingDays <= 1) ? ($monthlyGross * $workingDays) : $monthlyGross;
+        $workingDays = $this->payrollStandardWorkingDays($entry, $run);
+        $salary = EmployeeSalary::where('employee_id', $entry->employee_id)->first();
+        $structureGross = (float) ($salary?->monthly_gross ?? $entry->monthly_gross ?? 0);
 
         if ($workingDays <= 0 || $structureGross <= 0) {
             return 0.0;
@@ -703,16 +907,48 @@ class SalaryPayrollGenerateController extends Controller
         return round($structureGross / $workingDays, 2);
     }
 
+    private function grossInputModeForEntry(SalaryPayrollEntry $entry): string
+    {
+        $salary = EmployeeSalary::where('employee_id', $entry->employee_id)->first();
+
+        return $salary?->gross_input_mode === 'day' ? 'day' : 'month';
+    }
+
     private function regularEarningsForEntry(SalaryPayrollEntry $entry): float
     {
-        $incentiveAmount = (float) ($entry->incentive_amount ?? 0);
         $totalEarnings = (float) $entry->total_earnings;
+        $incentiveAmount = (float) ($entry->incentive_amount ?? 0);
+        $extraAmount = ($entry->attendance_extra_applied ?? false)
+            ? (float) ($entry->attendance_extra_amount ?? 0)
+            : 0.0;
 
-        if ($incentiveAmount <= 0) {
-            return $totalEarnings;
+        return round(max(0, $totalEarnings - $incentiveAmount - $extraAmount), 0);
+    }
+
+    /**
+     * @return array{days: float, amount: float}
+     */
+    private function attendanceExtraForEntry(SalaryPayrollEntry $entry, ?SalaryPayrollRun $run = null): array
+    {
+        $otEnabled = (bool) ($entry->ot_enabled ?? $entry->employee?->employee?->ot_flag ?? false);
+        if ($otEnabled) {
+            return ['days' => 0.0, 'amount' => 0.0];
         }
 
-        return round(max(0, $totalEarnings - $incentiveAmount), 0);
+        $workingDays = $this->payrollStandardWorkingDays($entry, $run);
+        $paidDays = (float) ($entry->paid_days ?? 0);
+        if ($paidDays <= $workingDays) {
+            return ['days' => 0.0, 'amount' => 0.0];
+        }
+
+        $extraDays = $paidDays - $workingDays;
+        $salary = EmployeeSalary::where('employee_id', $entry->employee_id)->first();
+        $structureGross = (float) ($salary?->monthly_gross ?? $entry->monthly_gross ?? 0);
+        $extraAmount = $workingDays > 0
+            ? round(($structureGross / $workingDays) * $extraDays, 0)
+            : 0.0;
+
+        return ['days' => round($extraDays, 2), 'amount' => $extraAmount];
     }
 
     private function branchCategories(?int $branchId)

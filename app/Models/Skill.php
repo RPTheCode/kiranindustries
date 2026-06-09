@@ -40,4 +40,9 @@ class Skill extends Model
     {
         return $this->belongsToMany(Employee::class, 'employee_skill');
     }
+
+    public function wageRates()
+    {
+        return $this->hasMany(SkillWageRate::class);
+    }
 }

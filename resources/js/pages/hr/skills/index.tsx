@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { PageTemplate } from '@/components/page-template';
 import { usePage, router } from '@inertiajs/react';
-import { Plus, FileUp, FileText, Copy, Users } from 'lucide-react';
+import { Plus, FileUp, FileText, Copy, Users, Layers, MapPin, IndianRupee } from 'lucide-react';
 import { hasPermission } from '@/utils/authorization';
 import { CrudTable } from '@/components/CrudTable';
 import { CrudFormModal } from '@/components/CrudFormModal';
@@ -18,10 +18,27 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { CopyToBranchesModal } from '@/components/CopyToBranchesModal';
+import { WageZonesTab } from './components/WageZonesTab';
+import { ZoneRatesTab } from './components/ZoneRatesTab';
+
+type SkillsTab = 'skills' | 'zones' | 'rates';
 
 export default function Skills() {
     const { t } = useTranslation();
-    const { auth, skills, branches = [], stats = {}, activeBranchId, filters: pageFilters = {} } = usePage().props as any;
+    const {
+        auth,
+        skills,
+        branches = [],
+        stats = {},
+        activeBranchId,
+        activeBranchName,
+        filters: pageFilters = {},
+        tab: activeTab = 'skills',
+        wageZones = [],
+        selectedWageZoneId = null,
+        selectedWageZone = null,
+        zoneRates = [],
+    } = usePage().props as any;
     const permissions = auth?.permissions || [];
     const sessionActiveBranchId = activeBranchId ?? auth?.active_branch_id ?? null;
     const defaultStatus = 'all';
@@ -70,8 +87,17 @@ export default function Skills() {
         per_page: pageFilters.per_page,
         sort_field: pageFilters.sort_field,
         sort_direction: pageFilters.sort_direction,
+        tab: activeTab,
+        wage_zone_id: selectedWageZoneId || undefined,
         ...extra,
     });
+
+    const switchTab = (tab: SkillsTab) => {
+        router.get(route('hr.skills.index'), listQueryParams({ tab, page: 1 }), {
+            preserveState: true,
+            preserveScroll: true,
+        });
+    };
 
     const defaultBranchFilter = sessionActiveBranchId ? String(sessionActiveBranchId) : 'all';
 
@@ -91,9 +117,9 @@ export default function Skills() {
     const filteredBranchName =
         selectedBranch !== 'all' ? branches.find((b: any) => String(b.id) === selectedBranch)?.name : null;
 
-    const activeBranchName = sessionActiveBranchId
+    const resolvedActiveBranchName = activeBranchName ?? (sessionActiveBranchId
         ? branches.find((b: any) => String(b.id) === String(sessionActiveBranchId))?.name
-        : null;
+        : null);
 
     const isViewingOtherBranch =
         selectedBranch !== 'all' &&
@@ -380,12 +406,11 @@ export default function Skills() {
         });
     };
 
-    // Define page actions
+    // Define page actions (context-aware per tab)
     const pageActions = [];
 
-    // If user selected multiple skills, add bulk actions
-    if (selectedSkills.length > 0) {
-        if (hasPermission(permissions, 'create-skills')) {
+    if (activeTab === 'skills') {
+        if (selectedSkills.length > 0 && hasPermission(permissions, 'create-skills')) {
             pageActions.push({
                 label: `${t('Copy Selected to Branches')} (${selectedSkills.length})`,
                 icon: <Copy className="h-4 w-4 mr-2" />,
@@ -397,35 +422,34 @@ export default function Skills() {
                 }
             });
         }
-    }
 
-    // Add standard "Add New Skill" button if user has permission
-    if (hasPermission(permissions, 'create-skills')) {
-        pageActions.push({
-            label: t('Add Skill'),
-            icon: <Plus className="h-4 w-4 mr-2" />,
-            variant: 'default' as const,
-            onClick: () => handleAddNew()
-        });
+        if (hasPermission(permissions, 'create-skills')) {
+            pageActions.push({
+                label: t('Add Skill'),
+                icon: <Plus className="h-4 w-4 mr-2" />,
+                variant: 'default' as const,
+                onClick: () => handleAddNew()
+            });
+
+            pageActions.push({
+                label: t('Import Skills'),
+                icon: <FileUp className="h-4 w-4 mr-2" />,
+                variant: 'outline' as const,
+                className: 'border-primary text-primary hover:bg-primary/5',
+                onClick: () => setIsImportModalOpen(true),
+            });
+        }
 
         pageActions.push({
-            label: t('Import Skills'),
-            icon: <FileUp className="h-4 w-4 mr-2" />,
+            label: t('Download Report'),
+            icon: <FileText className="h-4 w-4 mr-2" />,
             variant: 'outline' as const,
-            className: 'border-primary text-primary hover:bg-primary/5',
-            onClick: () => setIsImportModalOpen(true),
+            className: 'border-slate-300 text-slate-700 hover:bg-slate-50',
+            onClick: () => {
+                window.open(route('hr.reports.master_listing', { type: 'SKL', branch_id: activeBranchId }), '_blank');
+            },
         });
     }
-
-    pageActions.push({
-        label: t('Download Report'),
-        icon: <FileText className="h-4 w-4 mr-2" />,
-        variant: 'outline' as const,
-        className: 'border-slate-300 text-slate-700 hover:bg-slate-50',
-        onClick: () => {
-            window.open(route('hr.reports.master_listing', { type: 'SKL', branch_id: activeBranchId }), '_blank');
-        },
-    });
 
     const breadcrumbs = [
         { title: t('Dashboard'), href: route('dashboard') },
@@ -631,6 +655,12 @@ export default function Skills() {
         }))
     ];
 
+    const tabItems: { id: SkillsTab; step: number; label: string; icon: typeof Layers; hint: string }[] = [
+        { id: 'skills', step: 1, label: t('Skill Levels'), icon: Layers, hint: t('Unskilled, Semi Skilled, Skilled...') },
+        { id: 'zones', step: 2, label: t('Wage Zones'), icon: MapPin, hint: t('State / city wise zones') },
+        { id: 'rates', step: 3, label: t('Set Rates'), icon: IndianRupee, hint: t('Min wage per zone & skill') },
+    ];
+
     return (
         <PageTemplate
             title={t("Skill Management")}
@@ -665,11 +695,66 @@ export default function Skills() {
                         style={{ color: 'var(--theme-color)' }}
                     >
                         {t('Show active branch')}
-                        {activeBranchName ? ` (${activeBranchName})` : ''}
+                        {resolvedActiveBranchName ? ` (${resolvedActiveBranchName})` : ''}
                     </button>
                 </div>
             )}
 
+            <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50/60 px-4 py-2.5 text-xs text-slate-600">
+                <span className="font-semibold text-slate-800">{t('How it works:')}</span>{' '}
+                {t('Step 1 — Add skill levels → Step 2 — Create wage zones (Surat, Ahmedabad, any state) → Step 3 — Set minimum wage rates for each skill in each zone.')}
+            </div>
+
+            <div className="mb-4 flex flex-wrap gap-2">
+                {tabItems.map(({ id, step, label, icon: Icon, hint }) => (
+                    <button
+                        key={id}
+                        type="button"
+                        onClick={() => switchTab(id)}
+                        className={cn(
+                            'flex min-w-[140px] flex-1 flex-col items-start rounded-xl border px-4 py-3 text-left transition-all sm:max-w-[220px]',
+                            activeTab === id
+                                ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20'
+                                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50',
+                        )}
+                    >
+                        <span className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                            <span className={cn(
+                                'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold',
+                                activeTab === id ? 'bg-primary text-white' : 'bg-slate-200 text-slate-600',
+                            )}>
+                                {step}
+                            </span>
+                            <Icon className={cn('h-4 w-4', activeTab === id ? 'text-primary' : 'text-slate-500')} />
+                            {label}
+                        </span>
+                        <span className="mt-0.5 pl-7 text-[10px] text-slate-500">{hint}</span>
+                    </button>
+                ))}
+            </div>
+
+            {activeTab === 'zones' && (
+                <WageZonesTab
+                    wageZones={wageZones}
+                    permissions={permissions}
+                    listQueryParams={listQueryParams}
+                />
+            )}
+
+            {activeTab === 'rates' && (
+                <ZoneRatesTab
+                    wageZones={wageZones}
+                    selectedWageZoneId={selectedWageZoneId}
+                    selectedWageZone={selectedWageZone}
+                    zoneRates={zoneRates}
+                    permissions={permissions}
+                    listQueryParams={listQueryParams}
+                    activeBranchName={resolvedActiveBranchName}
+                />
+            )}
+
+            {activeTab === 'skills' && (
+            <>
             <div className="bg-white dark:bg-gray-900 rounded-lg shadow mb-4 p-4">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500 mb-3 pb-3 border-b border-slate-100 dark:border-slate-800">
                     {filteredBranchName && selectedBranch !== 'all' && (
@@ -771,7 +856,6 @@ export default function Skills() {
                 />
             </div>
 
-            {/* Form Modal */}
             <CrudFormModal
                 isOpen={isFormModalOpen}
                 onClose={() => setIsFormModalOpen(false)}
@@ -788,7 +872,7 @@ export default function Skills() {
                             })) : [],
                             required: true
                         },
-                        { name: 'name', label: t('Skill Name'), type: 'text', required: true },
+                        { name: 'name', label: t('Skill Name'), type: 'text', required: true, placeholder: t('e.g. Unskilled, Semi Skilled, Skilled') },
                         { name: 'code', label: t('Short Code'), type: 'text', required: true },
                         {
                             name: 'status',
@@ -811,6 +895,7 @@ export default function Skills() {
                     branch_id: activeBranchId?.toString(),
                     status: 'active'
                 }}
+                description={t('Skill levels are used for employees. Set government minimum wages in the "Set Rates" tab by zone.')}
                 title={
                     formMode === 'create'
                         ? t('Add New Skill')
@@ -885,6 +970,8 @@ export default function Skills() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+            </>
+            )}
         </PageTemplate>
     );
 }

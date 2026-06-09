@@ -286,6 +286,7 @@ class SalaryPayrollRunService
             'use_attendance' => array_key_exists('use_attendance', $data)
                 ? (bool) $data['use_attendance']
                 : true,
+            'apply_attendance_extra' => (bool) ($data['apply_attendance_extra'] ?? false),
             'status' => 'draft',
             'created_by' => Auth::id(),
         ]);
@@ -402,6 +403,9 @@ class SalaryPayrollRunService
             'use_attendance' => array_key_exists('use_attendance', $data)
                 ? (bool) $data['use_attendance']
                 : ($run->use_attendance ?? true),
+            'apply_attendance_extra' => array_key_exists('apply_attendance_extra', $data)
+                ? (bool) $data['apply_attendance_extra']
+                : (bool) ($run->apply_attendance_extra ?? false),
             'status' => 'draft',
         ]);
 

@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next';
 import { Link } from '@inertiajs/react';
-import { AlertTriangle, ChevronUp } from 'lucide-react';
+import { AlertTriangle, ChevronUp, Loader2 } from 'lucide-react';
 import { StatutoryFlagBadge } from './StatutoryIndicators';
+import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 
 export interface PayrollEntryBreakdown {
@@ -19,6 +20,14 @@ export interface PayrollEntryBreakdown {
   incentive_amount?: number;
   incentive_per_day_rate?: number;
   regular_earnings?: number;
+  attendance_extra_days?: number;
+  attendance_extra_amount?: number;
+  apply_attendance_extra?: boolean;
+  attendance_extra_applied?: boolean;
+  run_apply_attendance_extra?: boolean;
+  can_toggle_attendance_extra?: boolean;
+  is_locked?: boolean;
+  id?: number;
   mispunch_count?: number;
   has_mispunch?: boolean;
   use_attendance?: boolean;
@@ -31,6 +40,20 @@ export interface PayrollEntryBreakdown {
   pf_employee: number;
   pf_wages?: number;
   pf_employer?: number;
+  working_days_source?: string | null;
+  use_government_wage_rules?: boolean;
+  govt_min_wage_per_day?: number | null;
+  govt_min_wage_used?: number | null;
+  govt_wage_missing_reason?: string | null;
+  govt_wage_rate_for_salary?: number | null;
+  govt_wage_salary_applied?: boolean;
+  actual_paid_days?: number;
+  govt_wage_equiv_days_raw?: number | null;
+  govt_wage_paid_days?: number | null;
+  contract_regular_earnings?: number | null;
+  govt_wage_computed_earnings?: number | null;
+  govt_wage_adjustment_amount?: number;
+  govt_wage_adjustment_type?: 'incentive' | 'deduction' | null;
   pf_eps_employer?: number;
   pf_epf_employer?: number;
   pf_breakdown?: {
@@ -59,10 +82,103 @@ function formatRupee(value: number) {
   return Number(value).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
-function formatDays(value: number) {
+export function formatDays(value: number) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '0';
   return n % 1 === 0 ? String(n) : n.toFixed(1);
+}
+
+/** When govt wage conversion changes paid days (e.g. attendance 23 → govt 22). */
+export function resolveGovtAttendanceDayChange(entry: {
+  govt_wage_salary_applied?: boolean;
+  actual_paid_days?: number;
+  govt_wage_paid_days?: number | null;
+  paid_days?: number;
+}): { actual: number; govt: number } | null {
+  if (!entry.govt_wage_salary_applied) return null;
+  const actual = Number(entry.actual_paid_days ?? entry.paid_days ?? 0);
+  const govt = Number(entry.govt_wage_paid_days ?? entry.paid_days ?? 0);
+  if (actual <= 0 || Math.abs(actual - govt) < 0.01) return null;
+  return { actual, govt };
+}
+
+export function GovtAttendanceDayChangeBadge({
+  change,
+  t,
+  size = 'sm',
+  showDescription = false,
+}: {
+  change: { actual: number; govt: number };
+  t: (key: string, opts?: Record<string, unknown>) => string;
+  size?: 'sm' | 'md';
+  showDescription?: boolean;
+}) {
+  const isMd = size === 'md';
+  const description = t('Govt min wage — attendance {{actual}} days converted to {{govt}} paid days for salary & PF', {
+    actual: formatDays(change.actual),
+    govt: formatDays(change.govt),
+  });
+
+  return (
+    <span className={cn('inline-flex flex-col gap-0.5', showDescription && 'items-start')}>
+      <span
+        className={cn(
+          'inline-flex items-center gap-0.5 rounded font-bold tabular-nums',
+          isMd
+            ? 'border border-indigo-300 bg-indigo-100 px-2 py-0.5 text-[10px] text-indigo-950'
+            : 'bg-indigo-600 px-1.5 py-px text-[8px] text-white',
+        )}
+        title={description}
+      >
+        <span className={cn(isMd && 'text-indigo-700/80')}>{t('Att')}</span>
+        <span>{formatDays(change.actual)}</span>
+        <span className={cn(isMd ? 'text-indigo-500' : 'opacity-90')}>→</span>
+        <span>{formatDays(change.govt)}</span>
+        {!isMd && <span className="opacity-90">{t('govt')}</span>}
+      </span>
+      {showDescription && (
+        <span className="text-[9px] font-medium leading-tight text-indigo-900/90">{description}</span>
+      )}
+    </span>
+  );
+}
+
+export type AttendanceDaysBadgeTone = 'empty' | 'partial' | 'full' | 'govt_adjusted';
+
+export function getAttendanceDaysBadgeTone(
+  entry: { paid_days?: number; govt_wage_salary_applied?: boolean; actual_paid_days?: number; govt_wage_paid_days?: number | null },
+  working: number,
+): AttendanceDaysBadgeTone {
+  if (resolveGovtAttendanceDayChange(entry)) return 'govt_adjusted';
+  const paid = Number(entry.paid_days ?? 0);
+  if (paid <= 0) return 'empty';
+  if (paid >= working) return 'full';
+  return 'partial';
+}
+
+export function attendanceDaysBadgeDescription(
+  tone: AttendanceDaysBadgeTone,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  opts?: { actual?: string; govt?: string; paid?: string; working?: number },
+): string | null {
+  switch (tone) {
+    case 'govt_adjusted':
+      return t('Indigo — govt min wage: {{actual}} attendance → {{govt}} paid days', {
+        actual: opts?.actual ?? '',
+        govt: opts?.govt ?? '',
+      });
+    case 'partial':
+      return t('Blue — partial month: {{paid}} paid of {{working}} working days', {
+        paid: opts?.paid ?? '',
+        working: opts?.working ?? 26,
+      });
+    case 'full':
+      return t('Green — full paid days for this month');
+    case 'empty':
+      return t('Grey — no paid days');
+    default:
+      return null;
+  }
 }
 
 function formatPtSlabRange(min: number | null, max: number | null, formatRupee: (v: number) => string) {
@@ -100,27 +216,19 @@ function breakdownLines(breakdown?: Record<string, number>) {
 
 function salaryDisplayMeta(entry: {
   monthly_gross: number;
+  gross_input_mode?: string;
   daily_option?: boolean;
-  employee_working_days?: number;
+  working_days?: number;
 }) {
   const monthlyGross = Number(entry.monthly_gross ?? 0);
-  const dailyOption = Boolean(entry.daily_option);
-  const configDays = Number(entry.employee_working_days ?? 0);
-  const salaryDays = configDays > 0 ? configDays : (dailyOption ? 1 : 26);
+  const dailyOption = entry.gross_input_mode === 'day' || Boolean(entry.daily_option);
+  const salaryDays = Math.max(1, Number(entry.working_days ?? 26) || 26);
 
-  if (dailyOption && salaryDays <= 1) {
+  if (dailyOption) {
     return {
       mode: 'day' as const,
       rate: monthlyGross,
-      ctc: Math.round(monthlyGross * 26),
-    };
-  }
-
-  if (dailyOption && salaryDays > 1) {
-    return {
-      mode: 'day' as const,
-      rate: Math.round((monthlyGross / salaryDays) * 100) / 100,
-      ctc: monthlyGross,
+      ctc: Math.round(monthlyGross * salaryDays),
     };
   }
 
@@ -131,9 +239,37 @@ function salaryDisplayMeta(entry: {
   };
 }
 
+function workingDaysSourceLabel(source: string | null | undefined, t: (key: string) => string) {
+  switch (source) {
+    case 'branch':
+      return t('Branch setting');
+    case 'zone':
+      return t('Wage zone');
+    case 'company':
+      return t('Company default');
+    default:
+      return t('Default (26)');
+  }
+}
+
+function govtWageMissingLabel(reason: string | null | undefined, t: (key: string) => string) {
+  switch (reason) {
+    case 'no_wage_zone':
+      return t('Branch has no wage zone linked');
+    case 'no_skill':
+      return t('Employee skill not set');
+    case 'no_zone_rate':
+      return t('No govt rate for skill + zone');
+    default:
+      return null;
+  }
+}
+
 interface PayrollEntryBreakdownPanelProps {
   entry: PayrollEntryBreakdown;
   runUsesAttendance?: boolean;
+  togglingAdjust?: boolean;
+  onToggleAdjust?: (apply: boolean) => void;
   onClose?: () => void;
 }
 
@@ -180,19 +316,28 @@ function EarningsBreakdownPanel({
   entry,
   formatRupee: fmt,
   t,
+  togglingAdjust = false,
+  onToggleAdjust,
 }: {
   entry: PayrollEntryBreakdown;
   formatRupee: (v: number) => string;
   t: (key: string, opts?: Record<string, unknown>) => string;
+  togglingAdjust?: boolean;
+  onToggleAdjust?: (apply: boolean) => void;
 }) {
   const componentLines = componentEarningLines(entry.earnings_breakdown);
   const incentiveDays = Number(entry.incentive_days ?? 0);
   const incentiveAmount = Number(entry.incentive_amount ?? 0);
-  const workingDays = Math.max(26, Number(entry.working_days ?? 26) || 26);
+  const otEnabled = Boolean(entry.ot_enabled);
+  const attendanceExtraDays = Number(entry.attendance_extra_days ?? 0);
+  const attendanceExtraAmount = Number(entry.attendance_extra_amount ?? 0);
+  const attendanceExtraApplied = Boolean(entry.attendance_extra_applied);
+  const workingDays = Math.max(1, Number(entry.working_days ?? 26) || 26);
   const monthlyGross = Number(entry.monthly_gross ?? 0);
   const perDayRate = Number(entry.incentive_per_day_rate ?? 0) || (workingDays > 0 ? Math.round((monthlyGross / workingDays) * 100) / 100 : 0);
   const regularEarnings = Number(entry.regular_earnings ?? 0) || componentLines.reduce((sum, [, amt]) => sum + Number(amt), 0);
-  const hasIncentive = incentiveDays > 0 && incentiveAmount > 0;
+  const hasIncentive = otEnabled && incentiveDays > 0 && incentiveAmount > 0;
+  const hasAttendanceExtra = !otEnabled && attendanceExtraDays > 0 && attendanceExtraAmount > 0;
 
   return (
     <div className="min-w-0 rounded-md border border-slate-200 bg-white">
@@ -208,9 +353,59 @@ function EarningsBreakdownPanel({
         ))}
       </div>
       <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/80 px-2.5 py-1 text-[11px] font-semibold text-slate-800">
-        <span>{t('Regular Salary')}</span>
+        <span>{t('Regular Salary')} ({workingDays} {t('days')})</span>
         <span className="tabular-nums">₹{fmt(regularEarnings)}</span>
       </div>
+
+      {hasAttendanceExtra && (
+        <div className="border-t border-sky-200 bg-sky-50/50 px-2.5 py-2 text-[10px] text-sky-950">
+          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+            <p className="font-bold uppercase tracking-wide text-sky-900">{t('Adjust (OT No — extra days)')}</p>
+            <span className={cn(
+              'rounded px-1.5 py-px text-[9px] font-bold uppercase',
+              attendanceExtraApplied ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900',
+            )}>
+              {attendanceExtraApplied ? t('Applied to net') : t('Pending — not in net')}
+            </span>
+          </div>
+          <div className="grid gap-1 sm:grid-cols-2">
+            <div className="flex justify-between gap-2 rounded bg-white/80 px-2 py-1">
+              <span>{t('Extra days')}</span>
+              <strong className="tabular-nums">{attendanceExtraDays}</strong>
+            </div>
+            <div className="flex justify-between gap-2 rounded bg-white/80 px-2 py-1">
+              <span>{t('Per day')} (÷ {workingDays})</span>
+              <strong className="tabular-nums">₹{fmt(perDayRate)}</strong>
+            </div>
+          </div>
+          <div className="mt-1.5 flex items-center justify-between rounded bg-white/80 px-2 py-1 font-semibold">
+            <span>{t('Adjust amount')}</span>
+            <strong className="tabular-nums text-sky-900">+ ₹{fmt(attendanceExtraAmount)}</strong>
+          </div>
+          <p className="mt-1.5 text-[9px] text-sky-800/90">
+            {attendanceExtraApplied
+              ? t('Included in Total Salary and Net. PF is still calculated on {{days}} days only.', { days: workingDays })
+              : t('Not in net yet. Turn on the option below to add this amount for this employee only.')}
+          </p>
+          {entry.can_toggle_attendance_extra && onToggleAdjust && (
+            <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-md border border-sky-300 bg-white px-2 py-1.5">
+              {togglingAdjust ? (
+                <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-sky-700" />
+              ) : (
+                <Checkbox
+                  checked={Boolean(entry.apply_attendance_extra)}
+                  onCheckedChange={(v) => onToggleAdjust(Boolean(v))}
+                  className="mt-0.5"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              )}
+              <span className="text-[10px] font-semibold leading-snug text-sky-950">
+                {t('Add ₹{{amount}} adjust to net salary (this employee only)', { amount: fmt(attendanceExtraAmount) })}
+              </span>
+            </label>
+          )}
+        </div>
+      )}
 
       {hasIncentive && (
         <div className="border-t border-amber-200 bg-amber-50/50 px-2.5 py-2 text-[10px] text-amber-950">
@@ -253,25 +448,33 @@ function EarningsBreakdownPanel({
   );
 }
 
-export function PayrollEntryBreakdownPanel({ entry, runUsesAttendance = true, onClose }: PayrollEntryBreakdownPanelProps) {
+export function PayrollEntryBreakdownPanel({ entry, runUsesAttendance = true, togglingAdjust = false, onToggleAdjust, onClose }: PayrollEntryBreakdownPanelProps) {
   const { t } = useTranslation();
   const deductions = breakdownLines(entry.deductions_breakdown);
   const componentLines = componentEarningLines(entry.earnings_breakdown);
   const hasBreakdown = componentLines.length > 0 || deductions.length > 0 || Number(entry.incentive_amount ?? 0) > 0;
-  const workingDays = Math.max(26, Number(entry.working_days ?? 26) || 26);
+  const workingDays = Math.max(1, Number(entry.working_days ?? 26) || 26);
   const presentDays = Number(entry.present_days ?? 0);
   const halfDays = Number(entry.half_days ?? 0);
   const weekOffWorkedDays = Number(entry.week_off_worked_days ?? 0);
   const paidDays = Number(entry.paid_days ?? 0);
   const incentiveDays = Number(entry.incentive_days ?? 0);
   const incentiveAmount = Number(entry.incentive_amount ?? 0);
+  const attendanceExtraDays = Number(entry.attendance_extra_days ?? 0);
+  const attendanceExtraAmount = Number(entry.attendance_extra_amount ?? 0);
+  const attendanceExtraApplied = Boolean(entry.attendance_extra_applied);
   const otEnabled = Boolean(entry.ot_enabled);
   const isProRated = runUsesAttendance && paidDays > 0 && paidDays < workingDays;
-  const hasIncentive = incentiveDays > 0 && incentiveAmount > 0;
+  const hasIncentive = otEnabled && incentiveDays > 0 && incentiveAmount > 0;
+  const hasAttendanceExtra = !otEnabled && attendanceExtraDays > 0 && attendanceExtraAmount > 0;
   const hasHalfDays = halfDays > 0;
   const hasWeekOffWorked = weekOffWorkedDays > 0;
-  const showAttendanceNote = runUsesAttendance && (entry.has_mispunch || isProRated || paidDays === 0 || hasIncentive || otEnabled || hasHalfDays || hasWeekOffWorked);
+  const govtDayChange = resolveGovtAttendanceDayChange(entry);
+  const showAttendanceNote = runUsesAttendance && (entry.has_mispunch || isProRated || paidDays === 0 || hasIncentive || otEnabled || hasHalfDays || hasWeekOffWorked || govtDayChange);
   const salaryMeta = salaryDisplayMeta(entry);
+
+  const showGovtRules = Boolean(entry.use_government_wage_rules);
+  const govtMissing = govtWageMissingLabel(entry.govt_wage_missing_reason, t);
 
   return (
     <div className="w-full border-l-4 border-l-primary/40 bg-slate-50/80 px-3 py-2">
@@ -292,12 +495,131 @@ export function PayrollEntryBreakdownPanel({ entry, runUsesAttendance = true, on
         )}
       </div>
 
+      {(entry.working_days_source || showGovtRules) && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] text-slate-700">
+          {entry.working_days_source && (
+            <span>
+              {t('Working days')}: <strong>{formatDays(workingDays)}</strong>
+              {' · '}{workingDaysSourceLabel(entry.working_days_source, t)}
+            </span>
+          )}
+          {showGovtRules && entry.govt_min_wage_per_day != null && (
+            <span className="text-indigo-800">
+              · {t('Govt min/day for PF')}: <strong>₹{formatRupee(entry.govt_min_wage_per_day)}</strong>
+              {entry.govt_min_wage_used != null && entry.govt_min_wage_used > 0 && (
+                <> · {t('PF basic used')}: <strong>₹{formatRupee(entry.govt_min_wage_used)}</strong></>
+              )}
+            </span>
+          )}
+          {showGovtRules && govtMissing && (
+            <span className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-900">{govtMissing}</span>
+          )}
+        </div>
+      )}
+
+      {govtDayChange && (
+        <div className="mb-2 flex flex-col gap-1 rounded-md border-2 border-indigo-300 bg-indigo-100/90 px-2.5 py-1.5 text-[10px] text-indigo-950">
+          <div className="flex flex-wrap items-center gap-2">
+            <GovtAttendanceDayChangeBadge change={govtDayChange} t={t} size="md" />
+            <span className="rounded bg-indigo-600 px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">{t('Color: Indigo')}</span>
+          </div>
+          <p className="font-semibold text-indigo-950">
+            {t('Why indigo? Contract rate is below govt minimum — paid days changed from {{actual}} (attendance) to {{govt}} (govt rate days). Salary & PF use {{govt}} days.', {
+              actual: formatDays(govtDayChange.actual),
+              govt: formatDays(govtDayChange.govt),
+            })}
+          </p>
+        </div>
+      )}
+
+      {entry.govt_wage_salary_applied && entry.govt_min_wage_per_day != null && (
+        <div className="mb-2 rounded-md border border-indigo-200 bg-indigo-50/70 px-2.5 py-2 text-[10px] text-indigo-950">
+          <p className="mb-1.5 font-bold uppercase tracking-wide text-indigo-900">{t('Government wage conversion')}</p>
+          <div className="grid gap-1 sm:grid-cols-2">
+            <div className="flex justify-between gap-2 rounded bg-white/80 px-2 py-1">
+              <span>{t('Contract rate')}</span>
+              <strong className="tabular-nums">₹{formatRupee(
+                (entry.gross_input_mode === 'day' || entry.daily_option)
+                  ? Number(entry.monthly_gross ?? 0)
+                  : Number(entry.monthly_gross ?? 0) / Math.max(1, workingDays)
+              )}/day</strong>
+            </div>
+            <div className="flex justify-between gap-2 rounded bg-white/80 px-2 py-1">
+              <span>{t('Actual paid days')}</span>
+              <strong className="tabular-nums">{formatDays(Number(entry.actual_paid_days ?? paidDays))}</strong>
+            </div>
+            <div className="flex justify-between gap-2 rounded bg-white/80 px-2 py-1">
+              <span>{t('Contract salary')}</span>
+              <strong className="tabular-nums">₹{formatRupee(entry.contract_regular_earnings ?? 0)}</strong>
+            </div>
+            <div className="flex justify-between gap-2 rounded bg-white/80 px-2 py-1">
+              <span>{t('Govt rate')} ({t('salary')})</span>
+              <strong className="tabular-nums">₹{formatRupee(entry.govt_wage_rate_for_salary ?? Math.round(Number(entry.govt_min_wage_per_day ?? 0)))}/day</strong>
+            </div>
+            {entry.govt_min_wage_per_day != null
+              && entry.govt_wage_rate_for_salary != null
+              && Math.abs(Number(entry.govt_min_wage_per_day) - Number(entry.govt_wage_rate_for_salary)) >= 0.01 && (
+              <div className="flex justify-between gap-2 rounded bg-white/80 px-2 py-1 text-indigo-800/80">
+                <span>{t('Govt rate')} ({t('PF exact')})</span>
+                <strong className="tabular-nums">₹{formatRupee(entry.govt_min_wage_per_day)}/day</strong>
+              </div>
+            )}
+            <div className="flex justify-between gap-2 rounded bg-white/80 px-2 py-1 sm:col-span-2">
+              <span>{t('Equivalent days')} (₹{formatRupee(entry.contract_regular_earnings ?? 0)} ÷ ₹{formatRupee(entry.govt_wage_rate_for_salary ?? entry.govt_min_wage_per_day ?? 0)})</span>
+              <strong className="tabular-nums">{entry.govt_wage_equiv_days_raw != null ? entry.govt_wage_equiv_days_raw.toFixed(2) : '—'} → {formatDays(Number(entry.govt_wage_paid_days ?? paidDays))} {t('days')}</strong>
+            </div>
+            <div className="flex justify-between gap-2 rounded bg-white/80 px-2 py-1">
+              <span>{t('Govt salary')}</span>
+              <strong className="tabular-nums">₹{formatRupee(entry.govt_wage_computed_earnings ?? 0)}</strong>
+            </div>
+            {Number(entry.govt_wage_adjustment_amount ?? 0) > 0 && (
+              <div className="flex justify-between gap-2 rounded bg-white/80 px-2 py-1 font-semibold">
+                <span>{entry.govt_wage_adjustment_type === 'deduction' ? t('Other deduction (adjust)') : t('Incentive (adjust)')}</span>
+                <strong className={cn('tabular-nums', entry.govt_wage_adjustment_type === 'deduction' ? 'text-red-700' : 'text-green-700')}>
+                  {entry.govt_wage_adjustment_type === 'deduction' ? '−' : '+'} ₹{formatRupee(entry.govt_wage_adjustment_amount ?? 0)}
+                </strong>
+              </div>
+            )}
+          </div>
+          <p className="mt-1.5 text-[9px] text-indigo-800/90">
+            {t('Paid days shown as {{govtDays}} at govt rate. Contract target ₹{{contract}} preserved via adjust. PF wages use govt salary ₹{{govtSalary}} (same as Excel).', {
+              govtDays: formatDays(Number(entry.govt_wage_paid_days ?? paidDays)),
+              contract: formatRupee(entry.contract_regular_earnings ?? 0),
+              govtSalary: formatRupee(entry.govt_wage_computed_earnings ?? 0),
+            })}
+          </p>
+        </div>
+      )}
+
       {showAttendanceNote && (
         <div className={cn(
           'mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-[10px]',
-          entry.has_mispunch ? 'border border-amber-200 bg-amber-50 text-amber-900' : 'border border-sky-100 bg-sky-50/80 text-sky-900',
+          entry.has_mispunch
+            ? 'border border-amber-200 bg-amber-50 text-amber-900'
+            : govtDayChange
+              ? 'border border-indigo-200 bg-indigo-50/80 text-indigo-950'
+              : 'border border-sky-100 bg-sky-50/80 text-sky-900',
         )}>
           <span>
+            {(entry.has_mispunch || govtDayChange) && (
+              <span className={cn(
+                'mr-1.5 rounded px-1 py-px text-[9px] font-bold uppercase',
+                entry.has_mispunch ? 'bg-amber-500 text-white' : 'bg-indigo-600 text-white',
+              )}>
+                {entry.has_mispunch ? t('Amber') : t('Indigo')}
+              </span>
+            )}
+            {govtDayChange && (
+              <span className="mr-1 font-semibold text-indigo-900">
+                {t('Govt wage days: {{actual}} → {{govt}} · ', {
+                  actual: formatDays(govtDayChange.actual),
+                  govt: formatDays(govtDayChange.govt),
+                })}
+              </span>
+            )}
+            {entry.has_mispunch && (
+              <span className="mr-1 font-semibold text-amber-900">{t('Mispunch — fix attendance · ')}</span>
+            )}
             {t('Working')} <strong>{workingDays}</strong>
             {' → '}{t('Present')} <strong>{formatDays(presentDays)}</strong>
             {hasHalfDays && (
@@ -306,19 +628,40 @@ export function PayrollEntryBreakdownPanel({ entry, runUsesAttendance = true, on
             {hasWeekOffWorked && (
               <> · {t('Week-off worked')} <strong>{formatDays(weekOffWorkedDays)}</strong></>
             )}
-            {' → '}{t('Paid')} <strong>{formatDays(paidDays)}</strong>
+            {' → '}{t('Paid')}{' '}
+            {govtDayChange ? (
+              <>
+                <strong className="text-indigo-800">{formatDays(govtDayChange.actual)}</strong>
+                <span className="mx-0.5 font-bold text-indigo-600">→</span>
+                <strong className="rounded bg-indigo-200 px-1 text-indigo-950">{formatDays(govtDayChange.govt)}</strong>
+                <span className="ml-1 rounded bg-indigo-600 px-1 py-px text-[9px] font-bold uppercase text-white">{t('govt')}</span>
+              </>
+            ) : (
+              <strong>{formatDays(paidDays)}</strong>
+            )}
             {' · '}{t('OT')} <strong>{otEnabled ? t('Yes') : t('No')}</strong>
             {hasIncentive && (
               <> · {t('Incentive Days')} <strong>{incentiveDays}</strong> · {t('Incentive Amount')} <strong>₹{formatRupee(incentiveAmount)}</strong></>
             )}
-            {isProRated && paidDays > 0 && !hasIncentive && (
+            {hasAttendanceExtra && (
+              <> · {t('Adjust')} <strong>{formatDays(attendanceExtraDays)}</strong> · <strong>+₹{formatRupee(attendanceExtraAmount)}</strong>
+                {!attendanceExtraApplied && <> ({t('pending')})</>}
+              </>
+            )}
+            {isProRated && paidDays > 0 && !hasIncentive && !hasAttendanceExtra && (
               <> · {t('Total Salary')} ₹{formatRupee(entry.total_earnings)} ({formatDays(paidDays)}/{workingDays} {t('days')})</>
             )}
-            {!isProRated && paidDays > 0 && !hasIncentive && (
+            {!isProRated && paidDays > 0 && !hasIncentive && !hasAttendanceExtra && (
               <> · {t('Full month pay')}</>
             )}
             {hasIncentive && (
               <> · {t('Regular')} ₹{formatRupee(entry.total_earnings - incentiveAmount)} + {t('PI')} ₹{formatRupee(incentiveAmount)} = ₹{formatRupee(entry.total_earnings)}</>
+            )}
+            {hasAttendanceExtra && !hasIncentive && attendanceExtraApplied && (
+              <> · {t('Regular')} ₹{formatRupee(entry.total_earnings - attendanceExtraAmount)} + {t('Adjust')} ₹{formatRupee(attendanceExtraAmount)} = ₹{formatRupee(entry.total_earnings)}</>
+            )}
+            {hasAttendanceExtra && !hasIncentive && !attendanceExtraApplied && (
+              <> · {t('Regular')} ₹{formatRupee(entry.total_earnings)} · {t('Adjust pending')} ₹{formatRupee(attendanceExtraAmount)}</>
             )}
             {paidDays === 0 && <> · {t('No pay — 0 paid days')}</>}
           </span>
@@ -342,7 +685,7 @@ export function PayrollEntryBreakdownPanel({ entry, runUsesAttendance = true, on
       )}
 
       <div className="mb-2 grid w-full gap-2 lg:grid-cols-2">
-        <EarningsBreakdownPanel entry={entry} formatRupee={formatRupee} t={t} />
+        <EarningsBreakdownPanel entry={entry} formatRupee={formatRupee} t={t} togglingAdjust={togglingAdjust} onToggleAdjust={onToggleAdjust} />
         <CompactLineList
           title={t('Deductions')}
           lines={deductions}
@@ -375,10 +718,20 @@ export function PayrollEntryBreakdownPanel({ entry, runUsesAttendance = true, on
             </div>
           </div>
           <p className="mt-1.5 text-[9px] text-orange-800/80">
-            {t('Employee 12% deducted from salary. Employer share split: {{eps}}% EPS + {{epf}}% EPF.', {
-              eps: entry.pf_breakdown.eps_pct,
-              epf: entry.pf_breakdown.epf_employer_pct,
-            })}
+            {entry.govt_wage_salary_applied
+              ? t('PF wages = govt salary ({{days}} × ₹{{rate}} = ₹{{wages}}). Employee {{empPct}}% = ₹{{empPf}}; EPS {{eps}}% + EPF {{epf}}%.', {
+                  days: formatDays(Number(entry.govt_wage_paid_days ?? paidDays)),
+                  rate: formatRupee(entry.govt_wage_rate_for_salary ?? Math.round(Number(entry.govt_min_wage_per_day ?? 0))),
+                  wages: formatRupee(entry.pf_breakdown.wages),
+                  empPct: entry.pf_breakdown.employee_pct,
+                  empPf: formatRupee(entry.pf_breakdown.employee),
+                  eps: entry.pf_breakdown.eps_pct,
+                  epf: entry.pf_breakdown.epf_employer_pct,
+                })
+              : t('Employee 12% deducted from salary. Employer share split: {{eps}}% EPS + {{epf}}% EPF.', {
+                  eps: entry.pf_breakdown.eps_pct,
+                  epf: entry.pf_breakdown.epf_employer_pct,
+                })}
           </p>
         </div>
       )}

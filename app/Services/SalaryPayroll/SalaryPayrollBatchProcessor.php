@@ -37,6 +37,12 @@ class SalaryPayrollBatchProcessor
             ->all();
 
         DB::transaction(function () use ($run, $employees, $components, $lockedEmployeeIds) {
+            $preservedApplyFlags = SalaryPayrollEntry::query()
+                ->where('salary_payroll_run_id', $run->id)
+                ->where('is_locked', false)
+                ->pluck('apply_attendance_extra', 'employee_id')
+                ->all();
+
             SalaryPayrollEntry::query()
                 ->where('salary_payroll_run_id', $run->id)
                 ->where('is_locked', false)
@@ -49,14 +55,22 @@ class SalaryPayrollBatchProcessor
                     continue;
                 }
 
+                $entryApply = array_key_exists($employee->id, $preservedApplyFlags)
+                    ? (bool) $preservedApplyFlags[$employee->id]
+                    : (bool) ($run->apply_attendance_extra ?? false);
+
+                $employeeContext = array_merge($context, [
+                    'entry_apply_attendance_extra' => $entryApply,
+                ]);
+
                 $result = $this->calculator->calculateForEmployee(
                     $employee,
                     $components,
                     $run->financial_year,
-                    $context
+                    $employeeContext
                 );
 
-                SalaryPayrollEntry::create($this->entryPayload($run->id, $employee->id, $result));
+                SalaryPayrollEntry::create($this->entryPayload($run->id, $employee->id, $result, $entryApply));
             }
 
             $this->runService->refreshRunTotals($run);
@@ -100,18 +114,22 @@ class SalaryPayrollBatchProcessor
             throw new \InvalidArgumentException(__('Employee not found.'));
         }
 
+        $entryApply = (bool) ($entryExists->apply_attendance_extra ?? false);
+
         $result = $this->calculator->calculateForEmployee(
             $employee,
             $components,
             $run->financial_year,
-            $this->runContext($run)
+            array_merge($this->runContext($run), [
+                'entry_apply_attendance_extra' => $entryApply,
+            ])
         );
 
-        DB::transaction(function () use ($run, $employeeId, $result) {
+        DB::transaction(function () use ($run, $employeeId, $result, $entryApply) {
             SalaryPayrollEntry::query()
                 ->where('salary_payroll_run_id', $run->id)
                 ->where('employee_id', $employeeId)
-                ->update($this->entryPayload($run->id, $employeeId, $result, false));
+                ->update($this->entryPayload($run->id, $employeeId, $result, $entryApply, false));
 
             $this->runService->refreshRunTotals($run);
         });
@@ -126,6 +144,7 @@ class SalaryPayrollBatchProcessor
     {
         return [
             'use_attendance' => (bool) ($run->use_attendance ?? true),
+            'apply_attendance_extra' => (bool) ($run->apply_attendance_extra ?? false),
             'pay_period_start' => $run->pay_period_start?->toDateString(),
             'pay_period_end' => $run->pay_period_end?->toDateString(),
             'branch_id' => $run->branch_id,
@@ -136,7 +155,7 @@ class SalaryPayrollBatchProcessor
      * @param  array<string, mixed>  $result
      * @return array<string, mixed>
      */
-    private function entryPayload(int $runId, int $employeeId, array $result, bool $includeKeys = true): array
+    private function entryPayload(int $runId, int $employeeId, array $result, bool $applyAttendanceExtra = false, bool $includeKeys = true): array
     {
         $payload = [
             'monthly_gross' => $result['monthly_gross'],
@@ -147,6 +166,10 @@ class SalaryPayrollBatchProcessor
             'paid_days' => $result['paid_days'] ?? 0,
             'incentive_days' => $result['incentive_days'] ?? 0,
             'incentive_amount' => $result['incentive_amount'] ?? 0,
+            'attendance_extra_days' => $result['attendance_extra_days'] ?? 0,
+            'attendance_extra_amount' => $result['attendance_extra_amount'] ?? 0,
+            'apply_attendance_extra' => $applyAttendanceExtra,
+            'attendance_extra_applied' => $result['attendance_extra_applied'] ?? false,
             'ot_enabled' => $result['ot_enabled'] ?? false,
             'mispunch_count' => $result['mispunch_count'] ?? 0,
             'has_mispunch' => $result['has_mispunch'] ?? false,
@@ -158,6 +181,17 @@ class SalaryPayrollBatchProcessor
             'deductions_breakdown' => $result['deductions_breakdown'],
             'pf_employee' => $result['pf_employee'],
             'pf_wages' => $result['pf_wages'] ?? 0,
+            'govt_min_wage_per_day' => $result['govt_min_wage_per_day'] ?? null,
+            'govt_min_wage_used' => $result['govt_min_wage_used'] ?? null,
+            'govt_wage_salary_applied' => $result['govt_wage_salary_applied'] ?? false,
+            'actual_paid_days' => $result['actual_paid_days'] ?? null,
+            'govt_wage_equiv_days_raw' => $result['govt_wage_equiv_days_raw'] ?? null,
+            'govt_wage_paid_days' => $result['govt_wage_paid_days'] ?? null,
+            'contract_regular_earnings' => $result['contract_regular_earnings'] ?? null,
+            'govt_wage_computed_earnings' => $result['govt_wage_computed_earnings'] ?? null,
+            'govt_wage_adjustment_amount' => $result['govt_wage_adjustment_amount'] ?? 0,
+            'govt_wage_adjustment_type' => $result['govt_wage_adjustment_type'] ?? null,
+            'working_days_source' => $result['working_days_source'] ?? null,
             'pf_employer' => $result['pf_employer'],
             'pf_eps_employer' => $result['pf_eps_employer'] ?? 0,
             'pf_epf_employer' => $result['pf_epf_employer'] ?? 0,

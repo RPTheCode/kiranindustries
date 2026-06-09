@@ -42,6 +42,7 @@ import { Combobox } from '@/components/ui/combobox';
 import { Pagination } from '@/components/ui/pagination';
 import { ConfirmActionDialog } from './components/ConfirmActionDialog';
 import { cn } from '@/lib/utils';
+import { canApplySalaryPayrollAttendanceExtra } from '@/utils/authorization';
 
 type ScopeMode = 'all' | 'category' | 'shift' | 'employee';
 type PeriodMode = 'month' | 'custom';
@@ -120,7 +121,11 @@ export default function PayrollGenerateCreate() {
     employees = [],
     activeBranchName,
     flash,
+    auth,
   } = usePage().props as any;
+
+  const permissions = auth?.permissions || [];
+  const canApplyAttendanceExtra = canApplySalaryPayrollAttendanceExtra(permissions);
 
   const isEdit = mode === 'edit' && existingRun;
   const initialFilters = existingRun?.scope_filters ?? {};
@@ -134,6 +139,9 @@ export default function PayrollGenerateCreate() {
   const [customEnd, setCustomEnd] = useState(existingRun?.pay_period_end || '');
   const [useAttendance, setUseAttendance] = useState(
     existingRun?.use_attendance !== undefined ? Boolean(existingRun.use_attendance) : true
+  );
+  const [applyAttendanceExtra, setApplyAttendanceExtra] = useState(
+    existingRun?.apply_attendance_extra !== undefined ? Boolean(existingRun.apply_attendance_extra) : false
   );
   const [scopeMode, setScopeMode] = useState<ScopeMode>(existingRun?.scope_mode || 'all');
   const [categoryIds, setCategoryIds] = useState<number[]>(initialFilters.category_ids || []);
@@ -206,6 +214,12 @@ export default function PayrollGenerateCreate() {
     return customEnd >= customStart;
   }, [periodMode, monthYear, customStart, customEnd]);
 
+  useEffect(() => {
+    if (!useAttendance && applyAttendanceExtra) {
+      setApplyAttendanceExtra(false);
+    }
+  }, [useAttendance, applyAttendanceExtra]);
+
   const payload = useCallback(() => ({
     period_mode: periodMode,
     financial_year: financialYear,
@@ -219,7 +233,8 @@ export default function PayrollGenerateCreate() {
     department_ids: departmentId !== 'all' ? [Number(departmentId)] : [],
     search: searchTerm || undefined,
     use_attendance: useAttendance,
-  }), [periodMode, financialYear, monthYear, customStart, customEnd, scopeMode, categoryIds, shiftIds, employeeIds, departmentId, searchTerm, useAttendance]);
+    apply_attendance_extra: useAttendance && canApplyAttendanceExtra ? applyAttendanceExtra : false,
+  }), [periodMode, financialYear, monthYear, customStart, customEnd, scopeMode, categoryIds, shiftIds, employeeIds, departmentId, searchTerm, useAttendance, applyAttendanceExtra, canApplyAttendanceExtra]);
 
   const toggleId = (list: number[], id: number, checked: boolean) =>
     checked ? [...list, id] : list.filter((x) => x !== id);
@@ -609,6 +624,22 @@ export default function PayrollGenerateCreate() {
               </p>
             </div>
           </label>
+
+          {useAttendance && canApplyAttendanceExtra && (
+            <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-sky-200 bg-sky-50/60 p-3">
+              <Checkbox
+                checked={applyAttendanceExtra}
+                onCheckedChange={(v) => setApplyAttendanceExtra(Boolean(v))}
+                className="mt-0.5"
+              />
+              <div>
+                <p className="text-xs font-bold text-sky-950">{t('Add extra days salary to net (OT No only)')}</p>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-sky-900/80">
+                  {t('When ON: all OT No employees with extra days get adjust added to net on generate. You can still turn ON/OFF per employee later in payroll breakdown. When OFF: adjust is pending until you enable it per employee or here.')}
+                </p>
+              </div>
+            </label>
+          )}
         </div>
 
         {step === 1 && (
@@ -958,10 +989,17 @@ export default function PayrollGenerateCreate() {
         open={generateConfirmOpen}
         onOpenChange={setGenerateConfirmOpen}
         title={isEdit ? t('Update & Regenerate Payroll?') : t('Generate Payroll?')}
-        description={t('You are about to generate payroll for {{count}} employees with total gross ₹{{amount}}. Continue?', {
-          count: previewSummary.ready_count,
-          amount: formatRupee(previewSummary.total_gross),
-        })}
+        description={
+          applyAttendanceExtra
+            ? t('You are about to generate payroll for {{count}} employees with total gross ₹{{amount}}. Extra days salary (OT No) will be added to net where applicable. Continue?', {
+                count: previewSummary.ready_count,
+                amount: formatRupee(previewSummary.total_gross),
+              })
+            : t('You are about to generate payroll for {{count}} employees with total gross ₹{{amount}}. Extra days (OT No) will appear in Adjust column but will NOT be added to net unless you enable that option above. Continue?', {
+                count: previewSummary.ready_count,
+                amount: formatRupee(previewSummary.total_gross),
+              })
+        }
         confirmLabel={isEdit ? t('Update & Regenerate') : existingRunPreview ? t('Update Existing & Regenerate') : t('Generate Payroll')}
         cancelLabel={t('Cancel')}
         variant="primary"

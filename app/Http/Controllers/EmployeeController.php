@@ -20,6 +20,7 @@ use Illuminate\Support\Str;
 use App\Services\StorageConfigService;
 use Inertia\Inertia;
 use App\Services\ActivityLogger;
+use App\Services\SalaryPayroll\BranchPayrollSettingsService;
 use App\Services\SalaryPayroll\SalaryComponentAssignmentService;
 use App\Traits\LogsActivity;
 
@@ -299,6 +300,10 @@ class EmployeeController extends Controller
             $activeBranchId ? (int) $activeBranchId : null
         );
 
+        $branchPayrollSettings = $activeBranchId
+            ? app(BranchPayrollSettingsService::class)->resolve((int) $activeBranchId)
+            : null;
+
         return Inertia::render('hr/employees/create', [
             'departments' => $departments,
             'designations' => $designations,
@@ -313,6 +318,7 @@ class EmployeeController extends Controller
             'skills' => $skills,
             'branches' => $branches,
             'salaryComponents' => $salaryComponents,
+            'branchPayrollSettings' => $branchPayrollSettings,
             'nextEmployeeId' => Employee::getNextEmployeeId(),
             'resignReasons' => $resignReasons,
             'overtimeOptions' => $overtimeOptions,
@@ -370,7 +376,7 @@ class EmployeeController extends Controller
                 'category_id' => 'required|exists:categories,id',
                 'date_of_joining' => 'required|date',
                 'po_status' => 'required|in:Permanent,Other',
-                'daily_option' => 'required|boolean',
+                'daily_option' => 'nullable|boolean',
                 'week_off' => 'nullable',
                 'ot_flag' => 'nullable|boolean',
                 'ot_hours' => 'required_if:ot_flag,1,true|nullable|string|max:20',
@@ -440,8 +446,8 @@ class EmployeeController extends Controller
             $employee->confirm_date = $request->confirm_date;
             $employee->employment_type = $request->employment_type;
             $employee->po_status = $request->po_status;
-            $employee->daily_option = $request->daily_option;
-            $employee->working_days = $request->working_days ?? 26;
+            $employee->daily_option = (bool) ($request->daily_option ?? false);
+            $employee->working_days = null;
 
             // Address & Personal
             $employee->address_line_1 = $request->address_line_1;
@@ -520,7 +526,31 @@ class EmployeeController extends Controller
             }
 
             // Salary Components
-            if ($request->has('salary_components')) {
+            if ($request->filled('gross_salary') && (float) $request->gross_salary > 0) {
+                $monthlyGross = (float) $request->gross_salary;
+                $workingDays = (int) app(BranchPayrollSettingsService::class)
+                    ->resolveWorkingDays((int) ($employee->branch_id ?? 0));
+                $grossInputMode = $request->input('gross_input_mode', 'month');
+                $componentsMap = $request->salary_components ?? [];
+                if (is_string($componentsMap)) {
+                    $componentsMap = json_decode($componentsMap, true) ?? [];
+                }
+
+                \App\Models\EmployeeSalary::updateOrCreate(
+                    ['employee_id' => $user->id],
+                    [
+                        'monthly_gross' => $monthlyGross,
+                        'gross_input_mode' => $grossInputMode,
+                        'per_day_salary' => $grossInputMode === 'day' && $workingDays > 0
+                            ? round($monthlyGross / $workingDays, 2)
+                            : null,
+                        'basic_salary' => $request->basic_salary ?? 0,
+                        'components' => $componentsMap,
+                        'is_active' => true,
+                        'created_by' => creatorId(),
+                    ]
+                );
+            } elseif ($request->has('salary_components')) {
                 \App\Models\EmployeeSalary::updateOrCreate(
                     ['employee_id' => $user->id],
                     [
@@ -731,6 +761,10 @@ class EmployeeController extends Controller
             (int) ($employee->branch_id ?? session('active_branch_id') ?? 0) ?: null
         );
 
+        $branchPayrollSettings = ($employee->branch_id ?? session('active_branch_id'))
+            ? app(BranchPayrollSettingsService::class)->resolve((int) ($employee->branch_id ?? session('active_branch_id')))
+            : null;
+
         $employeeSalary = \App\Models\EmployeeSalary::where('employee_id', $employee->user_id)
             ->where('is_active', true)
             ->first();
@@ -750,6 +784,7 @@ class EmployeeController extends Controller
             'skills' => $skills,
             'branches' => $branches,
             'salaryComponents' => $salaryComponents,
+            'branchPayrollSettings' => $branchPayrollSettings,
             'employeeSalary' => $employeeSalary,
             'resignReasons' => $resignReasons,
             'overtimeOptions' => $overtimeOptions,
@@ -834,7 +869,7 @@ class EmployeeController extends Controller
                 'date_of_joining' => 'required|date',
                 'employment_type' => 'nullable|string|max:50',
                 'po_status' => 'required|in:Permanent,Other',
-                'daily_option' => 'required|boolean',
+                'daily_option' => 'nullable|boolean',
                 'working_days' => 'nullable|integer',
                 'weight' => 'nullable|numeric|min:0',
                 'employment_status' => 'nullable|string|max:50',
@@ -982,8 +1017,8 @@ class EmployeeController extends Controller
             $employee->date_of_joining = $request->date_of_joining;
             $employee->employment_type = $request->employment_type;
             $employee->po_status = $request->po_status;
-            $employee->daily_option = $request->daily_option;
-            $employee->working_days = $request->working_days ?? 26;
+            $employee->daily_option = (bool) ($request->daily_option ?? false);
+            $employee->working_days = null;
 
             // Address & Personal
             $employee->address_line_1 = $request->address_line_1;
@@ -1083,13 +1118,35 @@ class EmployeeController extends Controller
             }
 
             // Salary Record
-            if ($request->has('salary_components')) {
+            if ($request->filled('gross_salary') && (float) $request->gross_salary > 0) {
+                $monthlyGross = (float) $request->gross_salary;
+                $workingDays = (int) app(BranchPayrollSettingsService::class)
+                    ->resolveWorkingDays((int) ($employee->branch_id ?? 0));
+                $grossInputMode = $request->input('gross_input_mode', 'month');
+                $componentsMap = $request->salary_components ?? [];
+                if (is_string($componentsMap)) {
+                    $componentsMap = json_decode($componentsMap, true) ?? [];
+                }
+
+                \App\Models\EmployeeSalary::updateOrCreate(
+                    ['employee_id' => $employee->user_id],
+                    [
+                        'monthly_gross' => $monthlyGross,
+                        'gross_input_mode' => $grossInputMode,
+                        'per_day_salary' => $grossInputMode === 'day' && $workingDays > 0
+                            ? round($monthlyGross / $workingDays, 2)
+                            : null,
+                        'basic_salary' => $request->basic_salary ?? 0,
+                        'components' => $componentsMap,
+                        'is_active' => true,
+                        'created_by' => creatorId(),
+                    ]
+                );
+            } elseif ($request->has('salary_components')) {
                 \App\Models\EmployeeSalary::updateOrCreate(
                     ['employee_id' => $employee->user_id],
                     [
                         'basic_salary' => $request->basic_salary ?? 0,
-                        'pf_basic_salary' => $request->pf_basic_salary ?? 0,
-                        'gross_salary' => $request->gross_salary ?? 0,
                         'components' => $request->salary_components,
                         'is_active' => true,
                         'created_by' => creatorId(),
@@ -1807,6 +1864,8 @@ class EmployeeController extends Controller
             ->orderBy('name')
             ->get(['id', 'name']);
 
+        $payrollSettings = app(BranchPayrollSettingsService::class)->resolve($branchId);
+
         return response()->json([
             'categories' => $this->categoriesForBranch($branchId),
             'departments' => $departments,
@@ -1814,6 +1873,8 @@ class EmployeeController extends Controller
             'designations' => $designations,
             'shifts' => $shifts,
             'skills' => $skills,
+            'payroll_working_days' => $payrollSettings['working_days'],
+            'payroll_working_days_source' => $payrollSettings['working_days_source'],
         ]);
     }
 

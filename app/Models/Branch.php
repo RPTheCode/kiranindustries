@@ -14,6 +14,10 @@ class Branch extends BaseModel
         'address',
         'city',
         'state',
+        'wage_zone_id',
+        'standard_working_days',
+        'use_government_wage_rules',
+        'govt_wage_mode',
         'country',
         'zip_code',
         'phone',
@@ -26,6 +30,8 @@ class Branch extends BaseModel
 
     protected $casts = [
         'status' => 'string',
+        'standard_working_days' => 'integer',
+        'use_government_wage_rules' => 'boolean',
     ];
 
     public function company()
@@ -46,5 +52,10 @@ class Branch extends BaseModel
     public function employees()
     {
         return $this->hasMany(Employee::class);
+    }
+
+    public function wageZone()
+    {
+        return $this->belongsTo(WageZone::class);
     }
 }

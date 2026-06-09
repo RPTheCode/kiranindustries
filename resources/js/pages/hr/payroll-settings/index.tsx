@@ -10,7 +10,9 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from '@/components/custom-toast';
-import { Save, Plus, Trash2, IndianRupee, Percent, ShieldCheck, Users } from 'lucide-react';
+import { Save, Plus, Trash2, IndianRupee, Percent, ShieldCheck, Users, CalendarDays, Scale } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
 import { canEditPayrollSettings } from '@/utils/authorization';
 
 function sanitizeNonNegativeNumber(value: string): string {
@@ -40,6 +42,10 @@ export default function PayrollSettings() {
         nextFinancialYear,
         financialYearOptions = [],
         auth,
+        activeBranchId,
+        activeBranchName,
+        wageZones = [],
+        salaryRules,
     } = usePage().props as any;
     const permissions = auth?.permissions || [];
     const canEdit = canEditPayrollSettings(permissions);
@@ -58,13 +64,25 @@ export default function PayrollSettings() {
     const [formParams, setFormParams] = useState({ ...parameters });
     const [ptSlabs, setPtSlabs] = useState([...initialPtSlabs]);
     const [itSlabs, setItSlabs] = useState([...initialItSlabs]);
+    const [salaryRulesForm, setSalaryRulesForm] = useState({
+        wage_zone_id: salaryRules?.wage_zone_id ? String(salaryRules.wage_zone_id) : '',
+        standard_working_days: salaryRules?.standard_working_days ?? '',
+        use_government_wage_rules: Boolean(salaryRules?.use_government_wage_rules),
+        govt_wage_mode: salaryRules?.govt_wage_mode || 'both',
+    });
 
     useEffect(() => {
         setFinancialYear(selectedFinancialYear);
         setFormParams({ ...parameters, financial_year: selectedFinancialYear });
         setPtSlabs([...initialPtSlabs]);
         setItSlabs([...initialItSlabs]);
-    }, [selectedFinancialYear, parameters, initialPtSlabs, initialItSlabs]);
+        setSalaryRulesForm({
+            wage_zone_id: salaryRules?.wage_zone_id ? String(salaryRules.wage_zone_id) : '',
+            standard_working_days: salaryRules?.standard_working_days ?? '',
+            use_government_wage_rules: Boolean(salaryRules?.use_government_wage_rules),
+            govt_wage_mode: salaryRules?.govt_wage_mode || 'both',
+        });
+    }, [selectedFinancialYear, parameters, initialPtSlabs, initialItSlabs, salaryRules]);
 
     const changeFinancialYear = (year: string) => {
         if (year === financialYear) {
@@ -187,6 +205,46 @@ export default function PayrollSettings() {
         );
     };
 
+    const workingDaysSourceLabel = (source?: string) => {
+        switch (source) {
+            case 'branch':
+                return t('Branch setting');
+            case 'zone':
+                return t('Wage zone default');
+            case 'company':
+                return t('Company default');
+            default:
+                return t('System default (26)');
+        }
+    };
+
+    const selectedZone = wageZones.find((z: { id: number }) => String(z.id) === salaryRulesForm.wage_zone_id);
+    const resolvedWorkingDays = salaryRules?.working_days ?? 26;
+
+    const saveSalaryRules = () => {
+        if (!activeBranchId) {
+            toast.error(t('Select an active branch from the header first.'));
+            return;
+        }
+        router.post(
+            route('hr.payroll-settings.salary-rules.update'),
+            {
+                financial_year: financialYear,
+                wage_zone_id: salaryRulesForm.wage_zone_id ? Number(salaryRulesForm.wage_zone_id) : null,
+                standard_working_days: salaryRulesForm.standard_working_days !== ''
+                    ? Number(salaryRulesForm.standard_working_days)
+                    : null,
+                use_government_wage_rules: salaryRulesForm.use_government_wage_rules,
+                govt_wage_mode: salaryRulesForm.use_government_wage_rules
+                    ? salaryRulesForm.govt_wage_mode
+                    : 'pf_compliance',
+            },
+            {
+                onSuccess: () => toast.success(t('Salary rules saved successfully')),
+            }
+        );
+    };
+
     const paramVal = (key: string) => {
         const v = formParams[key];
         return v === null || v === undefined ? '' : v;
@@ -227,7 +285,7 @@ export default function PayrollSettings() {
             </div>
 
             <Tabs defaultValue="pf-esi" className="w-full">
-                <TabsList className="grid w-full grid-cols-3 mb-8 bg-slate-100/50 p-1 rounded-xl border border-slate-200">
+                <TabsList className="grid w-full grid-cols-4 mb-8 bg-slate-100/50 p-1 rounded-xl border border-slate-200">
                     <TabsTrigger value="pf-esi" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
                         <ShieldCheck className="w-4 h-4 mr-2" />
                         {t('PF / ESI')}
@@ -239,6 +297,10 @@ export default function PayrollSettings() {
                     <TabsTrigger value="it" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
                         <Percent className="w-4 h-4 mr-2" />
                         {t('Income Tax')}
+                    </TabsTrigger>
+                    <TabsTrigger value="salary-rules" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                        <CalendarDays className="w-4 h-4 mr-2" />
+                        {t('Salary Rules')}
                     </TabsTrigger>
                 </TabsList>
 
@@ -524,6 +586,139 @@ export default function PayrollSettings() {
                                     ))}
                                 </TableBody>
                             </Table>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                {/* Salary Rules Tab */}
+                <TabsContent value="salary-rules">
+                    <Card className="border-none shadow-md overflow-hidden bg-white/50 backdrop-blur-sm">
+                        <CardHeader className="bg-slate-50/50 border-b border-slate-100 p-3">
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <CardTitle className="text-sm font-bold">{t('Salary Rules')}</CardTitle>
+                                    <CardDescription className="text-[10px]">
+                                        {t('Working days and government wage rules for the active branch')}
+                                    </CardDescription>
+                                </div>
+                                {canEdit && (
+                                <Button onClick={saveSalaryRules} size="sm" className="h-8 bg-primary hover:bg-primary/90 text-xs" disabled={!activeBranchId}>
+                                    <Save className="w-3.5 h-3.5 mr-1.5" />
+                                    {t('Save Changes')}
+                                </Button>
+                                )}
+                            </div>
+                        </CardHeader>
+                        <CardContent className="p-4 space-y-4">
+                            {!activeBranchId ? (
+                                <p className="rounded-lg border border-dashed border-amber-200 bg-amber-50/80 px-3 py-2 text-[11px] text-amber-800">
+                                    {t('Select an active branch from the header to configure salary rules.')}
+                                </p>
+                            ) : (
+                                <>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{t('Active Branch')}</Label>
+                                        <Badge variant="secondary" className="text-xs">{activeBranchName}</Badge>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                                        <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/40 p-4">
+                                            <Label className="text-[11px] font-semibold">{t('Wage Zone')}</Label>
+                                            <Select
+                                                value={salaryRulesForm.wage_zone_id || 'none'}
+                                                onValueChange={(value) => setSalaryRulesForm((prev) => ({
+                                                    ...prev,
+                                                    wage_zone_id: value === 'none' ? '' : value,
+                                                }))}
+                                                disabled={!canEdit}
+                                            >
+                                                <SelectTrigger className="h-9 text-xs bg-white">
+                                                    <SelectValue placeholder={t('Select wage zone')} />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="none" className="text-xs">{t('None')}</SelectItem>
+                                                    {wageZones.map((zone: { id: number; display_label: string; working_days: number }) => (
+                                                        <SelectItem key={zone.id} value={String(zone.id)} className="text-xs">
+                                                            {zone.display_label} ({zone.working_days} {t('days')})
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <p className="text-[10px] text-muted-foreground">
+                                                {t('Links this branch to government minimum wage rates set under Skills → Set Rates.')}
+                                            </p>
+                                        </div>
+
+                                        <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/40 p-4">
+                                            <Label className="text-[11px] font-semibold">{t('Standard Working Days')}</Label>
+                                            <Input
+                                                type="number"
+                                                min="1"
+                                                max="31"
+                                                value={salaryRulesForm.standard_working_days}
+                                                onChange={(e) => setSalaryRulesForm((prev) => ({
+                                                    ...prev,
+                                                    standard_working_days: sanitizeNonNegativeNumber(e.target.value),
+                                                }))}
+                                                onKeyDown={blockMinusKey}
+                                                disabled={!canEdit}
+                                                className="h-9 text-sm bg-white"
+                                                placeholder={selectedZone ? String(selectedZone.working_days) : '26'}
+                                            />
+                                            <p className="text-[10px] text-muted-foreground">
+                                                {t('Leave empty to use wage zone default. Resolved for payroll:')}{' '}
+                                                <strong>{resolvedWorkingDays}</strong>{' '}
+                                                ({workingDaysSourceLabel(salaryRules?.working_days_source)})
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between rounded-xl border border-indigo-100 bg-indigo-50/30 p-4">
+                                        <div className="space-y-1 pr-4">
+                                            <div className="flex items-center gap-2">
+                                                <Scale className="h-4 w-4 text-indigo-700" />
+                                                <Label className="text-xs font-bold text-indigo-900">{t('Government Wage Rules')}</Label>
+                                            </div>
+                                            <p className="text-[10px] text-indigo-800/80">
+                                                {t('When ON: agreed salary is used; PF uses govt minimum. With "Salary + PF" mode, contract rate below govt min converts attendance days to govt rate and balances difference via adjust.')}
+                                            </p>
+                                        </div>
+                                        <Switch
+                                            checked={salaryRulesForm.use_government_wage_rules}
+                                            onCheckedChange={(checked) => setSalaryRulesForm((prev) => ({
+                                                ...prev,
+                                                use_government_wage_rules: checked,
+                                                govt_wage_mode: checked && prev.govt_wage_mode === 'pf_compliance' ? 'both' : prev.govt_wage_mode,
+                                            }))}
+                                            disabled={!canEdit}
+                                        />
+                                    </div>
+
+                                    {salaryRulesForm.use_government_wage_rules && (
+                                        <div className="rounded-lg border border-indigo-100 bg-white px-3 py-2">
+                                            <Label className="mb-1 block text-[10px] font-bold text-indigo-900">{t('Government wage mode')}</Label>
+                                            <Select
+                                                value={salaryRulesForm.govt_wage_mode}
+                                                onValueChange={(v) => setSalaryRulesForm((prev) => ({ ...prev, govt_wage_mode: v }))}
+                                                disabled={!canEdit}
+                                            >
+                                                <SelectTrigger className="h-8 text-xs">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="pf_compliance">{t('PF only — use govt min for PF wages')}</SelectItem>
+                                                    <SelectItem value="salary_floor">{t('Salary — convert days to govt rate + adjust')}</SelectItem>
+                                                    <SelectItem value="both">{t('Both — PF + salary day conversion')}</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    )}
+
+                                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/80 px-3 py-2 text-[10px] text-slate-600">
+                                        {t('Set skill-wise government rates under Skills → Wage Zones & Set Rates. Payroll uses the employee skill and this branch wage zone when generating.')}
+                                    </div>
+                                </>
+                            )}
                         </CardContent>
                     </Card>
                 </TabsContent>

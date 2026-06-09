@@ -17,15 +17,15 @@ class SkillsTemplateExport implements FromCollection, WithHeadings, WithStyles, 
     {
         return collect([
             [
-                'name' => 'Communication',
-                'code' => 'COMM',
+                'name' => 'Unskilled',
+                'code' => 'UNSK',
                 'status' => 'active',
             ],
             [
-                'name' => 'Technical Support',
-                'code' => 'TECH',
+                'name' => 'Semi Skilled',
+                'code' => 'SEMI',
                 'status' => 'active',
-            ]
+            ],
         ]);
     }
 

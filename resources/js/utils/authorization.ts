@@ -98,6 +98,13 @@ export const canFinalizeSalaryPayrollRuns = (userPermissions: string[]) =>
         'manage-any-salary-payroll-runs',
     ]) || hasAnyPermission(userPermissions, ['manage-employee-salaries', 'manage-any-employee-salaries']);
 
+export const canApplySalaryPayrollAttendanceExtra = (userPermissions: string[]) =>
+    hasAnyPermission(userPermissions, [
+        'apply-salary-payroll-attendance-extra',
+        'manage-salary-payroll-runs',
+        'manage-any-salary-payroll-runs',
+    ]) || hasAnyPermission(userPermissions, ['manage-employee-salaries', 'manage-any-employee-salaries']);
+
 export const canAccessEarningDeductionEntry = (userPermissions: string[]) =>
     canAccessEntity(userPermissions, 'earning-deduction-entry');
 

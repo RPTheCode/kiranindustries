@@ -25,6 +25,7 @@
         "maatwebsite/excel": "^3.1",
         "mercadopago/dx-php": "^2.5",
         "mollie/mollie-api-php": "^3.1",
+        "nick322/secure-spreadsheet": "^1.0",
         "openai-php/client": "^0.14.0",
         "paytabscom/laravel_paytabs": "^1.9",
         "phpoffice/phpword": "^1.4",

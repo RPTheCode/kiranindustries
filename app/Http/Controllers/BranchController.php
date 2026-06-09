@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Branch;
 use App\Models\Employee;
 use App\Models\Scopes\BranchScope;
+use App\Models\WageZone;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
@@ -132,6 +133,16 @@ class BranchController extends Controller
             'branches' => $branches,
             'stats' => $stats,
             'activeBranchId' => $activeBranchId,
+            'wageZones' => WageZone::query()
+                ->whereIn('created_by', getCompanyAndUsersId())
+                ->orderBy('state')
+                ->orderBy('region')
+                ->orderBy('name')
+                ->get()
+                ->map(fn (WageZone $zone) => [
+                    'id' => $zone->id,
+                    'display_label' => $zone->displayLabel(),
+                ]),
             'filters' => $filters,
         ]);
     }
@@ -150,6 +161,7 @@ class BranchController extends Controller
                 'email' => 'nullable|strict_email|max:255',
                 'in_charge_name' => 'nullable|string|max:255',
                 'in_charge_contact' => 'nullable|strict_phone',
+                'wage_zone_id' => 'nullable|integer|exists:wage_zones,id',
                 'status' => 'nullable|in:active,inactive',
             ]);
 
@@ -203,6 +215,7 @@ class BranchController extends Controller
                     'email' => 'nullable|strict_email|max:255',
                     'in_charge_name' => 'nullable|string|max:255',
                     'in_charge_contact' => 'nullable|strict_phone',
+                    'wage_zone_id' => 'nullable|integer|exists:wage_zones,id',
                     'status' => 'nullable|in:active,inactive',
                 ]);
 

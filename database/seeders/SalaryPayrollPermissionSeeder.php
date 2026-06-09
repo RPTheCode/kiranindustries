@@ -39,6 +39,7 @@ class SalaryPayrollPermissionSeeder extends Seeder
             ['name' => 'edit-salary-payroll-runs', 'label' => 'Edit Generate Payroll'],
             ['name' => 'delete-salary-payroll-runs', 'label' => 'Delete Generate Payroll'],
             ['name' => 'finalize-salary-payroll-runs', 'label' => 'Finalize Generate Payroll'],
+            ['name' => 'apply-salary-payroll-attendance-extra', 'label' => 'Apply OT No Extra Days to Net Salary'],
 
             // Earning / Deduction Entry
             ['name' => 'manage-earning-deduction-entry', 'label' => 'Manage Earning / Deduction'],

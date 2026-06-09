@@ -8,6 +8,7 @@ use App\Models\EmployeeSalary;
 use App\Models\SalaryComponent;
 use App\Models\Shift;
 use App\Models\User;
+use App\Services\SalaryPayroll\BranchPayrollSettingsService;
 use App\Services\SalaryPayroll\EmployeeSalaryRevisionService;
 use App\Services\SalaryPayroll\SalaryComponentAssignmentService;
 use App\Services\SalaryPayroll\SalaryStructureCalculator;
@@ -21,7 +22,8 @@ class SalaryPayrollEmployeeSalaryController extends Controller
     public function __construct(
         private SalaryStructureCalculator $calculator,
         private EmployeeSalaryRevisionService $revisionService,
-        private SalaryComponentAssignmentService $componentAssignment
+        private SalaryComponentAssignmentService $componentAssignment,
+        private BranchPayrollSettingsService $branchPayrollSettings
     ) {}
 
     public function index(Request $request)
@@ -76,17 +78,15 @@ class SalaryPayrollEmployeeSalaryController extends Controller
             $user->salary_record = $salary ? [
                 'id' => $salary->id,
                 'monthly_gross' => (float) ($salary->monthly_gross ?? $salary->basic_salary ?? 0),
-                'gross_input_mode' => $this->grossInputModeForProfile($emp),
+                'gross_input_mode' => $this->grossInputModeForSalary($salary),
                 'per_day_salary' => (float) ($salary->per_day_salary ?? 0),
-                'gross_display_amount' => $this->grossDisplayAmount($salary, $emp),
+                'gross_display_amount' => $this->grossDisplayAmount($salary, $emp, $emp?->branch_id),
                 'net_salary' => $this->netFromRecord($salary),
                 'is_active' => (bool) $salary->is_active,
             ] : null;
             $user->pf_applicable = (bool) ($emp?->pf_flag ?? false);
             $user->esi_applicable = (bool) ($emp?->esic_flag ?? false);
             $user->extra_salary_component_ids = $emp?->extra_salary_component_ids ?? [];
-            $user->daily_option = (bool) ($emp?->daily_option ?? false);
-            $user->working_days = $this->workingDaysFromProfile($emp);
 
             return $user;
         });
@@ -94,6 +94,10 @@ class SalaryPayrollEmployeeSalaryController extends Controller
         $salaryComponents = $this->branchSalaryComponents($branchId);
         $primaryComponents = $this->componentAssignment->primaryComponents($salaryComponents);
         $customComponents = $this->componentAssignment->customComponents($salaryComponents);
+
+        $branchPayrollSettings = $branchId
+            ? $this->branchPayrollSettings->resolve((int) $branchId)
+            : null;
 
         return Inertia::render('hr/salary-payroll/employee-salaries/index', [
             'employees' => $employees,
@@ -105,6 +109,7 @@ class SalaryPayrollEmployeeSalaryController extends Controller
             'shifts' => $this->branchShifts($branchId),
             'activeBranchId' => $branchId,
             'activeBranchName' => $branchName,
+            'branchPayrollSettings' => $branchPayrollSettings,
             'filters' => $request->all(['search', 'category_id', 'department_id', 'shift_id', 'per_page']),
             'defaultEffectiveFrom' => now()->toDateString(),
         ]);
@@ -221,7 +226,8 @@ class SalaryPayrollEmployeeSalaryController extends Controller
         }
 
         $workingDays = $this->workingDaysForEmployee($validated['employee_id'] ?? null, $validated['working_days'] ?? null);
-        $grossInputMode = $this->grossInputModeForEmployee($validated['employee_id'] ?? null);
+        $grossInputMode = $validated['gross_input_mode']
+            ?? $this->grossInputModeForEmployee($validated['employee_id'] ?? null);
         $monthlyGross = $this->resolveMonthlyGross(
             (float) ($validated['gross_amount'] ?? $validated['monthly_gross'] ?? 0),
             $grossInputMode,
@@ -285,6 +291,7 @@ class SalaryPayrollEmployeeSalaryController extends Controller
 
         $validated = $request->validate([
             'daily_option' => 'required|boolean',
+            'gross_input_mode' => 'nullable|in:day,month',
         ]);
 
         $employee = User::with('employee')->where('id', $employeeId)
@@ -296,13 +303,8 @@ class SalaryPayrollEmployeeSalaryController extends Controller
             return redirect()->back()->with('error', __('Employee does not belong to the active branch.'));
         }
 
-        $dailyOption = (bool) $validated['daily_option'];
-        $workingDays = $dailyOption ? 1 : 26;
-
-        $employee->employee?->update([
-            'daily_option' => $dailyOption,
-            'working_days' => $workingDays,
-        ]);
+        $dailyOption = (bool) ($validated['gross_input_mode'] === 'day' || $validated['daily_option']);
+        $workingDays = (int) $this->branchPayrollSettings->resolveWorkingDays((int) ($branchId ?? $employee->employee?->branch_id ?? 0));
 
         $salary = EmployeeSalary::where('employee_id', $employeeId)->first();
         if ($salary) {
@@ -314,7 +316,7 @@ class SalaryPayrollEmployeeSalaryController extends Controller
             ]);
         }
 
-        return redirect()->back()->with('success', __('Daily option updated.'));
+        return redirect()->back()->with('success', __('Salary entry mode updated.'));
     }
 
     public function store(Request $request)
@@ -395,13 +397,14 @@ class SalaryPayrollEmployeeSalaryController extends Controller
             return redirect()->back()->with('error', __('No active salary components for this branch.'));
         }
 
-        $grossInputMode = $this->grossInputModeForEmployee((int) $validated['employee_id']);
+        $grossInputMode = $validated['gross_input_mode']
+            ?? $this->grossInputModeForEmployee((int) $validated['employee_id']);
         $grossAmount = (float) ($validated['gross_amount'] ?? $validated['monthly_gross'] ?? 0);
         if ($grossAmount <= 0) {
             return redirect()->back()->with('error', __('Gross salary amount is required.'));
         }
 
-        $workingDays = $this->workingDaysForEmployee((int) $validated['employee_id']);
+        $workingDays = (int) $this->branchPayrollSettings->resolveWorkingDays((int) ($branchId ?? $employee->employee?->branch_id ?? 0));
         $monthlyGross = $this->resolveMonthlyGross($grossAmount, $grossInputMode, $workingDays);
         $perDaySalary = $grossInputMode === 'day'
             ? round($grossAmount, 2)
@@ -433,7 +436,7 @@ class SalaryPayrollEmployeeSalaryController extends Controller
         return redirect()->back()->with('success', __('Employee salary saved successfully.'));
     }
 
-    private function grossDisplayAmount(?EmployeeSalary $salary, $empProfile): float
+    private function grossDisplayAmount(?EmployeeSalary $salary, $empProfile, ?int $branchId = null): float
     {
         if (! $salary) {
             return 0;
@@ -444,8 +447,13 @@ class SalaryPayrollEmployeeSalaryController extends Controller
             return 0;
         }
 
-        if ($this->grossInputModeForProfile($empProfile) === 'day') {
-            $days = $this->workingDaysFromProfile($empProfile);
+        if ($this->grossInputModeForSalary($salary) === 'day') {
+            if ((float) ($salary->per_day_salary ?? 0) > 0) {
+                return (float) $salary->per_day_salary;
+            }
+            $days = $branchId
+                ? (int) $this->branchPayrollSettings->resolveWorkingDays($branchId)
+                : BranchPayrollSettingsService::DEFAULT_WORKING_DAYS;
 
             return round($monthly / max(1, $days), 2);
         }
@@ -453,9 +461,14 @@ class SalaryPayrollEmployeeSalaryController extends Controller
         return $monthly;
     }
 
+    private function grossInputModeForSalary(?EmployeeSalary $salary): string
+    {
+        return $salary?->gross_input_mode === 'day' ? 'day' : 'month';
+    }
+
     private function grossInputModeForProfile($empProfile): string
     {
-        return ($empProfile?->daily_option ?? false) ? 'day' : 'month';
+        return 'month';
     }
 
     private function grossInputModeForEmployee(?int $userId): string
@@ -464,19 +477,18 @@ class SalaryPayrollEmployeeSalaryController extends Controller
             return 'month';
         }
 
-        $employee = User::with('employee')->find($userId);
+        $salary = EmployeeSalary::where('employee_id', $userId)->first();
 
-        return $this->grossInputModeForProfile($employee?->employee);
+        return $this->grossInputModeForSalary($salary);
     }
 
-    private function workingDaysFromProfile($empProfile): int
+    private function workingDaysForBranch(?int $branchId): int
     {
-        $days = (int) ($empProfile?->working_days ?? 0);
-        if ($days > 0) {
-            return $days;
+        if (! $branchId) {
+            return (int) BranchPayrollSettingsService::DEFAULT_WORKING_DAYS;
         }
 
-        return ($empProfile?->daily_option ?? false) ? 1 : 26;
+        return (int) $this->branchPayrollSettings->resolveWorkingDays($branchId);
     }
 
     private function workingDaysForEmployee(?int $userId, ?int $override = null): int
@@ -486,12 +498,12 @@ class SalaryPayrollEmployeeSalaryController extends Controller
         }
 
         if (! $userId) {
-            return 26;
+            return (int) BranchPayrollSettingsService::DEFAULT_WORKING_DAYS;
         }
 
         $employee = User::with('employee')->find($userId);
 
-        return $this->workingDaysFromProfile($employee?->employee);
+        return $this->workingDaysForBranch($employee?->employee?->branch_id);
     }
 
     private function resolveMonthlyGross(float $amount, string $mode, int $workingDays): float

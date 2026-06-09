@@ -27,6 +27,7 @@ class SkillsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOnFa
     {
         $this->rowsSaved++;
         $this->savedNumbers[] = $this->currentRow;
+
         return new Skill([
             'name' => $row['name'],
             'code' => $row['code'],

@@ -2,9 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Branch;
 use App\Models\IncomeTaxSlab;
 use App\Models\PayrollParameter;
 use App\Models\ProfessionalTaxSlab;
+use App\Models\WageZone;
+use App\Services\SalaryPayroll\BranchPayrollSettingsService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
@@ -28,6 +31,29 @@ class PayrollSettingController extends Controller
         $ptSlabs = $this->resolvePtSlabsForYear($selectedYear);
         $itSlabs = $this->resolveItSlabsForYear($selectedYear);
 
+        $activeBranchId = session('active_branch_id');
+        $activeBranch = $activeBranchId
+            ? Branch::with('wageZone')->find($activeBranchId)
+            : null;
+
+        $wageZones = WageZone::query()
+            ->whereIn('created_by', getCompanyAndUsersId())
+            ->orderBy('state')
+            ->orderBy('region')
+            ->orderBy('name')
+            ->get()
+            ->map(fn (WageZone $zone) => [
+                'id' => $zone->id,
+                'name' => $zone->name,
+                'display_label' => $zone->displayLabel(),
+                'working_days' => (int) $zone->working_days,
+                'status' => (bool) $zone->status,
+            ]);
+
+        $salaryRules = $activeBranchId
+            ? app(BranchPayrollSettingsService::class)->resolve((int) $activeBranchId, $selectedYear)
+            : null;
+
         return Inertia::render('hr/payroll-settings/index', [
             'parameters' => $parameters,
             'ptSlabs' => $ptSlabs,
@@ -36,7 +62,43 @@ class PayrollSettingController extends Controller
             'defaultFinancialYear' => $defaultFinancialYear,
             'nextFinancialYear' => nextFinancialYearLabel(),
             'financialYearOptions' => $financialYearOptions,
+            'activeBranchId' => $activeBranchId,
+            'activeBranchName' => $activeBranch?->name,
+            'wageZones' => $wageZones,
+            'salaryRules' => $salaryRules,
         ]);
+    }
+
+    public function updateSalaryRules(Request $request)
+    {
+        $activeBranchId = session('active_branch_id');
+        if (! $activeBranchId) {
+            return redirect()
+                ->back()
+                ->with('error', __('Select an active branch from the header first.'));
+        }
+
+        $branch = Branch::where('id', $activeBranchId)
+            ->whereIn('created_by', getCompanyAndUsersId())
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'wage_zone_id' => 'nullable|integer|exists:wage_zones,id',
+            'standard_working_days' => 'nullable|integer|min:1|max:31',
+            'use_government_wage_rules' => 'nullable|boolean',
+            'govt_wage_mode' => 'nullable|string|in:pf_compliance,salary_floor,both',
+        ]);
+
+        $branch->update([
+            'wage_zone_id' => $validated['wage_zone_id'] ?? null,
+            'standard_working_days' => $validated['standard_working_days'] ?? null,
+            'use_government_wage_rules' => (bool) ($validated['use_government_wage_rules'] ?? false),
+            'govt_wage_mode' => $validated['govt_wage_mode'] ?? BranchPayrollSettingsService::DEFAULT_GOVT_WAGE_MODE,
+        ]);
+
+        return redirect()
+            ->route('hr.payroll-settings.index', ['financial_year' => $request->input('financial_year')])
+            ->with('success', __('Salary rules updated for :branch.', ['branch' => $branch->name]));
     }
 
     public function updateParameters(Request $request)

@@ -21,10 +21,17 @@ class SalaryPayrollAttendanceService
      *     mispunch_dates: array<int, string>
      * }
      */
-    public function summarize(User $employee, Carbon $periodStart, Carbon $periodEnd, ?int $branchId = null): array
-    {
+    public function summarize(
+        User $employee,
+        Carbon $periodStart,
+        Carbon $periodEnd,
+        ?int $branchId = null,
+        ?float $salaryStandardDays = null
+    ): array {
         $emp = $employee->employee;
-        $salaryStandardDays = 26.0;
+        $salaryStandardDays = ($salaryStandardDays !== null && $salaryStandardDays > 0)
+            ? $salaryStandardDays
+            : 26.0;
 
         $codes = array_values(array_unique(array_filter([
             trim((string) ($emp?->emy_code ?? '')),
