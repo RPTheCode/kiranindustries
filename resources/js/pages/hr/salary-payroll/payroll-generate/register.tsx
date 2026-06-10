@@ -1,9 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { PageTemplate } from '@/components/page-template';
 import { Link, router, usePage } from '@inertiajs/react';
 import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
   FileDown,
   LayoutGrid,
   Search,
@@ -47,6 +51,8 @@ interface RegisterRow {
   working_days: number;
   present_days: number;
   paid_days: number;
+  actual_paid_days?: number;
+  govt_wage_salary_applied?: boolean;
   week_off_worked_days: number;
   half_days: number;
   incentive_days: number;
@@ -78,6 +84,96 @@ function formatNum(value: number) {
 const stickyHead = 'sticky z-20 bg-slate-100 shadow-[2px_0_0_0_#e2e8f0]';
 const stickyCell = 'sticky z-10 bg-white shadow-[2px_0_0_0_#f1f5f9] group-hover:bg-slate-50';
 const stickyCellAlt = 'sticky z-10 bg-slate-50/80 shadow-[2px_0_0_0_#f1f5f9]';
+const stickyRightHead = 'sticky z-20 bg-green-100 shadow-[-2px_0_0_0_#86efac]';
+const stickyRightCell = 'sticky z-[15] bg-green-50 shadow-[-2px_0_0_0_#bbf7d0] group-hover:bg-green-100/60';
+const stickyRightCellAlt = 'sticky z-[15] bg-green-50/90 shadow-[-2px_0_0_0_#bbf7d0]';
+const stickyRightTotal = 'sticky z-[15] bg-slate-200 shadow-[-2px_0_0_0_#94a3b8]';
+
+const SCROLLBAR_STYLES = `
+  .payroll-register-scroll {
+    scrollbar-width: auto;
+    scrollbar-color: #94a3b8 #e2e8f0;
+  }
+  .payroll-register-scroll::-webkit-scrollbar {
+    width: 14px;
+    height: 14px;
+  }
+  .payroll-register-scroll::-webkit-scrollbar-track {
+    background: #e2e8f0;
+    border-radius: 7px;
+  }
+  .payroll-register-scroll::-webkit-scrollbar-thumb {
+    background: #94a3b8;
+    border-radius: 7px;
+    border: 3px solid #e2e8f0;
+  }
+  .payroll-register-scroll::-webkit-scrollbar-thumb:hover {
+    background: #64748b;
+  }
+  .payroll-register-scroll::-webkit-scrollbar-corner {
+    background: #e2e8f0;
+  }
+`;
+
+type ScrollMeta = {
+  canLeft: boolean;
+  canRight: boolean;
+  canUp: boolean;
+  canDown: boolean;
+};
+
+function RegisterScrollBar({
+  meta,
+  onScrollBy,
+  onJump,
+  t,
+}: {
+  meta: ScrollMeta;
+  onScrollBy: (dx: number, dy: number) => void;
+  onJump: (section: 'start' | 'attendance' | 'earnings' | 'deductions' | 'net') => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-1">
+        <Button type="button" variant="outline" size="sm" className="h-7 w-7 p-0" disabled={!meta.canLeft} onClick={() => onScrollBy(-280, 0)} title={t('Scroll left')}>
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <Button type="button" variant="outline" size="sm" className="h-7 w-7 p-0" disabled={!meta.canRight} onClick={() => onScrollBy(280, 0)} title={t('Scroll right')}>
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+        <Button type="button" variant="outline" size="sm" className="h-7 w-7 p-0" disabled={!meta.canUp} onClick={() => onScrollBy(0, -200)} title={t('Scroll up')}>
+          <ChevronUp className="h-4 w-4" />
+        </Button>
+        <Button type="button" variant="outline" size="sm" className="h-7 w-7 p-0" disabled={!meta.canDown} onClick={() => onScrollBy(0, 200)} title={t('Scroll down')}>
+          <ChevronDown className="h-4 w-4" />
+        </Button>
+        <span className="mx-1 hidden h-4 w-px bg-slate-300 sm:inline" />
+        {([
+          ['start', t('Start')],
+          ['attendance', t('Attendance')],
+          ['earnings', t('Salary')],
+          ['deductions', t('Deductions')],
+          ['net', t('Net')],
+        ] as const).map(([section, label]) => (
+          <Button
+            key={section}
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-[10px] font-semibold text-slate-600"
+            onClick={() => onJump(section)}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
+      <p className="text-[10px] text-slate-500">
+        {t('Wheel = vertical · Shift/Alt + wheel = horizontal · Name & Net stay fixed')}
+      </p>
+    </div>
+  );
+}
 
 export default function PayrollGenerateRegister() {
   const { t } = useTranslation();
@@ -100,11 +196,75 @@ export default function PayrollGenerateRegister() {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showFilePassword, setShowFilePassword] = useState(false);
   const [showFilePasswordConfirmation, setShowFilePasswordConfirmation] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollMeta, setScrollMeta] = useState<ScrollMeta>({
+    canLeft: false,
+    canRight: false,
+    canUp: false,
+    canDown: false,
+  });
 
   const earningColumns: string[] = register?.earning_columns ?? [];
   const deductionColumns: string[] = register?.deduction_columns ?? [];
   const rows: RegisterRow[] = register?.rows ?? [];
   const totals = register?.totals ?? {};
+
+  const refreshScrollMeta = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setScrollMeta({
+      canLeft: el.scrollLeft > 4,
+      canRight: el.scrollLeft + el.clientWidth < el.scrollWidth - 4,
+      canUp: el.scrollTop > 4,
+      canDown: el.scrollTop + el.clientHeight < el.scrollHeight - 4,
+    });
+  };
+
+  const scrollBy = (dx: number, dy: number) => {
+    scrollRef.current?.scrollBy({ left: dx, top: dy, behavior: 'smooth' });
+  };
+
+  const jumpToSection = (section: 'start' | 'attendance' | 'earnings' | 'deductions' | 'net') => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    if (section === 'start') {
+      el.scrollTo({ left: 0, top: el.scrollTop, behavior: 'smooth' });
+      return;
+    }
+    if (section === 'net') {
+      el.scrollTo({ left: el.scrollWidth - el.clientWidth, top: el.scrollTop, behavior: 'smooth' });
+      return;
+    }
+
+    const target = el.querySelector(`[data-register-section="${section}"]`) as HTMLElement | null;
+    if (target) {
+      el.scrollTo({ left: Math.max(0, target.offsetLeft - 300), top: el.scrollTop, behavior: 'smooth' });
+    }
+  };
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if ((e.shiftKey || e.altKey) && e.deltaY !== 0) {
+        el.scrollLeft += e.deltaY;
+        e.preventDefault();
+      }
+    };
+
+    refreshScrollMeta();
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('scroll', refreshScrollMeta);
+    window.addEventListener('resize', refreshScrollMeta);
+
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('scroll', refreshScrollMeta);
+      window.removeEventListener('resize', refreshScrollMeta);
+    };
+  }, [rows.length, earningColumns.length, deductionColumns.length]);
 
   const categoryFilter = filters.category_id ? String(filters.category_id) : 'all';
   const shiftFilter = filters.shift_id ? String(filters.shift_id) : 'all';
@@ -249,6 +409,7 @@ export default function PayrollGenerateRegister() {
       breadcrumbs={breadcrumbs}
       noPadding
     >
+      <style>{SCROLLBAR_STYLES}</style>
       <div className="mx-auto max-w-full space-y-3 px-1 pb-6">
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
           <div>
@@ -311,48 +472,76 @@ export default function PayrollGenerateRegister() {
           )}
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm">
-          <div className="overflow-auto max-h-[calc(100vh-280px)]">
+        <div className="relative overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm">
+          {scrollMeta.canLeft && (
+            <div
+              className="pointer-events-none absolute left-[288px] top-0 z-[25] h-[calc(100%-48px)] w-8 bg-gradient-to-r from-slate-900/10 to-transparent"
+              aria-hidden
+            />
+          )}
+          {scrollMeta.canRight && (
+            <div
+              className="pointer-events-none absolute right-[88px] top-0 z-[25] h-[calc(100%-48px)] w-8 bg-gradient-to-l from-slate-900/10 to-transparent"
+              aria-hidden
+            />
+          )}
+          <div
+            ref={scrollRef}
+            className="payroll-register-scroll w-full max-h-[calc(100vh-260px)] min-h-[320px] overflow-auto"
+          >
             <table className="min-w-max w-full border-collapse">
               <thead className="sticky top-0 z-30 bg-slate-100">
+                <tr className="bg-slate-200/80">
+                  <th className={cn(th, stickyHead, 'sticky top-0 left-0 z-[45] min-w-[36px]')} colSpan={3} />
+                  <th className={cn(th, 'min-w-[270px] text-center text-[9px] font-bold uppercase text-slate-500')} colSpan={3}>{t('Employee')}</th>
+                  <th className={cn(th, 'min-w-[162px] text-center text-[9px] font-bold uppercase text-slate-500')} colSpan={2}>{t('Rate')}</th>
+                  <th className={cn(th, 'min-w-[40px] text-center text-[9px] font-bold uppercase text-slate-500')} data-register-section="attendance">{t('OT')}</th>
+                  <th className={cn(th, 'min-w-[240px] text-center text-[9px] font-bold uppercase text-sky-800 bg-sky-50/80')} colSpan={5} data-register-section="attendance">{t('Attendance')}</th>
+                  <th className={cn(th, 'min-w-[120px] text-center text-[9px] font-bold uppercase text-violet-800 bg-violet-50/80')} colSpan={2}>{t('Incentive')}</th>
+                  <th className={cn(th, 'min-w-[120px] text-center text-[9px] font-bold uppercase text-sky-800 bg-sky-50/80')} colSpan={2}>{t('Adjust')}</th>
+                  <th className={cn(th, 'min-w-[80px] text-center text-[9px] font-bold uppercase text-emerald-800 bg-emerald-50/80')} colSpan={Math.max(1, earningColumns.length + 2)} data-register-section="earnings">{t('Earnings')}</th>
+                  <th className={cn(th, 'min-w-[80px] text-center text-[9px] font-bold uppercase text-rose-800 bg-rose-50/80')} colSpan={Math.max(1, deductionColumns.length + 1)} data-register-section="deductions">{t('Deductions')}</th>
+                  <th className={cn(th, 'min-w-[292px] text-center text-[9px] font-bold uppercase text-slate-500')} colSpan={3}>{t('Statutory & Bank')}</th>
+                  <th className={cn(th, stickyRightHead, 'sticky top-0 right-0 z-[45] min-w-[88px] text-green-900')} data-register-section="net">{t('Net')}</th>
+                </tr>
                 <tr>
-                  <th className={cn(th, stickyHead, 'left-0 min-w-[36px]')}>#</th>
-                  <th className={cn(th, stickyHead, 'left-[36px] min-w-[72px]')}>{t('Code')}</th>
-                  <th className={cn(th, stickyHead, 'left-[108px] min-w-[180px]')}>{t('Name')}</th>
+                  <th className={cn(th, stickyHead, 'sticky top-[29px] left-0 z-[45] min-w-[36px]')}>#</th>
+                  <th className={cn(th, stickyHead, 'sticky top-[29px] left-[36px] z-[45] min-w-[72px]')}>{t('Code')}</th>
+                  <th className={cn(th, stickyHead, 'sticky top-[29px] left-[108px] z-[45] min-w-[180px]')}>{t('Name')}</th>
                   <th className={cn(th, 'min-w-[80px]')}>{t('Category')}</th>
                   <th className={cn(th, 'min-w-[100px]')}>{t('Department')}</th>
                   <th className={cn(th, 'min-w-[90px]')}>{t('Shift')}</th>
                   <th className={cn(th, 'min-w-[72px]')}>{t('Day Rate')}</th>
                   <th className={cn(th, 'min-w-[80px]')}>{t('CTC')}</th>
-                  <th className={cn(th, 'min-w-[40px]')}>{t('OT')}</th>
-                  <th className={cn(th, 'min-w-[48px]')}>{t('Work')}</th>
-                  <th className={cn(th, 'min-w-[48px]')}>{t('Present')}</th>
-                  <th className={cn(th, 'min-w-[48px]')}>{t('Paid')}</th>
-                  <th className={cn(th, 'min-w-[48px]')}>{t('WO')}</th>
-                  <th className={cn(th, 'min-w-[48px]')}>{t('HD')}</th>
-                  <th className={cn(th, 'min-w-[48px]')}>{t('PI')}</th>
-                  <th className={cn(th, 'min-w-[72px]')}>{t('PI Amt')}</th>
-                  <th className={cn(th, 'min-w-[48px] bg-sky-50 text-sky-900')}>{t('Adj')}</th>
-                  <th className={cn(th, 'min-w-[72px] bg-sky-50 text-sky-900')}>{t('Adjust')}</th>
+                  <th className={cn(th, 'sticky top-[29px] z-30 min-w-[40px]')}>{t('OT')}</th>
+                  <th className={cn(th, 'sticky top-[29px] z-30 min-w-[48px]')}>{t('Work')}</th>
+                  <th className={cn(th, 'sticky top-[29px] z-30 min-w-[48px]')}>{t('Present')}</th>
+                  <th className={cn(th, 'sticky top-[29px] z-30 min-w-[48px]')}>{t('Paid')}</th>
+                  <th className={cn(th, 'sticky top-[29px] z-30 min-w-[48px]')}>{t('WO')}</th>
+                  <th className={cn(th, 'sticky top-[29px] z-30 min-w-[48px]')}>{t('HD')}</th>
+                  <th className={cn(th, 'sticky top-[29px] z-30 min-w-[48px]')}>{t('PI')}</th>
+                  <th className={cn(th, 'sticky top-[29px] z-30 min-w-[72px]')}>{t('PI Amt')}</th>
+                  <th className={cn(th, 'sticky top-[29px] z-30 min-w-[48px] bg-sky-50 text-sky-900')}>{t('Adj')}</th>
+                  <th className={cn(th, 'sticky top-[29px] z-30 min-w-[72px] bg-sky-50 text-sky-900')}>{t('Adjust')}</th>
                   {earningColumns.map((col) => (
-                    <th key={col} className={cn(th, 'min-w-[80px] bg-emerald-50 text-emerald-900')}>{col}</th>
+                    <th key={col} className={cn(th, 'sticky top-[29px] z-30 min-w-[80px] bg-emerald-50 text-emerald-900')}>{col}</th>
                   ))}
-                  <th className={cn(th, 'min-w-[88px] bg-emerald-50 text-emerald-900')}>{t('Regular')}</th>
-                  <th className={cn(th, 'min-w-[88px] bg-emerald-100 text-emerald-900')}>{t('Total')}</th>
+                  <th className={cn(th, 'sticky top-[29px] z-30 min-w-[88px] bg-emerald-50 text-emerald-900')}>{t('Regular')}</th>
+                  <th className={cn(th, 'sticky top-[29px] z-30 min-w-[88px] bg-emerald-100 text-emerald-900')}>{t('Total')}</th>
                   {deductionColumns.map((col) => (
-                    <th key={col} className={cn(th, 'min-w-[80px] bg-rose-50 text-rose-900')}>{col}</th>
+                    <th key={col} className={cn(th, 'sticky top-[29px] z-30 min-w-[80px] bg-rose-50 text-rose-900')}>{col}</th>
                   ))}
-                  <th className={cn(th, 'min-w-[80px] bg-rose-100 text-rose-900')}>{t('Deductions')}</th>
-                  <th className={cn(th, 'min-w-[88px] bg-green-100 text-green-900')}>{t('Net')}</th>
-                  <th className={cn(th, 'min-w-[72px]')}>{t('PF Wages')}</th>
-                  <th className={cn(th, 'min-w-[100px]')}>{t('Bank')}</th>
-                  <th className={cn(th, 'min-w-[120px]')}>{t('Account')}</th>
+                  <th className={cn(th, 'sticky top-[29px] z-30 min-w-[80px] bg-rose-100 text-rose-900')}>{t('Deductions')}</th>
+                  <th className={cn(th, 'sticky top-[29px] z-30 min-w-[72px]')}>{t('PF Wages')}</th>
+                  <th className={cn(th, 'sticky top-[29px] z-30 min-w-[100px]')}>{t('Bank')}</th>
+                  <th className={cn(th, 'sticky top-[29px] z-30 min-w-[120px]')}>{t('Account')}</th>
+                  <th className={cn(th, stickyRightHead, 'sticky top-[29px] right-0 z-[45] min-w-[88px] text-green-900')}>{t('Net')}</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={20 + earningColumns.length + deductionColumns.length} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                    <td colSpan={21 + earningColumns.length + deductionColumns.length} className="px-4 py-12 text-center text-sm text-muted-foreground">
                       {t('No employees found.')}
                     </td>
                   </tr>
@@ -369,7 +558,17 @@ export default function PayrollGenerateRegister() {
                     <td className={cn(td, 'text-center')}>{row.ot_enabled ? t('Y') : t('N')}</td>
                     <td className={tdNum}>{formatNum(row.working_days)}</td>
                     <td className={tdNum}>{formatNum(row.present_days)}</td>
-                    <td className={tdNum}>{formatNum(row.paid_days)}</td>
+                    <td
+                      className={cn(tdNum, row.govt_wage_salary_applied && Number(row.actual_paid_days ?? 0) > Number(row.paid_days ?? 0) ? 'text-indigo-800' : '')}
+                      title={row.govt_wage_salary_applied && Number(row.actual_paid_days ?? 0) > Number(row.paid_days ?? 0)
+                        ? t('Attendance {{actual}} → govt {{govt}} paid days', {
+                            actual: formatNum(row.actual_paid_days ?? row.paid_days),
+                            govt: formatNum(row.paid_days),
+                          })
+                        : undefined}
+                    >
+                      {formatNum(row.paid_days)}
+                    </td>
                     <td className={tdNum}>{formatNum(row.week_off_worked_days)}</td>
                     <td className={tdNum}>{formatNum(row.half_days)}</td>
                     <td className={tdNum}>{formatNum(row.incentive_days)}</td>
@@ -388,10 +587,14 @@ export default function PayrollGenerateRegister() {
                       <td key={col} className={cn(tdNum, 'bg-rose-50/30')}>{formatRupee(row.deductions[col] ?? 0)}</td>
                     ))}
                     <td className={cn(tdNum, 'bg-rose-50/50 font-semibold text-rose-800')}>{formatRupee(row.total_deductions)}</td>
-                    <td className={cn(tdNum, 'bg-green-50 font-bold text-green-800')}>{formatRupee(row.net_salary)}</td>
                     <td className={tdNum}>{formatRupee(row.pf_wages)}</td>
                     <td className={tdText}>{row.bank_name || '—'}</td>
                     <td className={tdText}>{row.account_number || '—'}</td>
+                    <td className={cn(
+                      tdNum,
+                      'right-0 font-bold text-green-800',
+                      idx % 2 === 1 ? stickyRightCellAlt : stickyRightCell,
+                    )}>{formatRupee(row.net_salary)}</td>
                   </tr>
                 ))}
                 {rows.length > 0 && (
@@ -404,24 +607,26 @@ export default function PayrollGenerateRegister() {
                     {earningColumns.map((col) => (
                       <td key={col} className={tdNum}>{formatRupee(totals.earnings?.[col] ?? 0)}</td>
                     ))}
-                    <td className={td} />
+                    <td className={tdNum}>{formatRupee(totals.regular_earnings ?? 0)}</td>
                     <td className={tdNum}>{formatRupee(totals.total_earnings ?? 0)}</td>
                     {deductionColumns.map((col) => (
                       <td key={col} className={tdNum}>{formatRupee(totals.deductions?.[col] ?? 0)}</td>
                     ))}
                     <td className={tdNum}>{formatRupee(totals.total_deductions ?? 0)}</td>
-                    <td className={cn(tdNum, 'text-green-800')}>{formatRupee(totals.net_salary ?? 0)}</td>
                     <td className={td} colSpan={3} />
+                    <td className={cn(tdNum, stickyRightTotal, 'right-0 text-green-800')}>{formatRupee(totals.net_salary ?? 0)}</td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
+          <RegisterScrollBar
+            meta={scrollMeta}
+            onScrollBy={scrollBy}
+            onJump={jumpToSection}
+            t={t}
+          />
         </div>
-
-        <p className="text-center text-[10px] text-muted-foreground">
-          {t('Scroll horizontally for all columns · Sticky name columns · Download exports password-protected Excel')}
-        </p>
       </div>
 
       <Dialog open={downloadOpen} onOpenChange={(open) => { setDownloadOpen(open); if (!open) resetDownloadForm(); }}>

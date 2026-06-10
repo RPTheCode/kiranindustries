@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 
 export interface PayrollEntryBreakdown {
   monthly_gross: number;
+  gross_input_mode?: string;
   daily_option?: boolean;
   employee_working_days?: number;
   total_earnings: number;
@@ -96,14 +97,74 @@ export function formatDays(value: number) {
 }
 
 /** When govt wage conversion changes paid days (e.g. attendance 23 → govt 22). */
+export function resolveActualPaidDays(entry: {
+  govt_wage_salary_applied?: boolean;
+  actual_paid_days?: number;
+  govt_wage_paid_days?: number | null;
+  paid_days?: number;
+  contract_regular_earnings?: number | null;
+  incentive_per_day_rate?: number;
+  monthly_gross?: number;
+  working_days?: number;
+  present_days?: number;
+  week_off_worked_days?: number;
+  ot_enabled?: boolean;
+  gross_input_mode?: string;
+  daily_option?: boolean;
+}): number {
+  const govt = Number(entry.govt_wage_paid_days ?? entry.paid_days ?? 0);
+  const stored = Number(entry.actual_paid_days ?? 0);
+
+  if (!entry.govt_wage_salary_applied) {
+    return stored > 0 ? stored : govt;
+  }
+
+  if (stored > govt + 0.009) {
+    return stored;
+  }
+
+  const contract = Number(entry.contract_regular_earnings ?? 0);
+  const workingDays = Math.max(1, Number(entry.working_days ?? 26) || 26);
+  const perDay = Number(entry.incentive_per_day_rate ?? 0)
+    || (entry.gross_input_mode === 'day' || entry.daily_option
+      ? Number(entry.monthly_gross ?? 0)
+      : Number(entry.monthly_gross ?? 0) / workingDays);
+  if (contract > 0 && perDay > 0) {
+    const derived = Math.round((contract / perDay) * 100) / 100;
+    if (derived > govt + 0.009) {
+      return derived;
+    }
+  }
+
+  const present = Number(entry.present_days ?? 0);
+  const weekOff = Number(entry.week_off_worked_days ?? 0);
+  const otEnabled = Boolean(entry.ot_enabled);
+  const attendanceOnly = Math.min(present, workingDays) + weekOff;
+  const attendancePaid = otEnabled ? Math.min(attendanceOnly, workingDays) : (attendanceOnly > workingDays ? workingDays : attendanceOnly);
+  if (attendancePaid > govt + 0.009) {
+    return attendancePaid;
+  }
+
+  return stored > 0 ? stored : govt;
+}
+
 export function resolveGovtAttendanceDayChange(entry: {
   govt_wage_salary_applied?: boolean;
   actual_paid_days?: number;
   govt_wage_paid_days?: number | null;
   paid_days?: number;
+  contract_regular_earnings?: number | null;
+  incentive_per_day_rate?: number;
+  monthly_gross?: number;
+  working_days?: number;
+  present_days?: number;
+  week_off_worked_days?: number;
+  ot_enabled?: boolean;
+  gross_input_mode?: string;
+  daily_option?: boolean;
 }): { actual: number; govt: number } | null {
   if (!entry.govt_wage_salary_applied) return null;
-  const actual = Number(entry.actual_paid_days ?? entry.paid_days ?? 0);
+  const actual = resolveActualPaidDays(entry);
   const govt = Number(entry.govt_wage_paid_days ?? entry.paid_days ?? 0);
   if (actual <= 0 || Math.abs(actual - govt) < 0.01) return null;
   return { actual, govt };
@@ -170,19 +231,19 @@ export function attendanceDaysBadgeDescription(
 ): string | null {
   switch (tone) {
     case 'govt_adjusted':
-      return t('Indigo — govt min wage: {{actual}} attendance → {{govt}} paid days', {
+      return t('Govt min wage: {{actual}} attendance → {{govt}} paid days', {
         actual: opts?.actual ?? '',
         govt: opts?.govt ?? '',
       });
     case 'partial':
-      return t('Blue — partial month: {{paid}} paid of {{working}} working days', {
+      return t('Partial month — {{paid}} of {{working}} working days', {
         paid: opts?.paid ?? '',
         working: opts?.working ?? 26,
       });
     case 'full':
-      return t('Green — full paid days for this month');
+      return t('Full month — all working days paid');
     case 'empty':
-      return t('Grey — no paid days');
+      return t('No paid days this month');
     default:
       return null;
   }
@@ -212,6 +273,26 @@ function componentEarningLines(breakdown?: Record<string, number>): [string, num
   return Object.entries(breakdown)
     .filter(([name, amount]) => !isIncentiveLine(name) && Number(amount) > 0)
     .sort(([a], [b]) => componentSortKey(a).localeCompare(componentSortKey(b)));
+}
+
+function scaleEarningLinesToTarget(lines: [string, number][], targetTotal: number): [string, number][] {
+  if (lines.length === 0 || targetTotal <= 0) return lines;
+  const currentTotal = lines.reduce((sum, [, amount]) => sum + Number(amount), 0);
+  if (currentTotal <= 0) return lines;
+
+  const scaled = lines.map(([name, amount]) => [
+    name,
+    Math.round(Number(amount) / currentTotal * targetTotal),
+  ] as [string, number]);
+  const scaledSum = scaled.reduce((sum, [, amount]) => sum + amount, 0);
+  const diff = Math.round(targetTotal - scaledSum);
+  if (diff !== 0) {
+    const adjustIndex = scaled.findIndex(([name]) => name.toUpperCase().includes('BASIC'));
+    const idx = adjustIndex >= 0 ? adjustIndex : 0;
+    scaled[idx] = [scaled[idx][0], Math.max(0, scaled[idx][1] + diff)];
+  }
+
+  return scaled;
 }
 
 function breakdownLines(breakdown?: Record<string, number>) {
@@ -342,27 +423,54 @@ function EarningsBreakdownPanel({
   const workingDays = Math.max(1, Number(entry.working_days ?? 26) || 26);
   const monthlyGross = Number(entry.monthly_gross ?? 0);
   const perDayRate = Number(entry.incentive_per_day_rate ?? 0) || (workingDays > 0 ? Math.round((monthlyGross / workingDays) * 100) / 100 : 0);
-  const regularEarnings = Number(entry.regular_earnings ?? 0) || componentLines.reduce((sum, [, amt]) => sum + Number(amt), 0);
+  const govtApplied = Boolean(entry.govt_wage_salary_applied);
+  const contractEarnings = Number(entry.contract_regular_earnings ?? entry.regular_earnings ?? 0);
+  const govtSalary = Number(entry.govt_wage_computed_earnings ?? entry.total_earnings ?? 0);
+  const contractDays = govtApplied ? resolveActualPaidDays(entry) : Number(entry.paid_days ?? 0);
+  const govtDays = Number(entry.govt_wage_paid_days ?? entry.paid_days ?? 0);
+  const govtRate = Number(entry.govt_wage_rate_for_salary ?? Math.round(Number(entry.govt_min_wage_per_day ?? 0)));
+  const contractPerDay = entry.gross_input_mode === 'day' || entry.daily_option
+    ? monthlyGross
+    : perDayRate;
+  const regularEarnings = govtApplied
+    ? contractEarnings
+    : (Number(entry.regular_earnings ?? 0) || componentLines.reduce((sum, [, amt]) => sum + Number(amt), 0));
+  const displayComponentLines = govtApplied && contractEarnings > 0 && govtSalary > 0
+    ? scaleEarningLinesToTarget(componentLines, contractEarnings)
+    : componentLines;
   const hasIncentive = otEnabled && incentiveDays > 0 && incentiveAmount > 0;
   const hasAttendanceExtra = !otEnabled && attendanceExtraDays > 0 && attendanceExtraAmount > 0;
+  const regularSalaryLabel = govtApplied
+    ? t('Contract salary ({{days}} days × ₹{{rate}})', { days: formatDays(contractDays), rate: formatRupee(contractPerDay) })
+    : t('Regular Salary ({{days}} days)', { days: formatDays(Number(entry.paid_days ?? 0)) });
 
   return (
     <div className="min-w-0 rounded-md border border-slate-200 bg-white">
       <div className="bg-green-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-green-800">{t('Earnings')}</div>
       <div className="divide-y divide-slate-100">
-        {componentLines.length === 0 ? (
+        {displayComponentLines.length === 0 ? (
           <p className="px-2.5 py-2 text-[10px] text-slate-400">—</p>
-        ) : componentLines.map(([name, amount]) => (
+        ) : displayComponentLines.map(([name, amount]) => (
           <div key={name} className="flex items-center justify-between gap-2 px-2.5 py-1 text-[11px]">
             <span className="truncate text-slate-700">{name}</span>
             <span className="shrink-0 tabular-nums font-medium text-slate-900">₹{fmt(Number(amount))}</span>
           </div>
         ))}
       </div>
-      <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/80 px-2.5 py-1 text-[11px] font-semibold text-slate-800">
-        <span>{t('Regular Salary')} ({workingDays} {t('days')})</span>
+      <div className={cn(
+        'flex items-center justify-between border-t border-slate-200 px-2.5 py-1 text-[11px] font-semibold',
+        govtApplied ? 'bg-indigo-50/80 text-indigo-950' : 'bg-slate-50/80 text-slate-800',
+      )}>
+        <span>{regularSalaryLabel}</span>
         <span className="tabular-nums">₹{fmt(regularEarnings)}</span>
       </div>
+
+      {govtApplied && govtSalary > 0 && (
+        <div className="flex items-center justify-between border-t border-indigo-200 bg-indigo-50/60 px-2.5 py-1 text-[11px] font-semibold text-indigo-950">
+          <span>{t('Govt salary ({{days}} days × ₹{{rate}}) — PF base', { days: formatDays(govtDays), rate: formatRupee(govtRate) })}</span>
+          <span className="tabular-nums">₹{fmt(govtSalary)}</span>
+        </div>
+      )}
 
       {hasAttendanceExtra && (
         <div className="border-t border-sky-200 bg-sky-50/50 px-2.5 py-2 text-[10px] text-sky-950">
@@ -600,7 +708,7 @@ export function PayrollEntryBreakdownPanel({ entry, runUsesAttendance = true, to
 
       {showAttendanceNote && (
         <div className={cn(
-          'mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-[10px]',
+          'mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md px-2.5 py-2 text-xs',
           entry.has_mispunch
             ? 'border border-amber-200 bg-amber-50 text-amber-900'
             : govtDayChange
@@ -610,7 +718,7 @@ export function PayrollEntryBreakdownPanel({ entry, runUsesAttendance = true, to
           <span>
             {(entry.has_mispunch || govtDayChange) && (
               <span className={cn(
-                'mr-1.5 rounded px-1 py-px text-[9px] font-bold uppercase',
+                'mr-1.5 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase',
                 entry.has_mispunch ? 'bg-amber-500 text-white' : 'bg-indigo-600 text-white',
               )}>
                 {entry.has_mispunch ? t('Warning') : t('Indigo')}

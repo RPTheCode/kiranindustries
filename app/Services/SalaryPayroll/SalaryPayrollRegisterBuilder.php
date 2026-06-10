@@ -55,6 +55,7 @@ class SalaryPayrollRegisterBuilder
 
         $rows = [];
         $totals = [
+            'regular_earnings' => 0.0,
             'total_earnings' => 0.0,
             'total_deductions' => 0.0,
             'net_salary' => 0.0,
@@ -67,22 +68,29 @@ class SalaryPayrollRegisterBuilder
 
         foreach ($entries as $index => $entry) {
             $emp = $entry->employee?->employee;
-            $structureGross = max(
-                (float) $entry->total_earnings
-                    - (float) ($entry->incentive_amount ?? 0)
-                    - ((bool) ($entry->attendance_extra_applied ?? false) ? (float) ($entry->attendance_extra_amount ?? 0) : 0),
-                (float) $entry->monthly_gross
-            );
             $workingDays = (float) ($entry->working_days ?? 0);
             if ($workingDays <= 0) {
                 $workingDays = BranchPayrollSettingsService::DEFAULT_WORKING_DAYS;
             }
-            $dayRate = $workingDays > 0 ? $structureGross / $workingDays : 0;
-            $monthlyGross = (float) $entry->monthly_gross;
-            if ($monthlyGross > 0 && $monthlyGross < $structureGross / 2) {
-                $monthlyGross = round($monthlyGross * $workingDays, 0);
+
+            $regularEarnings = $this->regularEarningsForEntry($entry);
+            $displayTotalEarnings = $this->displayTotalEarningsForEntry($entry, $regularEarnings);
+            $displayDeductions = $this->displayDeductionsForEntry($entry);
+            $storedGross = (float) $entry->monthly_gross;
+            $isDayRate = $storedGross > 0 && ($storedGross < 5000 || $storedGross < ($regularEarnings / max(1, (float) ($entry->paid_days ?? 1))));
+
+            if ($isDayRate) {
+                $dayRate = round($storedGross, 2);
+                $monthlyGross = round($storedGross * $workingDays, 0);
+            } else {
+                $monthlyGross = round($storedGross, 0);
+                $dayRate = $workingDays > 0 ? round($monthlyGross / $workingDays, 2) : 0.0;
             }
+
             $earnings = $this->earningBreakdown($entry);
+            if ($entry->govt_wage_salary_applied && $regularEarnings > 0) {
+                $earnings = $this->scaleEarningsToTarget($earnings, $regularEarnings);
+            }
             $deductions = collect($entry->deductions_breakdown ?? [])
                 ->mapWithKeys(fn ($amount, $name) => [(string) $name => (float) $amount])
                 ->all();
@@ -94,12 +102,14 @@ class SalaryPayrollRegisterBuilder
                 'category' => $emp?->category?->name ?? '',
                 'department' => $emp?->department?->name ?? '',
                 'shift' => $emp?->shift?->name ?? '',
-                'day_rate' => round($dayRate, 2),
-                'monthly_gross' => round($monthlyGross > 0 ? $monthlyGross : $structureGross, 0),
+                'day_rate' => $dayRate,
+                'monthly_gross' => $monthlyGross,
                 'ot_enabled' => (bool) ($entry->ot_enabled ?? $emp?->ot_flag ?? false),
                 'working_days' => $workingDays,
                 'present_days' => (float) ($entry->present_days ?? 0),
                 'paid_days' => (float) ($entry->paid_days ?? 0),
+                'actual_paid_days' => $this->actualPaidDaysForEntry($entry, $workingDays),
+                'govt_wage_salary_applied' => (bool) ($entry->govt_wage_salary_applied ?? false),
                 'week_off_worked_days' => (float) ($entry->week_off_worked_days ?? 0),
                 'half_days' => (float) ($entry->half_days ?? 0),
                 'incentive_days' => (float) ($entry->incentive_days ?? 0),
@@ -107,14 +117,9 @@ class SalaryPayrollRegisterBuilder
                 'attendance_extra_days' => (float) ($entry->attendance_extra_days ?? 0),
                 'attendance_extra_amount' => (float) ($entry->attendance_extra_amount ?? 0),
                 'attendance_extra_applied' => (bool) ($entry->attendance_extra_applied ?? false),
-                'regular_earnings' => max(
-                    0,
-                    (float) $entry->total_earnings
-                        - (float) ($entry->incentive_amount ?? 0)
-                        - ((bool) ($entry->attendance_extra_applied ?? false) ? (float) ($entry->attendance_extra_amount ?? 0) : 0)
-                ),
-                'total_earnings' => (float) $entry->total_earnings,
-                'total_deductions' => (float) $entry->total_deductions,
+                'regular_earnings' => $regularEarnings,
+                'total_earnings' => $displayTotalEarnings,
+                'total_deductions' => $displayDeductions,
                 'net_salary' => (float) $entry->net_salary,
                 'pf_wages' => (float) ($entry->pf_wages ?: $entry->basic),
                 'pf_employee' => (float) $entry->pf_employee,
@@ -130,6 +135,7 @@ class SalaryPayrollRegisterBuilder
 
             $rows[] = $row;
 
+            $totals['regular_earnings'] += $row['regular_earnings'];
             $totals['total_earnings'] += $row['total_earnings'];
             $totals['total_deductions'] += $row['total_deductions'];
             $totals['net_salary'] += $row['net_salary'];
@@ -213,5 +219,115 @@ class SalaryPayrollRegisterBuilder
             || str_contains($upper, 'PI)')
             || str_contains($upper, 'OVERTIME SALARY')
             || str_contains($upper, 'EXTRA DAYS');
+    }
+
+    private function regularEarningsForEntry(SalaryPayrollEntry $entry): float
+    {
+        if ($entry->govt_wage_salary_applied && $entry->contract_regular_earnings !== null) {
+            return round((float) $entry->contract_regular_earnings, 0);
+        }
+
+        return round(max(
+            0,
+            (float) $entry->total_earnings
+                - (float) ($entry->incentive_amount ?? 0)
+                - ((bool) ($entry->attendance_extra_applied ?? false) ? (float) ($entry->attendance_extra_amount ?? 0) : 0)
+        ), 0);
+    }
+
+    private function displayTotalEarningsForEntry(SalaryPayrollEntry $entry, float $regularEarnings): float
+    {
+        return round(
+            $regularEarnings
+                + (float) ($entry->incentive_amount ?? 0)
+                + ((bool) ($entry->attendance_extra_applied ?? false) ? (float) ($entry->attendance_extra_amount ?? 0) : 0),
+            0
+        );
+    }
+
+    private function displayDeductionsForEntry(SalaryPayrollEntry $entry): float
+    {
+        $total = (float) $entry->total_deductions;
+
+        if (
+            ($entry->govt_wage_salary_applied ?? false)
+            && ($entry->govt_wage_adjustment_type ?? null) === 'deduction'
+            && (float) ($entry->govt_wage_adjustment_amount ?? 0) > 0
+        ) {
+            return round(max(0, $total - (float) $entry->govt_wage_adjustment_amount), 0);
+        }
+
+        return round($total, 0);
+    }
+
+    private function actualPaidDaysForEntry(SalaryPayrollEntry $entry, float $workingDays): float
+    {
+        $govtPaidDays = (float) ($entry->govt_wage_paid_days ?? $entry->paid_days ?? 0);
+        $stored = $entry->actual_paid_days !== null ? (float) $entry->actual_paid_days : 0.0;
+
+        if (! ($entry->govt_wage_salary_applied ?? false)) {
+            return $stored > 0 ? round($stored, 2) : round($govtPaidDays, 2);
+        }
+
+        if ($stored > $govtPaidDays + 0.009) {
+            return round($stored, 2);
+        }
+
+        $contractEarnings = (float) ($entry->contract_regular_earnings ?? 0);
+        $perDayRate = (float) $entry->monthly_gross;
+        if ($contractEarnings > 0 && $perDayRate > 0 && $perDayRate < 5000) {
+            $derivedDays = round($contractEarnings / $perDayRate, 2);
+            if ($derivedDays > $govtPaidDays + 0.009) {
+                return $derivedDays;
+            }
+        }
+
+        $presentDays = (float) ($entry->present_days ?? 0);
+        $weekOffWorkedDays = (float) ($entry->week_off_worked_days ?? 0);
+        $otEnabled = (bool) ($entry->ot_enabled ?? $entry->employee?->employee?->ot_flag ?? false);
+        $attendancePaidDays = min($presentDays, $workingDays) + $weekOffWorkedDays;
+        if ($otEnabled && $attendancePaidDays > $workingDays) {
+            $attendancePaidDays = $workingDays;
+        }
+
+        if ($attendancePaidDays > $govtPaidDays + 0.009) {
+            return round($attendancePaidDays, 2);
+        }
+
+        return $stored > 0 ? round($stored, 2) : round($govtPaidDays, 2);
+    }
+
+    /**
+     * @param  array<string, float>  $breakdown
+     * @return array<string, float>
+     */
+    private function scaleEarningsToTarget(array $breakdown, float $targetTotal): array
+    {
+        if ($breakdown === [] || $targetTotal <= 0) {
+            return $breakdown;
+        }
+
+        $currentTotal = array_sum($breakdown);
+        if ($currentTotal <= 0) {
+            return $breakdown;
+        }
+
+        $scaled = [];
+        foreach ($breakdown as $name => $amount) {
+            $scaled[$name] = round((float) $amount / $currentTotal * $targetTotal, 0);
+        }
+
+        $sum = round(array_sum($scaled), 0);
+        $diff = (int) round($targetTotal - $sum);
+        if ($diff !== 0) {
+            $adjustKey = array_key_exists('BASIC', $scaled)
+                ? 'BASIC'
+                : array_key_first($scaled);
+            if ($adjustKey !== null) {
+                $scaled[$adjustKey] = max(0, (float) $scaled[$adjustKey] + $diff);
+            }
+        }
+
+        return $scaled;
     }
 }

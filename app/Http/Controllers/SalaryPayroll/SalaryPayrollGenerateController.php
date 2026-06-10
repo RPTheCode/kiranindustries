@@ -845,10 +845,11 @@ class SalaryPayrollGenerateController extends Controller
             'use_government_wage_rules' => $this->branchUsesGovtWageRules($entry, $run),
             'govt_min_wage_per_day' => $entry->govt_min_wage_per_day !== null ? (float) $entry->govt_min_wage_per_day : null,
             'govt_min_wage_used' => $entry->govt_min_wage_used !== null ? (float) $entry->govt_min_wage_used : null,
+            'govt_wage_salary_applied' => (bool) ($entry->govt_wage_salary_applied ?? false),
             'govt_wage_rate_for_salary' => ($entry->govt_wage_salary_applied ?? false) && $entry->govt_min_wage_per_day !== null
                 ? (float) round((float) $entry->govt_min_wage_per_day, 0)
                 : null,
-            'actual_paid_days' => $entry->actual_paid_days !== null ? (float) $entry->actual_paid_days : (float) ($entry->paid_days ?? 0),
+            'actual_paid_days' => $this->actualPaidDaysForEntry($entry, $run),
             'govt_wage_equiv_days_raw' => $entry->govt_wage_equiv_days_raw !== null ? (float) $entry->govt_wage_equiv_days_raw : null,
             'govt_wage_paid_days' => $entry->govt_wage_paid_days !== null ? (float) $entry->govt_wage_paid_days : null,
             'contract_regular_earnings' => $entry->contract_regular_earnings !== null ? (float) $entry->contract_regular_earnings : null,
@@ -1137,6 +1138,10 @@ class SalaryPayrollGenerateController extends Controller
 
     private function regularEarningsForEntry(SalaryPayrollEntry $entry): float
     {
+        if ($entry->govt_wage_salary_applied && $entry->contract_regular_earnings !== null) {
+            return round((float) $entry->contract_regular_earnings, 0);
+        }
+
         $totalEarnings = (float) $entry->total_earnings;
         $incentiveAmount = (float) ($entry->incentive_amount ?? 0);
         $extraAmount = ($entry->attendance_extra_applied ?? false)
@@ -1144,6 +1149,44 @@ class SalaryPayrollGenerateController extends Controller
             : 0.0;
 
         return round(max(0, $totalEarnings - $incentiveAmount - $extraAmount), 0);
+    }
+
+    private function actualPaidDaysForEntry(SalaryPayrollEntry $entry, ?SalaryPayrollRun $run = null): float
+    {
+        $govtPaidDays = (float) ($entry->govt_wage_paid_days ?? $entry->paid_days ?? 0);
+        $stored = $entry->actual_paid_days !== null ? (float) $entry->actual_paid_days : 0.0;
+
+        if (! ($entry->govt_wage_salary_applied ?? false)) {
+            return $stored > 0 ? $stored : $govtPaidDays;
+        }
+
+        if ($stored > $govtPaidDays + 0.009) {
+            return round($stored, 2);
+        }
+
+        $contractEarnings = (float) ($entry->contract_regular_earnings ?? 0);
+        $perDayRate = $this->incentivePerDayRateForEntry($entry, $run);
+        if ($contractEarnings > 0 && $perDayRate > 0) {
+            $derivedDays = round($contractEarnings / $perDayRate, 2);
+            if ($derivedDays > $govtPaidDays + 0.009) {
+                return $derivedDays;
+            }
+        }
+
+        $workingDays = $this->payrollStandardWorkingDays($entry, $run);
+        $presentDays = (float) ($entry->present_days ?? 0);
+        $weekOffWorkedDays = (float) ($entry->week_off_worked_days ?? 0);
+        $otEnabled = (bool) ($entry->ot_enabled ?? $entry->employee?->employee?->ot_flag ?? false);
+        $attendancePaidDays = min($presentDays, $workingDays) + $weekOffWorkedDays;
+        if ($otEnabled && $attendancePaidDays > $workingDays) {
+            $attendancePaidDays = $workingDays;
+        }
+
+        if ($attendancePaidDays > $govtPaidDays + 0.009) {
+            return round($attendancePaidDays, 2);
+        }
+
+        return $stored > 0 ? round($stored, 2) : $govtPaidDays;
     }
 
     /**

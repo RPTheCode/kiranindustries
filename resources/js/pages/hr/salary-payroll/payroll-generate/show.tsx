@@ -48,6 +48,7 @@ import {
   PayrollEntryBreakdownPanel,
   GovtAttendanceDayChangeBadge,
   resolveGovtAttendanceDayChange,
+  resolveActualPaidDays,
   getAttendanceDaysBadgeTone,
   attendanceDaysBadgeDescription,
 } from './components/PayrollEntryBreakdownPanel';
@@ -107,20 +108,15 @@ function AttendanceDaysCell({
       >
         {formatDays(paid)}/{working}
       </div>
-      {badgeDescription && badgeTone !== 'full' && (
-        <p className="max-w-[128px] text-center text-[8px] font-medium leading-tight text-slate-600">
-          {badgeDescription}
-        </p>
-      )}
       {govtDayChange && (
-        <GovtAttendanceDayChangeBadge change={govtDayChange} t={t} showDescription />
+        <GovtAttendanceDayChangeBadge change={govtDayChange} t={t} />
       )}
-      {!govtDayChange && entry.govt_wage_salary_applied && Number(entry.actual_paid_days ?? 0) > 0 && (
-        <span className="rounded bg-indigo-100 px-1 py-px text-[8px] font-bold text-indigo-900" title={t('Actual attendance before govt conversion')}>
-          {t('Act')} {formatDays(Number(entry.actual_paid_days))}
+      {!govtDayChange && entry.govt_wage_salary_applied && (
+        <span className="rounded bg-indigo-100 px-1 py-px text-[10px] font-bold text-indigo-900" title={t('Actual attendance before govt conversion')}>
+          {t('Act')} {formatDays(resolveActualPaidDays(entry))}
         </span>
       )}
-      <div className="flex flex-wrap items-center justify-center gap-1 text-[9px] text-slate-500">
+      <div className="flex flex-wrap items-center justify-center gap-1 text-[10px] text-slate-600">
         <span title={t('Regular present on working days (excl. week-off worked)')}>{t('Present')} {formatDays(present)}</span>
         {weekOffWorkedDays > 0 && (
           <span
@@ -155,7 +151,7 @@ function AttendanceDaysCell({
               {t('PI')} {incentiveDays}
             </span>
             <span
-              className="max-w-[130px] text-center text-[8px] leading-tight text-violet-800"
+              className="max-w-[140px] text-center text-[10px] leading-tight text-violet-800"
               title={t('OT Yes: salary on {{salary}} days max, PI on {{pi}} extra days', { salary: formatDays(salaryDays), pi: formatDays(incentiveDays) })}
             >
               {t('Sal {{salary}} + PI {{pi}}', { salary: formatDays(salaryDays), pi: formatDays(incentiveDays) })}
@@ -199,7 +195,8 @@ function AttendanceDaysCell({
 function PayrollColorLegend({ t }: { t: (key: string) => string }) {
   const items: { swatch: string; label: string }[] = [
     { swatch: 'border-2 border-indigo-400 bg-indigo-100', label: t('Indigo — govt min wage: attendance days changed (e.g. 23 → 22) for salary & PF') },
-    { swatch: 'bg-emerald-100', label: t('Green — full paid days (≥ working days) or clean attendance') },
+    { swatch: 'border border-emerald-200 bg-emerald-100', label: t('Green bar — Total Salary (attendance ke baad, deductions se pehle)') },
+    { swatch: 'bg-emerald-100', label: t('Green badge — full paid days (≥ working days) or clean attendance') },
     { swatch: 'bg-sky-100', label: t('Blue — partial month or adjust applied to net') },
     { swatch: 'bg-amber-100', label: t('Warning (yellow) — half day, PI incentive, pending adjust, or mispunch') },
     { swatch: 'bg-violet-100', label: t('Violet — OT Yes (extra days → Incentive)') },
@@ -207,7 +204,7 @@ function PayrollColorLegend({ t }: { t: (key: string) => string }) {
   ];
 
   return (
-    <details className="mb-3 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-[10px] text-slate-700">
+    <details className="mb-3 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-700">
       <summary className="cursor-pointer font-semibold text-slate-800 select-none">
         {t('Color guide — what each highlight means')}
       </summary>
@@ -260,73 +257,74 @@ function SalaryCompactCell({ entry, formatRupee: fmt, t }: { entry: any; formatR
   const attendanceExtraDays = Number(entry.attendance_extra_days ?? 0);
   const attendanceExtraApplied = Boolean(entry.attendance_extra_applied);
   const otEnabled = Boolean(entry.ot_enabled);
+  const govtApplied = Boolean(entry.govt_wage_salary_applied);
+  const contractEarnings = Number(entry.contract_regular_earnings ?? entry.regular_earnings ?? 0);
+  const govtAdjust = govtApplied && entry.govt_wage_adjustment_type === 'deduction'
+    ? Number(entry.govt_wage_adjustment_amount ?? 0)
+    : 0;
+  const totalSalary = govtApplied && contractEarnings > 0
+    ? contractEarnings + incentiveAmount + (attendanceExtraApplied ? attendanceExtraAmount : 0)
+    : Number(entry.total_earnings ?? 0);
+  const displayDeductions = govtAdjust > 0
+    ? Math.max(0, Number(entry.total_deductions ?? 0) - govtAdjust)
+    : Number(entry.total_deductions ?? 0);
 
   return (
-    <div className="min-w-[118px] text-right text-[10px] leading-snug tabular-nums">
-      <div className="mb-1 flex items-center justify-end gap-1">
+    <div className="min-w-[128px] text-right text-xs leading-snug tabular-nums">
+      <div className="mb-1 flex items-center justify-end gap-1.5">
         <span className={cn(
-          'rounded px-1 py-px text-[8px] font-bold uppercase',
+          'rounded px-1.5 py-0.5 text-[10px] font-bold uppercase',
           meta.mode === 'day' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800',
         )}>
           {meta.mode === 'day' ? t('Day') : t('Month')}
         </span>
-        <span className="font-semibold text-slate-800" title={t('Contract rate')}>
-          ₹{fmt(meta.rate)}<span className="text-[9px] font-normal text-slate-500">/{meta.rateLabel === 'day' ? t('day') : t('mo')}</span>
+        <span className="text-sm font-semibold text-slate-800" title={t('Contract rate')}>
+          ₹{fmt(meta.rate)}<span className="text-[11px] font-normal text-slate-500">/{meta.rateLabel === 'day' ? t('day') : t('mo')}</span>
         </span>
       </div>
-      <div className="flex items-center justify-end gap-1.5 text-[9px] text-slate-400" title={t('Full month package (CTC)')}>
+      <div className="flex items-center justify-end gap-1.5 text-[11px] text-slate-500" title={t('Full month package (CTC)')}>
         <span>{t('CTC')}</span>
-        <span className="text-slate-600">₹{fmt(meta.ctc)}</span>
+        <span className="font-medium text-slate-700">₹{fmt(meta.ctc)}</span>
       </div>
       {otEnabled && incentiveAmount > 0 && (
-        <div className="flex flex-col items-end gap-0.5 text-[9px] text-amber-700">
-          <div className="flex items-center justify-end gap-1.5" title={t('Warning — production incentive for extra days (OT Yes)')}>
-            <span>{t('PI')} ({incentiveDays} {t('days')})</span>
-            <span className="font-semibold">+ ₹{fmt(incentiveAmount)}</span>
-          </div>
-          <span className="text-[8px] text-amber-600">{t('Warning — extra days added as Incentive')}</span>
+        <div className="flex items-center justify-end gap-1.5 text-[11px] text-amber-800" title={t('Warning — production incentive for extra days (OT Yes)')}>
+          <span>{t('PI')} ({incentiveDays} {t('days')})</span>
+          <span className="font-semibold">+ ₹{fmt(incentiveAmount)}</span>
         </div>
       )}
       {!otEnabled && attendanceExtraAmount > 0 && (
-        <div className="flex flex-col items-end gap-0.5">
-          <div
-            className={cn(
-              'flex items-center justify-end gap-1.5 text-[9px]',
-              attendanceExtraApplied ? 'text-sky-700' : 'text-amber-700',
-            )}
-            title={attendanceExtraApplied
-              ? t('Blue — extra days adjust added to net (OT No)')
-              : t('Warning — extra days adjust pending, not in net (OT No)')}
-          >
-            <span>{t('Adjust')} ({attendanceExtraDays} {t('days')}){!attendanceExtraApplied ? ` · ${t('pending')}` : ''}</span>
-            <span className="font-semibold">{attendanceExtraApplied ? '+' : ''} ₹{fmt(attendanceExtraAmount)}</span>
-          </div>
-          <span className={cn('text-[8px]', attendanceExtraApplied ? 'text-sky-600' : 'text-amber-600')}>
-            {attendanceExtraApplied
-              ? t('Blue — adjust included in net salary')
-              : t('Warning — tick "Add adjust to net" in breakdown')}
-          </span>
+        <div
+          className={cn(
+            'flex items-center justify-end gap-1.5 text-[11px]',
+            attendanceExtraApplied ? 'text-sky-700' : 'text-amber-800',
+          )}
+          title={attendanceExtraApplied
+            ? t('Blue — extra days adjust added to net (OT No)')
+            : t('Warning — extra days adjust pending, not in net (OT No)')}
+        >
+          <span>{t('Adjust')} ({attendanceExtraDays} {t('days')}){!attendanceExtraApplied ? ` · ${t('pending')}` : ''}</span>
+          <span className="font-semibold">{attendanceExtraApplied ? '+' : ''} ₹{fmt(attendanceExtraAmount)}</span>
         </div>
       )}
       <div
-        className="my-0.5 flex items-center justify-end gap-1.5 rounded bg-emerald-50 px-1 py-0.5 text-[10px]"
-        title={t('Salary after attendance — before deductions')}
+        className="my-1 flex items-center justify-end gap-1.5 rounded-md border border-emerald-200 bg-emerald-100 px-2 py-1 text-xs shadow-sm"
+        title={t('Total Salary = earnings after attendance (before PF, PT & other deductions)')}
       >
-        <span className="font-medium text-emerald-800">{t('Total Salary')}</span>
-        <span className="font-bold text-emerald-900">₹{fmt(entry.total_earnings)}</span>
+        <span className="font-semibold text-emerald-900">{t('Total Salary')}</span>
+        <span className="text-sm font-bold text-emerald-950">₹{fmt(totalSalary)}</span>
       </div>
-      {Number(entry.total_deductions) > 0 && (
-        <div className="flex items-center justify-end gap-1.5 text-[9px] text-red-600" title={t('PF, PT & other deductions')}>
+      {displayDeductions > 0 && (
+        <div className="flex items-center justify-end gap-1.5 text-[11px] text-red-600" title={t('PF, PT & other deductions')}>
           <span>{t('Deductions')}</span>
-          <span className="font-semibold">− ₹{fmt(entry.total_deductions)}</span>
+          <span className="font-semibold">− ₹{fmt(displayDeductions)}</span>
         </div>
       )}
       <div
-        className="flex items-center justify-end gap-1.5 border-t border-slate-200 pt-0.5 text-[11px]"
+        className="flex items-center justify-end gap-1.5 border-t border-slate-200 pt-1 text-sm"
         title={t('Take-home after PF, PT & other deductions')}
       >
         <span className="font-semibold text-primary">{t('Net Salary')}</span>
-        <span className="font-bold text-primary">₹{fmt(entry.net_salary)}</span>
+        <span className="text-base font-bold text-primary">₹{fmt(entry.net_salary)}</span>
       </div>
     </div>
   );
@@ -746,7 +744,7 @@ export default function PayrollGenerateShow() {
 
       {(usesAttendance || !isRunLocked) && (
         <div className={cn(
-          'mb-3 rounded-lg border px-3 py-2 text-[11px] leading-snug',
+          'mb-3 rounded-lg border px-3 py-2.5 text-xs leading-relaxed',
           usesAttendance && mispunchCount > 0 ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-blue-100 bg-blue-50/70 text-blue-900',
         )}>
           {usesAttendance ? (
@@ -764,7 +762,7 @@ export default function PayrollGenerateShow() {
       )}
 
       {usesAttendance && pendingAdjustCount > 0 && (
-        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-950">
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-950">
           {t('{{count}} employee(s) have extra days (OT No) pending in Adjust. Open employee → View breakdown → tick "Add adjust to net salary" for each employee you want.', { count: pendingAdjustCount })}
         </div>
       )}
@@ -772,7 +770,7 @@ export default function PayrollGenerateShow() {
       {usesAttendance && <PayrollColorLegend t={t} />}
 
       {hasPartialLocks && (
-        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
           <span>{lockedCount} {t('locked')} · {unlockedCount} {t('open')}</span>
           <Button variant="outline" size="sm" className="h-6 border-green-300 bg-white px-2 text-[10px] text-green-800" onClick={() => applyFilters({ lock_status: 'locked', page: 1 })}>
             {t('Locked')}
@@ -905,18 +903,18 @@ export default function PayrollGenerateShow() {
             </colgroup>
             <TableHeader className="bg-slate-50">
               <TableRow className="hover:bg-transparent">
-                <TableHead className="h-8 px-1 text-center text-[10px]">{t('Details')}</TableHead>
-                <TableHead className="h-8 px-2 text-[10px]">{t('Employee')}</TableHead>
+                <TableHead className="h-9 px-1 text-center text-xs font-semibold">{t('Details')}</TableHead>
+                <TableHead className="h-9 px-2 text-xs font-semibold">{t('Employee')}</TableHead>
                 {usesAttendance && (
-                  <TableHead className="h-8 px-1 text-center text-[10px]" title={t('Paid days / Working days')}>
+                  <TableHead className="h-9 px-1 text-center text-xs font-semibold" title={t('Paid days / Working days')}>
                     {t('Days')}
                   </TableHead>
                 )}
-                <TableHead className="h-8 px-2 text-right text-[10px]" title={t('Rate → CTC → Total Salary → Deductions → Net Salary')}>
+                <TableHead className="h-9 px-2 text-right text-xs font-semibold" title={t('Rate → CTC → Total Salary → Deductions → Net Salary')}>
                   {t('Pay')}
                 </TableHead>
                 {(showRowActions || showPayslipActions) && (
-                  <TableHead className="h-8 px-1 text-right text-[10px]">
+                  <TableHead className="h-9 px-1 text-right text-xs font-semibold">
                     {showRowActions ? t('Actions') : 'PDF'}
                   </TableHead>
                 )}
@@ -945,7 +943,7 @@ export default function PayrollGenerateShow() {
                         <button
                           type="button"
                           className={cn(
-                            'flex w-full flex-col items-center justify-center rounded-md border px-0.5 py-1 text-[9px] font-medium leading-none',
+                            'flex w-full flex-col items-center justify-center rounded-md border px-0.5 py-1 text-[10px] font-medium leading-none',
                             isExpanded
                               ? 'border-primary/30 bg-primary/10 text-primary'
                               : 'border-slate-200 bg-white text-slate-500 hover:border-primary/30 hover:bg-primary/5 hover:text-primary',
@@ -962,8 +960,8 @@ export default function PayrollGenerateShow() {
                         <div className="flex items-start gap-1.5 min-w-0">
                           {entry.is_locked && <Lock className="mt-0.5 h-3 w-3 shrink-0 text-green-600" />}
                           <div className="min-w-0 flex-1">
-                            <div className="truncate text-xs font-semibold text-slate-900">{entry.name}</div>
-                            <div className="truncate text-[10px] text-slate-500">
+                            <div className="truncate text-sm font-semibold text-slate-900">{entry.name}</div>
+                            <div className="truncate text-xs text-slate-500">
                               {entry.employee_code || '—'}
                               {(entry.category || entry.shift) && (
                                 <> · {[entry.category, entry.shift].filter(Boolean).join(' · ')}</>
