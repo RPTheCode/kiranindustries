@@ -51,6 +51,7 @@ import {
   resolveActualPaidDays,
   getAttendanceDaysBadgeTone,
   attendanceDaysBadgeDescription,
+  salaryAdvanceRecoveryAmount,
 } from './components/PayrollEntryBreakdownPanel';
 import { StatutoryChallanPanel } from './components/StatutoryChallanPanel';
 import { cn } from '@/lib/utils';
@@ -265,6 +266,7 @@ function SalaryCompactCell({ entry, formatRupee: fmt, t }: { entry: any; formatR
   const totalSalary = govtApplied && contractEarnings > 0
     ? contractEarnings + incentiveAmount + (attendanceExtraApplied ? attendanceExtraAmount : 0)
     : Number(entry.total_earnings ?? 0);
+  const advanceRecovery = salaryAdvanceRecoveryAmount(entry);
   const displayDeductions = govtAdjust > 0
     ? Math.max(0, Number(entry.total_deductions ?? 0) - govtAdjust)
     : Number(entry.total_deductions ?? 0);
@@ -313,6 +315,12 @@ function SalaryCompactCell({ entry, formatRupee: fmt, t }: { entry: any; formatR
         <span className="font-semibold text-emerald-900">{t('Total Salary')}</span>
         <span className="text-sm font-bold text-emerald-950">₹{fmt(totalSalary)}</span>
       </div>
+      {advanceRecovery > 0 && (
+        <div className="flex items-center justify-end gap-1.5 text-[11px] text-teal-800" title={t('Salary advance recovered from disbursed requests')}>
+          <span>{t('Advance')}</span>
+          <span className="font-semibold">− ₹{fmt(advanceRecovery)}</span>
+        </div>
+      )}
       {displayDeductions > 0 && (
         <div className="flex items-center justify-end gap-1.5 text-[11px] text-red-600" title={t('PF, PT & other deductions')}>
           <span>{t('Deductions')}</span>
@@ -722,6 +730,15 @@ export default function PayrollGenerateShow() {
         <span className="font-semibold text-slate-800">{t('Net')} <span className="text-green-700">₹{formatRupee(Number(run?.total_net || 0))}</span></span>
         <span className="text-slate-300">|</span>
         <span className="text-slate-600"><Users className="mr-1 inline h-3.5 w-3.5" />{run?.employee_count} {t('emp')}</span>
+        {Number(run?.total_advance_recovery ?? 0) > 0 && (
+          <>
+            <span className="text-slate-300">|</span>
+            <span className="font-semibold text-teal-800">
+              {t('Advance recovery')} <span className="text-red-700">₹{formatRupee(Number(run?.total_advance_recovery ?? 0))}</span>
+              {' '}({run?.advance_recovery_employee_count} {t('emp')})
+            </span>
+          </>
+        )}
         {!isRunLocked && (
           <>
             <span className="text-slate-300">|</span>
@@ -967,6 +984,19 @@ export default function PayrollGenerateShow() {
                                 <> · {[entry.category, entry.shift].filter(Boolean).join(' · ')}</>
                               )}
                             </div>
+                            {salaryAdvanceRecoveryAmount(entry) > 0 && (
+                              <span className="mt-0.5 inline-flex rounded bg-teal-100 px-1.5 py-px text-[10px] font-bold text-teal-900">
+                                {t('Advance')} −₹{formatRupee(salaryAdvanceRecoveryAmount(entry))}
+                              </span>
+                            )}
+                            {salaryAdvanceRecoveryAmount(entry) <= 0 && (entry.advance_recovery_deferred?.length ?? 0) > 0 && (
+                              <span
+                                className="mt-0.5 inline-flex rounded bg-amber-100 px-1.5 py-px text-[10px] font-bold text-amber-900"
+                                title={t('Advance disbursed after this payroll month — recovers in a later payroll')}
+                              >
+                                {t('Advance deferred')} ₹{formatRupee(entry.advance_recovery_deferred[0].pending_amount)}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </TableCell>

@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { Link } from '@inertiajs/react';
+import { Wallet } from 'lucide-react';
 import { AlertTriangle, ChevronUp, Loader2 } from 'lucide-react';
 import { StatutoryFlagBadge } from './StatutoryIndicators';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -84,6 +85,41 @@ export interface PayrollEntryBreakdown {
   } | null;
   earnings_breakdown?: Record<string, number>;
   deductions_breakdown?: Record<string, number>;
+  advance_recovery_amount?: number;
+  advance_allocations?: Array<{
+    salary_advance_request_id: number;
+    amount: number;
+    approved_amount?: number | null;
+    paid_before?: number | null;
+    paid_total?: number | null;
+    pending_amount?: number | null;
+    disbursement_date?: string | null;
+    application_date?: string | null;
+    status?: string | null;
+  }>;
+  advance_recovery_deferred?: Array<{
+    salary_advance_request_id: number;
+    pending_amount: number;
+    disbursement_date?: string | null;
+    pay_period_end?: string | null;
+  }>;
+}
+
+export const SALARY_ADVANCE_RECOVERY_LABEL = 'Salary Advance Recovery';
+
+export function salaryAdvanceRecoveryAmount(entry: {
+  advance_recovery_amount?: number;
+  deductions_breakdown?: Record<string, number>;
+  advance_allocations?: PayrollEntryBreakdown['advance_allocations'];
+}): number {
+  if (entry.advance_recovery_amount != null && Number(entry.advance_recovery_amount) > 0) {
+    return Number(entry.advance_recovery_amount);
+  }
+  const fromBreakdown = Number(entry.deductions_breakdown?.[SALARY_ADVANCE_RECOVERY_LABEL] ?? 0);
+  if (fromBreakdown > 0) {
+    return fromBreakdown;
+  }
+  return (entry.advance_allocations ?? []).reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
 }
 
 function formatRupee(value: number) {
@@ -882,6 +918,90 @@ export function PayrollEntryBreakdownPanel({ entry, runUsesAttendance = true, to
                   eps: entry.pf_breakdown.eps_pct,
                   epf: entry.pf_breakdown.epf_employer_pct,
                 })}
+          </p>
+        </div>
+      )}
+
+      {(entry.advance_recovery_deferred ?? []).length > 0 && salaryAdvanceRecoveryAmount(entry) <= 0 && (
+        <div className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 text-[10px] text-amber-950">
+          <p className="mb-1.5 flex items-center gap-1 font-bold uppercase tracking-wide text-amber-900">
+            <Wallet className="h-3 w-3" />
+            {t('Salary advance not in this payroll')}
+          </p>
+          {(entry.advance_recovery_deferred ?? []).map((deferred) => (
+            <div key={deferred.salary_advance_request_id} className="mb-1 rounded border border-amber-200 bg-white/80 px-2 py-1.5 last:mb-0">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Link
+                  href={route('hr.salary-advances.show', deferred.salary_advance_request_id)}
+                  className="font-semibold text-amber-900 hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {t('Advance')} #{deferred.salary_advance_request_id}
+                </Link>
+                <strong className="tabular-nums">₹{formatRupee(deferred.pending_amount)} {t('pending')}</strong>
+              </div>
+              <p className="mt-1 text-[9px] leading-snug text-amber-900/90">
+                {t('Disbursed on {{disbursed}} — after this payroll period (ends {{periodEnd}}). Recovery will apply in the payroll month on or after disbursement.', {
+                  disbursed: deferred.disbursement_date ?? '—',
+                  periodEnd: deferred.pay_period_end ?? '—',
+                })}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {salaryAdvanceRecoveryAmount(entry) > 0 && (
+        <div className="mb-2 rounded-md border border-teal-200 bg-teal-50/60 px-2.5 py-2 text-[10px] text-slate-700">
+          <p className="mb-1.5 flex items-center gap-1 font-bold uppercase tracking-wide text-teal-900">
+            <Wallet className="h-3 w-3" />
+            {t('Salary Advance Recovery')}
+          </p>
+          <div className="space-y-1">
+            {(entry.advance_allocations ?? []).map((allocation) => (
+              <div
+                key={allocation.salary_advance_request_id}
+                className="rounded border border-teal-100 bg-white/80 px-2 py-1.5"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Link
+                    href={route('hr.salary-advances.show', allocation.salary_advance_request_id)}
+                    className="font-semibold text-teal-900 hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {t('Advance')} #{allocation.salary_advance_request_id}
+                  </Link>
+                  <strong className="tabular-nums text-red-700">− ₹{formatRupee(allocation.amount)}</strong>
+                </div>
+                <div className="mt-1 grid gap-1 sm:grid-cols-2">
+                  {allocation.approved_amount != null && (
+                    <div className="flex justify-between gap-2 text-[9px] text-slate-600">
+                      <span>{t('Approved')}</span>
+                      <strong className="tabular-nums">₹{formatRupee(allocation.approved_amount)}</strong>
+                    </div>
+                  )}
+                  {allocation.paid_before != null && (
+                    <div className="flex justify-between gap-2 text-[9px] text-slate-600">
+                      <span>{t('Recovered before')}</span>
+                      <strong className="tabular-nums">₹{formatRupee(allocation.paid_before)}</strong>
+                    </div>
+                  )}
+                  {allocation.pending_amount != null && (
+                    <div className="flex justify-between gap-2 text-[9px] font-semibold text-orange-800 sm:col-span-2">
+                      <span>{t('Pending after this payroll')}</span>
+                      <strong className="tabular-nums">₹{formatRupee(allocation.pending_amount)}</strong>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-1.5 flex items-center justify-between rounded bg-teal-100/80 px-2 py-1 text-[11px] font-semibold text-teal-950">
+            <span>{t('Total recovered this month')}</span>
+            <strong className="tabular-nums text-red-700">− ₹{formatRupee(salaryAdvanceRecoveryAmount(entry))}</strong>
+          </div>
+          <p className="mt-1.5 text-[9px] text-teal-800/90">
+            {t('Disbursed salary advances are recovered automatically in payroll (FIFO). Regenerate if you add or disburse a new advance.')}
           </p>
         </div>
       )}

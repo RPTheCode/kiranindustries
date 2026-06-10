@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Models\Department;
 use App\Models\PayrollParameter;
 use App\Models\ProfessionalTaxSlab;
+use App\Models\SalaryPayroll\SalaryAdvanceRequest;
 use App\Models\SalaryPayroll\SalaryPayrollEntry;
 use App\Models\SalaryPayroll\SalaryPayrollRun;
 use App\Models\Shift;
@@ -221,7 +222,15 @@ class SalaryPayrollGenerateController extends Controller
             ->paginate($perPage)
             ->withQueryString();
 
-        $entries->getCollection()->transform(fn ($entry) => $this->formatEntry($entry, $salaryPayrollRun));
+        $advanceMap = $this->advanceRequestsForEntries($entries->getCollection());
+        $deferredAdvanceMap = $this->deferredAdvanceRecoveriesForEmployees(
+            $entries->getCollection()->pluck('employee_id')->unique()->values()->all(),
+            $salaryPayrollRun
+        );
+
+        $entries->getCollection()->transform(
+            fn ($entry) => $this->formatEntry($entry, $salaryPayrollRun, $advanceMap, $deferredAdvanceMap)
+        );
 
         $mispunchCount = SalaryPayrollEntry::query()
             ->where('salary_payroll_run_id', $salaryPayrollRun->id)
@@ -813,6 +822,8 @@ class SalaryPayrollGenerateController extends Controller
             'total_esi_employee' => (float) $run->total_esi_employee,
             'total_esi_employer' => (float) $run->total_esi_employer,
             'total_pt_amount' => (float) ($run->total_pt_amount ?? 0),
+            'total_advance_recovery' => $this->totalAdvanceRecoveryForRun($run),
+            'advance_recovery_employee_count' => $this->advanceRecoveryEmployeeCountForRun($run),
             'branch' => $run->branch ? ['id' => $run->branch->id, 'name' => $run->branch->name] : null,
             'creator' => $run->creator ? ['id' => $run->creator->id, 'name' => $run->creator->name] : null,
             'finalizer' => $run->finalizer ? ['id' => $run->finalizer->id, 'name' => $run->finalizer->name] : null,
@@ -821,9 +832,16 @@ class SalaryPayrollGenerateController extends Controller
         ];
     }
 
-    private function formatEntry(SalaryPayrollEntry $entry, ?SalaryPayrollRun $run = null): array
-    {
+    private function formatEntry(
+        SalaryPayrollEntry $entry,
+        ?SalaryPayrollRun $run = null,
+        ?\Illuminate\Support\Collection $advanceMap = null,
+        ?\Illuminate\Support\Collection $deferredAdvanceMap = null
+    ): array {
         $attendanceExtra = $this->attendanceExtraForEntry($entry, $run);
+        $advanceAllocations = $this->advanceAllocationsPayload($entry, $advanceMap);
+        $advanceRecoveryAmount = round(collect($advanceAllocations)->sum('amount'), 2);
+        $advanceRecoveryDeferred = $this->advanceRecoveryDeferredPayload($entry, $run, $deferredAdvanceMap);
 
         return [
             'id' => $entry->id,
@@ -898,6 +916,9 @@ class SalaryPayrollGenerateController extends Controller
             'pt_breakdown' => $this->ptBreakdownForEntry($entry, $run),
             'earnings_breakdown' => $this->componentEarningsBreakdown($entry->earnings_breakdown ?? []),
             'deductions_breakdown' => $entry->deductions_breakdown ?? [],
+            'advance_allocations' => $advanceAllocations,
+            'advance_recovery_amount' => $advanceRecoveryAmount,
+            'advance_recovery_deferred' => $advanceRecoveryDeferred,
             'status' => $entry->status,
             'error_message' => $entry->error_message,
             'is_locked' => $entry->isLocked(),
@@ -1268,5 +1289,159 @@ class SalaryPayrollGenerateController extends Controller
                 'name' => $u->name,
                 'employee_code' => $u->employee?->employee_id,
             ]);
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, SalaryPayrollEntry>  $entries
+     * @return \Illuminate\Support\Collection<int, SalaryAdvanceRequest>
+     */
+    /**
+     * @param  array<int, int>  $employeeIds
+     * @return \Illuminate\Support\Collection<int, \Illuminate\Support\Collection<int, SalaryAdvanceRequest>>
+     */
+    private function deferredAdvanceRecoveriesForEmployees(array $employeeIds, SalaryPayrollRun $run): \Illuminate\Support\Collection
+    {
+        if ($employeeIds === [] || ! $run->pay_period_end) {
+            return collect();
+        }
+
+        $periodEnd = $run->pay_period_end->format('Y-m-d');
+
+        return SalaryAdvanceRequest::query()
+            ->whereIn('employee_id', $employeeIds)
+            ->whereIn('status', [SalaryAdvanceRequest::STATUS_DISBURSED, SalaryAdvanceRequest::STATUS_RECOVERING])
+            ->whereRaw('paid_amount < COALESCE(approved_amount, requested_amount)')
+            ->whereDate('disbursement_date', '>', $periodEnd)
+            ->orderBy('disbursement_date')
+            ->get(['id', 'employee_id', 'approved_amount', 'requested_amount', 'paid_amount', 'disbursement_date', 'status'])
+            ->groupBy('employee_id');
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, \Illuminate\Support\Collection<int, SalaryAdvanceRequest>>|null  $deferredAdvanceMap
+     * @return array<int, array<string, mixed>>
+     */
+    private function advanceRecoveryDeferredPayload(
+        SalaryPayrollEntry $entry,
+        ?SalaryPayrollRun $run,
+        ?\Illuminate\Support\Collection $deferredAdvanceMap
+    ): array {
+        if (! $deferredAdvanceMap || ! $run?->pay_period_end) {
+            return [];
+        }
+
+        return $deferredAdvanceMap
+            ->get($entry->employee_id, collect())
+            ->map(fn (SalaryAdvanceRequest $advance) => [
+                'salary_advance_request_id' => $advance->id,
+                'pending_amount' => (float) $advance->pending_amount,
+                'disbursement_date' => $advance->disbursement_date?->format('Y-m-d'),
+                'pay_period_end' => $run->pay_period_end->format('Y-m-d'),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, SalaryPayrollEntry>  $entries
+     * @return \Illuminate\Support\Collection<int, SalaryAdvanceRequest>
+     */
+    private function advanceRequestsForEntries(\Illuminate\Support\Collection $entries): \Illuminate\Support\Collection
+    {
+        $ids = $entries
+            ->flatMap(fn (SalaryPayrollEntry $entry) => collect($entry->advance_allocations ?? [])
+                ->pluck('salary_advance_request_id'))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($ids === []) {
+            return collect();
+        }
+
+        return SalaryAdvanceRequest::query()
+            ->whereIn('id', $ids)
+            ->get(['id', 'approved_amount', 'requested_amount', 'paid_amount', 'disbursement_date', 'status', 'application_date'])
+            ->keyBy('id');
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, SalaryAdvanceRequest>|null  $advanceMap
+     * @return array<int, array<string, mixed>>
+     */
+    private function advanceAllocationsPayload(SalaryPayrollEntry $entry, ?\Illuminate\Support\Collection $advanceMap = null): array
+    {
+        $allocations = $entry->advance_allocations ?? [];
+        if ($allocations === []) {
+            return [];
+        }
+
+        $ids = collect($allocations)
+            ->pluck('salary_advance_request_id')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $advances = $advanceMap ?? SalaryAdvanceRequest::query()
+            ->whereIn('id', $ids)
+            ->get(['id', 'approved_amount', 'requested_amount', 'paid_amount', 'disbursement_date', 'status', 'application_date'])
+            ->keyBy('id');
+
+        return collect($allocations)
+            ->map(function (array $allocation) use ($advances) {
+                $requestId = (int) ($allocation['salary_advance_request_id'] ?? 0);
+                $amount = round((float) ($allocation['amount'] ?? 0), 2);
+                if ($requestId <= 0 || $amount <= 0) {
+                    return null;
+                }
+
+                /** @var SalaryAdvanceRequest|null $advance */
+                $advance = $advances->get($requestId);
+                $approved = $advance
+                    ? (float) ($advance->approved_amount ?? $advance->requested_amount)
+                    : null;
+                $paidTotal = $advance ? (float) $advance->paid_amount : null;
+                $paidBefore = $paidTotal !== null ? max(0, round($paidTotal - $amount, 2)) : null;
+
+                return [
+                    'salary_advance_request_id' => $requestId,
+                    'amount' => $amount,
+                    'approved_amount' => $approved,
+                    'paid_before' => $paidBefore,
+                    'paid_total' => $paidTotal,
+                    'pending_amount' => $advance ? (float) $advance->pending_amount : null,
+                    'disbursement_date' => $advance?->disbursement_date?->format('Y-m-d'),
+                    'application_date' => $advance?->application_date?->format('Y-m-d'),
+                    'status' => $advance?->status,
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    private function totalAdvanceRecoveryForRun(SalaryPayrollRun $run): float
+    {
+        return (float) SalaryPayrollEntry::query()
+            ->where('salary_payroll_run_id', $run->id)
+            ->get(['advance_allocations'])
+            ->sum(function (SalaryPayrollEntry $entry) {
+                return collect($entry->advance_allocations ?? [])
+                    ->sum(fn (array $allocation) => (float) ($allocation['amount'] ?? 0));
+            });
+    }
+
+    private function advanceRecoveryEmployeeCountForRun(SalaryPayrollRun $run): int
+    {
+        return SalaryPayrollEntry::query()
+            ->where('salary_payroll_run_id', $run->id)
+            ->get(['advance_allocations'])
+            ->filter(function (SalaryPayrollEntry $entry) {
+                return collect($entry->advance_allocations ?? [])
+                    ->sum(fn (array $allocation) => (float) ($allocation['amount'] ?? 0)) > 0;
+            })
+            ->count();
     }
 }

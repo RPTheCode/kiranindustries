@@ -54,6 +54,14 @@ class SalaryPayrollPermissionSeeder extends Seeder
             ['name' => 'manage-payroll-settings', 'label' => 'Manage Payroll Settings'],
             ['name' => 'view-payroll-settings', 'label' => 'View Payroll Settings'],
             ['name' => 'edit-payroll-settings', 'label' => 'Edit Payroll Settings'],
+
+            // Salary Advance
+            ['name' => 'manage-salary-advances', 'label' => 'Manage Salary Advance'],
+            ['name' => 'manage-any-salary-advances', 'label' => 'Manage Any Salary Advance'],
+            ['name' => 'view-salary-advances', 'label' => 'View Salary Advance'],
+            ['name' => 'create-salary-advances', 'label' => 'Create Salary Advance'],
+            ['name' => 'edit-salary-advances', 'label' => 'Edit Salary Advance'],
+            ['name' => 'delete-salary-advances', 'label' => 'Delete Salary Advance'],
         ];
 
         $permissionNames = [];

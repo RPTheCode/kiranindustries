@@ -124,3 +124,22 @@ export const canAccessPayrollSettings = (userPermissions: string[]) =>
 export const canEditPayrollSettings = (userPermissions: string[]) =>
     canEditEntity(userPermissions, 'payroll-settings')
     || hasAnyPermission(userPermissions, ['manage-settings', 'edit-settings']);
+
+export const canAccessSalaryAdvance = (userPermissions: string[]) =>
+    canAccessEntity(userPermissions, 'salary-advances');
+
+export const canCreateSalaryAdvance = (userPermissions: string[]) =>
+    canCreateEntity(userPermissions, 'salary-advances');
+
+export const canEditSalaryAdvance = (userPermissions: string[]) =>
+    canEditEntity(userPermissions, 'salary-advances');
+
+export const canDeleteSalaryAdvance = (userPermissions: string[]) =>
+    canDeleteEntity(userPermissions, 'salary-advances');
+
+export const canManageSalaryAdvance = (userPermissions: string[]) =>
+    hasAnyPermission(userPermissions, [
+        'manage-salary-advances',
+        'manage-any-salary-advances',
+        'edit-salary-advances',
+    ]);

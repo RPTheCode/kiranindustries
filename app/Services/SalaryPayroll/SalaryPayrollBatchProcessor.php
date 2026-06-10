@@ -12,7 +12,8 @@ class SalaryPayrollBatchProcessor
     public function __construct(
         private SalaryPayrollScopeService $scopeService,
         private SalaryPayrollCalculator $calculator,
-        private SalaryPayrollRunService $runService
+        private SalaryPayrollRunService $runService,
+        private SalaryPayrollAdvanceRecoveryService $advanceRecovery
     ) {}
 
     public function process(SalaryPayrollRun $run): SalaryPayrollRun
@@ -43,6 +44,15 @@ class SalaryPayrollBatchProcessor
                 ->pluck('apply_attendance_extra', 'employee_id')
                 ->all();
 
+            $entriesToDelete = SalaryPayrollEntry::query()
+                ->where('salary_payroll_run_id', $run->id)
+                ->where('is_locked', false)
+                ->get();
+
+            foreach ($entriesToDelete as $entryToDelete) {
+                $this->advanceRecovery->revertForEntry($entryToDelete);
+            }
+
             SalaryPayrollEntry::query()
                 ->where('salary_payroll_run_id', $run->id)
                 ->where('is_locked', false)
@@ -70,7 +80,8 @@ class SalaryPayrollBatchProcessor
                     $employeeContext
                 );
 
-                SalaryPayrollEntry::create($this->entryPayload($run->id, $employee->id, $result, $entryApply));
+                $entry = SalaryPayrollEntry::create($this->entryPayload($run->id, $employee->id, $result, $entryApply));
+                $this->advanceRecovery->applyAllocations($entry, $result['advance_allocations'] ?? []);
             }
 
             $this->runService->refreshRunTotals($run);
@@ -125,11 +136,22 @@ class SalaryPayrollBatchProcessor
             ])
         );
 
-        DB::transaction(function () use ($run, $employeeId, $result, $entryApply) {
+        DB::transaction(function () use ($run, $employeeId, $result, $entryApply, $entryExists) {
+            $this->advanceRecovery->revertForEntry($entryExists);
+
             SalaryPayrollEntry::query()
                 ->where('salary_payroll_run_id', $run->id)
                 ->where('employee_id', $employeeId)
                 ->update($this->entryPayload($run->id, $employeeId, $result, $entryApply, false));
+
+            $entry = SalaryPayrollEntry::query()
+                ->where('salary_payroll_run_id', $run->id)
+                ->where('employee_id', $employeeId)
+                ->first();
+
+            if ($entry) {
+                $this->advanceRecovery->applyAllocations($entry, $result['advance_allocations'] ?? []);
+            }
 
             $this->runService->refreshRunTotals($run);
         });
@@ -179,6 +201,7 @@ class SalaryPayrollBatchProcessor
             'net_salary' => $result['net_salary'],
             'earnings_breakdown' => $result['earnings_breakdown'],
             'deductions_breakdown' => $result['deductions_breakdown'],
+            'advance_allocations' => $result['advance_allocations'] ?? [],
             'pf_employee' => $result['pf_employee'],
             'pf_wages' => $result['pf_wages'] ?? 0,
             'govt_min_wage_per_day' => $result['govt_min_wage_per_day'] ?? null,
