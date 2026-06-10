@@ -337,7 +337,15 @@ Route::middleware(['auth', 'verified', 'setting'])->group(function () {
     Route::put('attendance-sync-engine/{record}', [\App\Http\Controllers\BiometricAttendanceSyncController::class, 'updateRecord']);
     Route::post('attendance-sync/bulk-update', [\App\Http\Controllers\BiometricAttendanceSyncController::class, 'bulkUpdate']);
     Route::post('attendance-sync-engine/bulk-update', [\App\Http\Controllers\BiometricAttendanceSyncController::class, 'bulkUpdate']);
-    Route::post('payslips/{payslip}/regenerate', [\App\Http\Controllers\PayslipController::class, 'regenerate'])->name('hr.payslips.regenerate');
+    // Legacy payroll URLs → Salary Payroll (bookmarks / old links)
+    Route::get('employee-salaries', fn () => redirect()->route('hr.salary-payroll.employee-salary.index'))->name('hr.employee-salaries.index');
+    Route::get('employee-salaries/{any}', fn () => redirect()->route('hr.salary-payroll.employee-salary.index'))->where('any', '.*');
+    Route::get('payroll-runs', fn () => redirect()->route('hr.salary-payroll.generate.index'))->name('hr.payroll-runs.index');
+    Route::get('payroll-runs/{any}', fn () => redirect()->route('hr.salary-payroll.generate.index'))->where('any', '.*');
+    Route::get('payslips', fn () => redirect()->route('hr.salary-payroll.generate.index'))->name('hr.payslips.index');
+    Route::get('payslips/{any}', fn () => redirect()->route('hr.salary-payroll.generate.index'))->where('any', '.*');
+    Route::get('employee-advances', fn () => redirect()->route('hr.salary-advances.index'))->name('hr.employee-advances.index');
+    Route::get('employee-advances/{any}', fn () => redirect()->route('hr.salary-advances.index'))->where('any', '.*');
     Route::get('payroll/earning-deduction-entry', [\App\Http\Controllers\MonthlyIncentiveController::class, 'index'])->middleware('permission:view-earning-deduction-entry|manage-earning-deduction-entry|manage-any-earning-deduction-entry|manage-own-earning-deduction-entry|create-earning-deduction-entry|edit-earning-deduction-entry|delete-earning-deduction-entry')->name('hr.earning-deduction.index');
     Route::get('payroll/earning-deduction-entry/employee-details/{id}', [\App\Http\Controllers\MonthlyIncentiveController::class, 'getEmployeeDetails'])->middleware('permission:view-earning-deduction-entry|manage-earning-deduction-entry|manage-any-earning-deduction-entry|manage-own-earning-deduction-entry|create-earning-deduction-entry|edit-earning-deduction-entry')->name('hr.earning-deduction.employee-details');
     Route::get('payroll/earning-deduction-entry/employee-history/{id}', [\App\Http\Controllers\MonthlyIncentiveController::class, 'getEmployeeHistory'])->middleware('permission:view-earning-deduction-entry|manage-earning-deduction-entry|manage-any-earning-deduction-entry|manage-own-earning-deduction-entry|create-earning-deduction-entry|edit-earning-deduction-entry')->name('hr.earning-deduction.employee-history');
@@ -925,19 +933,6 @@ Route::middleware(['auth', 'verified', 'setting'])->group(function () {
             Route::put('recruitment/job-types/{jobType}/toggle-status', [\App\Http\Controllers\JobTypeController::class, 'toggleStatus'])->middleware('permission:edit-job-types')->name('hr.recruitment.job-types.toggle-status');
         });
 
-        // Employee Advance Routes
-        Route::middleware('permission:manage-employee-salaries')->group(function () {
-            Route::get('employee-advances/download-template', [\App\Http\Controllers\EmployeeAdvanceController::class, 'importTemplate'])->name('hr.employee-advances.import.template');
-            Route::post('employee-advances/import', [\App\Http\Controllers\EmployeeAdvanceController::class, 'import'])->name('hr.employee-advances.import');
-            Route::get('employee-advances', [\App\Http\Controllers\EmployeeAdvanceController::class, 'index'])->name('hr.employee-advances.index');
-            Route::get('employee-advances/export', [\App\Http\Controllers\EmployeeAdvanceController::class, 'export'])->name('hr.employee-advances.export');
-            Route::get('employee-advances/create', [\App\Http\Controllers\EmployeeAdvanceController::class, 'create'])->name('hr.employee-advances.create');
-            Route::post('employee-advances', [\App\Http\Controllers\EmployeeAdvanceController::class, 'store'])->name('hr.employee-advances.store');
-            Route::get('employee-advances/{employeeAdvance}/edit', [\App\Http\Controllers\EmployeeAdvanceController::class, 'edit'])->name('hr.employee-advances.edit');
-            Route::put('employee-advances/{employeeAdvance}', [\App\Http\Controllers\EmployeeAdvanceController::class, 'update'])->name('hr.employee-advances.update');
-            Route::delete('employee-advances/{employeeAdvance}', [\App\Http\Controllers\EmployeeAdvanceController::class, 'destroy'])->name('hr.employee-advances.destroy');
-        });
-
         // Job Locations Routes
         Route::middleware('permission:manage-job-locations')->group(function () {
             Route::get('recruitment/job-locations', [\App\Http\Controllers\JobLocationController::class, 'index'])->name('hr.recruitment.job-locations.index');
@@ -1344,54 +1339,6 @@ Route::middleware(['auth', 'verified', 'setting'])->group(function () {
         Route::put('salary-components/{salaryComponent}/toggle-status', [\App\Http\Controllers\SalaryComponentController::class, 'toggleStatus'])->middleware('permission:edit-salary-components|manage-salary-components|manage-any-salary-components|manage-own-salary-components')->name('hr.salary-components.toggle-status');
         Route::post('salary-components/bulk-copy', [\App\Http\Controllers\SalaryComponentController::class, 'bulkCopyToBranches'])->middleware('permission:create-salary-components|edit-salary-components|manage-salary-components|manage-any-salary-components')->name('hr.salary-components.bulk-copy');
         Route::post('salary-components/{salaryComponent}/copy-to-branches', [\App\Http\Controllers\SalaryComponentController::class, 'copyToBranches'])->middleware('permission:create-salary-components|edit-salary-components|manage-salary-components|manage-any-salary-components')->name('hr.salary-components.copy-to-branches');
-
-        // Employee Salaries routes
-        Route::middleware('permission:manage-employee-salaries')->group(function () {
-            Route::get('employee-salaries', [\App\Http\Controllers\EmployeeSalaryController::class, 'index'])->name('hr.employee-salaries.index');
-            Route::post('employee-salaries', [\App\Http\Controllers\EmployeeSalaryController::class, 'store'])->middleware('permission:create-employee-salaries')->name('hr.employee-salaries.store');
-            Route::put('employee-salaries/{employeeSalary}', [\App\Http\Controllers\EmployeeSalaryController::class, 'update'])->middleware('permission:edit-employee-salaries')->name('hr.employee-salaries.update');
-            Route::delete('employee-salaries/{employeeSalary}', [\App\Http\Controllers\EmployeeSalaryController::class, 'destroy'])->middleware('permission:delete-employee-salaries')->name('hr.employee-salaries.destroy');
-            Route::put('employee-salaries/{employeeSalary}/toggle-status', [\App\Http\Controllers\EmployeeSalaryController::class, 'toggleStatus'])->middleware('permission:edit-employee-salaries')->name('hr.employee-salaries.toggle-status');
-            Route::get('employee-salaries/{employeeSalary}/payroll', [\App\Http\Controllers\EmployeeSalaryController::class, 'showPayroll'])->middleware('permission:view-employee-salaries')->name('hr.employee-salaries.show-payroll');
-            Route::get('employee-salaries/{employeeSalary}/payroll/{payrollRun}', [\App\Http\Controllers\EmployeeSalaryController::class, 'getPayrollCalculation'])->middleware('permission:view-employee-salaries')->name('hr.employee-salaries.get-payroll-calculation');
-        });
-
-        // Payroll Runs routes
-        Route::middleware('permission:manage-payroll-runs')->group(function () {
-            Route::get('payroll-runs', [\App\Http\Controllers\PayrollRunController::class, 'index'])->name('hr.payroll-runs.index');
-            Route::get('payroll-runs/preview-employees', [\App\Http\Controllers\PayrollRunController::class, 'previewEmployees'])->middleware('permission:create-payroll-runs')->name('hr.payroll-runs.preview-employees');
-            Route::get('payroll-runs/check-overlapping', [\App\Http\Controllers\PayrollRunController::class, 'checkOverlapping'])->middleware('permission:create-payroll-runs')->name('hr.payroll-runs.check-overlapping');
-            Route::get('payroll-runs/scope-filter-options', [\App\Http\Controllers\PayrollRunController::class, 'scopeFilterOptions'])->middleware('permission:create-payroll-runs')->name('hr.payroll-runs.scope-filter-options');
-            Route::get('payroll-runs/export-summary', [\App\Http\Controllers\PayrollRunController::class, 'exportSummary'])->middleware('permission:view-payroll-runs')->name('hr.payroll-runs.export-summary');
-            Route::get('payroll-runs/{payrollRun}/export-advances', [\App\Http\Controllers\PayrollRunController::class, 'exportAdvances'])->middleware('permission:view-payroll-runs')->name('hr.payroll-runs.export-advances');
-            Route::get('payroll-runs/{payrollRun}/export-salary-register', [\App\Http\Controllers\PayrollRunController::class, 'exportSalaryRegister'])->middleware('permission:view-payroll-runs')->name('hr.payroll-runs.export-salary-register');
-            Route::get('payroll-runs/{payrollRun}', [\App\Http\Controllers\PayrollRunController::class, 'show'])->middleware('permission:view-payroll-runs')->name('hr.payroll-runs.show');
-            Route::post('payroll-runs', [\App\Http\Controllers\PayrollRunController::class, 'store'])->middleware('permission:create-payroll-runs')->name('hr.payroll-runs.store');
-            Route::put('payroll-runs/{payrollRun}', [\App\Http\Controllers\PayrollRunController::class, 'update'])->middleware('permission:edit-payroll-runs')->name('hr.payroll-runs.update');
-            Route::delete('payroll-runs/{payrollRun}', [\App\Http\Controllers\PayrollRunController::class, 'destroy'])->middleware('permission:delete-payroll-runs')->name('hr.payroll-runs.destroy');
-            Route::get('payroll-runs/{payrollRun}/mispunches', [\App\Http\Controllers\PayrollRunController::class, 'checkMispunches'])->middleware('permission:process-payroll-runs')->name('hr.payroll-runs.mispunches');
-            Route::get('payroll-runs/{payrollRun}/mispunch-report', [\App\Http\Controllers\PayrollRunController::class, 'mispunchReport'])->middleware('permission:process-payroll-runs')->name('hr.payroll-runs.mispunch-report');
-            Route::get('payroll-runs/{payrollRun}/initiate-process', [\App\Http\Controllers\PayrollRunController::class, 'initiateProcess'])->middleware('permission:process-payroll-runs')->name('hr.payroll-runs.initiate-process');
-            Route::post('payroll-runs/{payrollRun}/process-batch', [\App\Http\Controllers\PayrollRunController::class, 'processBatch'])->middleware('permission:process-payroll-runs')->name('hr.payroll-runs.process-batch');
-            Route::post('payroll-runs/{payrollRun}/finalize', [\App\Http\Controllers\PayrollRunController::class, 'finalize'])->middleware('permission:process-payroll-runs')->name('hr.payroll-runs.finalize');
-            Route::put('payroll-runs/{payrollRun}/process', [\App\Http\Controllers\PayrollRunController::class, 'process'])->middleware('permission:process-payroll-runs')->name('hr.payroll-runs.process');
-            Route::put('payroll-runs/{payrollRun}/confirm', [\App\Http\Controllers\PayrollRunController::class, 'confirm'])->middleware('permission:process-payroll-runs')->name('hr.payroll-runs.confirm');
-            Route::put('payroll-runs/{payrollRun}/regenerate', [\App\Http\Controllers\PayrollRunController::class, 'regenerate'])->middleware('permission:process-payroll-runs')->name('hr.payroll-runs.regenerate');
-            Route::post('payroll-runs/{payrollRun}/regenerate-employee', [\App\Http\Controllers\PayrollRunController::class, 'regenerateEmployee'])->middleware('permission:process-payroll-runs')->name('hr.payroll-runs.regenerate-employee');
-        });
-
-        // Payslips routes
-        Route::middleware('permission:manage-payslips')->group(function () {
-            Route::get('payslips', [\App\Http\Controllers\PayslipController::class, 'index'])->name('hr.payslips.index');
-            Route::post('payslips/generate', [\App\Http\Controllers\PayslipController::class, 'generate'])->middleware('permission:create-payslips')->name('hr.payslips.generate');
-            Route::post('payslips/bulk-generate', [\App\Http\Controllers\PayslipController::class, 'bulkGenerate'])->middleware('permission:create-payslips')->name('hr.payslips.bulk-generate');
-            Route::get('payslips/{payslip}/download', [\App\Http\Controllers\PayslipController::class, 'download'])->middleware('permission:download-payslips')->name('hr.payslips.download');
-            Route::put('payslips/{payslip}', [\App\Http\Controllers\PayslipController::class, 'update'])->middleware('permission:create-payslips')->name('hr.payslips.update');
-            Route::put('payslips/{id}/toggle-hold', [\App\Http\Controllers\PayslipController::class, 'toggleHold'])->middleware('permission:create-payslips')->name('hr.payslips.toggle-hold');
-            Route::get('payslips/export/bulk-excel', [\App\Http\Controllers\PayslipController::class, 'exportBulkExcel'])->middleware('permission:download-payslips')->name('hr.payslips.export-bulk-excel');
-        });
-
-
 
         // Plans management routes (admin only)
         Route::middleware('permission:manage-plans')->group(function () {

@@ -28,7 +28,6 @@ import {
     Shield,
     Ticket,
     UsersRound,
-    Wallet,
 } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
@@ -299,47 +298,7 @@ export function AppSidebar() {
             });
         }
 
-        // Legacy payroll (runs, payslips, salaries, etc.)
-        const payrollChildren = [];
-
-        if ((hasPermission(permissions, 'manage-employee-salaries') || hasPermission(permissions, 'view-employee-salaries'))) {
-            payrollChildren.push({
-                title: t('Employee Salaries'),
-                href: route('hr.employee-salaries.index')
-            });
-        }
-
-        if ((hasPermission(permissions, 'manage-payroll-runs') || hasPermission(permissions, 'view-payroll-runs'))) {
-            payrollChildren.push({
-                title: t('Payroll Runs'),
-                href: route('hr.payroll-runs.index')
-            });
-        }
-
-        if ((hasPermission(permissions, 'manage-payslips') || hasPermission(permissions, 'view-payslips'))) {
-            payrollChildren.push({
-                title: t('Payslips'),
-                href: route('hr.payslips.index')
-            });
-        }
-
-        if ((hasPermission(permissions, 'manage-employee-salaries') || hasPermission(permissions, 'view-employee-salaries'))) {
-            payrollChildren.push({
-                title: t('Employee Advances'),
-                href: route('hr.employee-advances.index')
-            });
-        }
-
-        if (payrollChildren.length > 0) {
-            items.push({
-                title: t('Payroll Management'),
-                icon: Wallet,
-                children: payrollChildren,
-                group: 'payroll',
-            });
-        }
-
-        // New salary payroll module (separate from legacy payroll)
+        // Salary payroll module
         const salaryPayrollChildren = [];
         if (canAccessSalaryPayrollEmployee(permissions)) {
             salaryPayrollChildren.push({

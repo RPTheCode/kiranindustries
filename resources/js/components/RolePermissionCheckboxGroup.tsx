@@ -28,8 +28,14 @@ export function RolePermissionCheckboxGroup({
   const [expandedModules, setExpandedModules] = useState<string[]>([]);
 
   // Filter permissions based on search query
+  const legacyPayrollModules = ['payroll_runs', 'payslips'];
+
   const filteredPermissions = useMemo(() => {
     return Object.entries(permissions).reduce((acc, [module, modulePermissions]) => {
+      if (legacyPayrollModules.includes(module)) {
+        return acc;
+      }
+
       const filtered = modulePermissions.filter(p =>
         p.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -290,7 +296,6 @@ export function RolePermissionCheckboxGroup({
             'Employees',
             'Attendance & Bio-Sync',
             'Essl sync',
-            'Payroll Management',
             'Salary Payroll',
             'Reports',
             'Leave Management',
