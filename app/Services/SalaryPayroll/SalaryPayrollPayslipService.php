@@ -343,7 +343,8 @@ class SalaryPayrollPayslipService
             'PT' => 3,
             'GOVT WAGE ADJUSTMENT' => 4,
             'TDS' => 5,
-            'SALARY ADVANCE RECOVERY' => 6,
+            'SALARY LOAN RECOVERY' => 6,
+            'SALARY ADVANCE RECOVERY' => 7,
         ];
 
         return $lines->sortBy(fn ($amount, $name) => [

@@ -143,3 +143,22 @@ export const canManageSalaryAdvance = (userPermissions: string[]) =>
         'manage-any-salary-advances',
         'edit-salary-advances',
     ]);
+
+export const canAccessSalaryLoan = (userPermissions: string[]) =>
+    canAccessEntity(userPermissions, 'salary-loans');
+
+export const canCreateSalaryLoan = (userPermissions: string[]) =>
+    canCreateEntity(userPermissions, 'salary-loans');
+
+export const canEditSalaryLoan = (userPermissions: string[]) =>
+    canEditEntity(userPermissions, 'salary-loans');
+
+export const canDeleteSalaryLoan = (userPermissions: string[]) =>
+    canDeleteEntity(userPermissions, 'salary-loans');
+
+export const canManageSalaryLoan = (userPermissions: string[]) =>
+    hasAnyPermission(userPermissions, [
+        'manage-salary-loans',
+        'manage-any-salary-loans',
+        'edit-salary-loans',
+    ]);

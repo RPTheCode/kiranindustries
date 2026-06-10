@@ -883,6 +883,7 @@ class PermissionSeeder extends Seeder
             ['name' => 'edit-salary-payroll-runs', 'module' => 'Salary Payroll', 'label' => 'Edit Generate Payroll', 'description' => 'Edit salary payroll runs'],
             ['name' => 'delete-salary-payroll-runs', 'module' => 'Salary Payroll', 'label' => 'Delete Generate Payroll', 'description' => 'Delete salary payroll runs'],
             ['name' => 'finalize-salary-payroll-runs', 'module' => 'Salary Payroll', 'label' => 'Finalize Generate Payroll', 'description' => 'Finalize salary payroll runs'],
+            ['name' => 'apply-salary-payroll-attendance-extra', 'module' => 'Salary Payroll', 'label' => 'Apply OT No Extra Days to Net Salary', 'description' => 'Apply attendance extra days to net salary in payroll generate'],
 
             // Salary Payroll — Earning / Deduction
             ['name' => 'manage-earning-deduction-entry', 'module' => 'Salary Payroll', 'label' => 'Manage Earning / Deduction', 'description' => 'Manage earning and deduction entries'],
@@ -897,6 +898,22 @@ class PermissionSeeder extends Seeder
             ['name' => 'manage-payroll-settings', 'module' => 'Salary Payroll', 'label' => 'Manage Payroll Settings', 'description' => 'Manage PF, ESIC, PT payroll settings'],
             ['name' => 'view-payroll-settings', 'module' => 'Salary Payroll', 'label' => 'View Payroll Settings', 'description' => 'View payroll settings'],
             ['name' => 'edit-payroll-settings', 'module' => 'Salary Payroll', 'label' => 'Edit Payroll Settings', 'description' => 'Edit payroll settings'],
+
+            // Salary Payroll — Salary Advance
+            ['name' => 'manage-salary-advances', 'module' => 'Salary Payroll', 'label' => 'Manage Salary Advance', 'description' => 'Full access to salary advance requests'],
+            ['name' => 'manage-any-salary-advances', 'module' => 'Salary Payroll', 'label' => 'Manage Any Salary Advance', 'description' => 'Manage any employee salary advance'],
+            ['name' => 'view-salary-advances', 'module' => 'Salary Payroll', 'label' => 'View Salary Advance', 'description' => 'View salary advance requests'],
+            ['name' => 'create-salary-advances', 'module' => 'Salary Payroll', 'label' => 'Create Salary Advance', 'description' => 'Create salary advance requests'],
+            ['name' => 'edit-salary-advances', 'module' => 'Salary Payroll', 'label' => 'Edit Salary Advance', 'description' => 'Edit salary advance requests'],
+            ['name' => 'delete-salary-advances', 'module' => 'Salary Payroll', 'label' => 'Delete Salary Advance', 'description' => 'Delete salary advance requests'],
+
+            // Salary Payroll — Salary Loan
+            ['name' => 'manage-salary-loans', 'module' => 'Salary Payroll', 'label' => 'Manage Salary Loan', 'description' => 'Full access to salary loan requests'],
+            ['name' => 'manage-any-salary-loans', 'module' => 'Salary Payroll', 'label' => 'Manage Any Salary Loan', 'description' => 'Manage any employee salary loan'],
+            ['name' => 'view-salary-loans', 'module' => 'Salary Payroll', 'label' => 'View Salary Loan', 'description' => 'View salary loan requests'],
+            ['name' => 'create-salary-loans', 'module' => 'Salary Payroll', 'label' => 'Create Salary Loan', 'description' => 'Create salary loan requests'],
+            ['name' => 'edit-salary-loans', 'module' => 'Salary Payroll', 'label' => 'Edit Salary Loan', 'description' => 'Edit salary loan requests'],
+            ['name' => 'delete-salary-loans', 'module' => 'Salary Payroll', 'label' => 'Delete Salary Loan', 'description' => 'Delete salary loan requests'],
 
             // Employee Salaries management (legacy Payroll Management)
             ['name' => 'manage-payroll-runs', 'module' => 'payroll_runs', 'label' => 'Manage Payroll Runs', 'description' => 'Can manage payroll runs'],

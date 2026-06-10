@@ -13,7 +13,8 @@ class SalaryPayrollBatchProcessor
         private SalaryPayrollScopeService $scopeService,
         private SalaryPayrollCalculator $calculator,
         private SalaryPayrollRunService $runService,
-        private SalaryPayrollAdvanceRecoveryService $advanceRecovery
+        private SalaryPayrollAdvanceRecoveryService $advanceRecovery,
+        private SalaryPayrollLoanRecoveryService $loanRecovery
     ) {}
 
     public function process(SalaryPayrollRun $run): SalaryPayrollRun
@@ -50,6 +51,7 @@ class SalaryPayrollBatchProcessor
                 ->get();
 
             foreach ($entriesToDelete as $entryToDelete) {
+                $this->loanRecovery->revertForEntry($entryToDelete);
                 $this->advanceRecovery->revertForEntry($entryToDelete);
             }
 
@@ -81,6 +83,7 @@ class SalaryPayrollBatchProcessor
                 );
 
                 $entry = SalaryPayrollEntry::create($this->entryPayload($run->id, $employee->id, $result, $entryApply));
+                $this->loanRecovery->applyAllocations($entry, $result['loan_allocations'] ?? []);
                 $this->advanceRecovery->applyAllocations($entry, $result['advance_allocations'] ?? []);
             }
 
@@ -137,6 +140,7 @@ class SalaryPayrollBatchProcessor
         );
 
         DB::transaction(function () use ($run, $employeeId, $result, $entryApply, $entryExists) {
+            $this->loanRecovery->revertForEntry($entryExists);
             $this->advanceRecovery->revertForEntry($entryExists);
 
             SalaryPayrollEntry::query()
@@ -150,6 +154,7 @@ class SalaryPayrollBatchProcessor
                 ->first();
 
             if ($entry) {
+                $this->loanRecovery->applyAllocations($entry, $result['loan_allocations'] ?? []);
                 $this->advanceRecovery->applyAllocations($entry, $result['advance_allocations'] ?? []);
             }
 
@@ -202,6 +207,7 @@ class SalaryPayrollBatchProcessor
             'earnings_breakdown' => $result['earnings_breakdown'],
             'deductions_breakdown' => $result['deductions_breakdown'],
             'advance_allocations' => $result['advance_allocations'] ?? [],
+            'loan_allocations' => $result['loan_allocations'] ?? [],
             'pf_employee' => $result['pf_employee'],
             'pf_wages' => $result['pf_wages'] ?? 0,
             'govt_min_wage_per_day' => $result['govt_min_wage_per_day'] ?? null,

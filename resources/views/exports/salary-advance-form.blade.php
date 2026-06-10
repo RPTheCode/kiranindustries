@@ -1,9 +1,14 @@
+@php
+    $isBlank = (bool) ($blank ?? false);
+    $blankLine = '________________________';
+    $blankShort = '________';
+@endphp
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
-    <title>Salary Advance Form - #{{ $advance->id }}</title>
+    <title>{{ $isBlank ? 'Salary Advance Form (Blank)' : 'Salary Advance Form - #'.$advance->id }}</title>
     <style>
         @page {
             margin: 10mm 12mm;
@@ -126,6 +131,13 @@
         .val-line {
             font-weight: 900;
             color: #0f172a;
+        }
+
+        .blank-field {
+            border-bottom: 1px dashed #94a3b8;
+            min-height: 18px;
+            color: #64748b;
+            font-weight: normal;
         }
 
         .info-strip {
@@ -266,77 +278,123 @@
                     <div class="form-type-bar">FORM TYPE:- SALARY ADVANCE FORM</div>
 
                     <div class="meta-bar">
-                        Application No: <span class="val-line">#{{ $advance->id }}</span>
-                        &nbsp;&nbsp;|&nbsp;&nbsp;
-                        Application Date: <span class="val-line">{{ $advance->application_date?->format('d/m/Y') }}</span>
-                        @if($advance->status)
+                        @if($isBlank)
+                            Application No: <span class="blank-field">{{ $blankShort }}</span>
                             &nbsp;&nbsp;|&nbsp;&nbsp;
-                            Status: <span class="val-line">{{ strtoupper(str_replace('_', ' ', $advance->status)) }}</span>
+                            Application Date: <span class="blank-field">{{ $blankShort }}</span>
+                        @else
+                            Application No: <span class="val-line">#{{ $advance->id }}</span>
+                            &nbsp;&nbsp;|&nbsp;&nbsp;
+                            Application Date: <span class="val-line">{{ $advance->application_date?->format('d/m/Y') }}</span>
+                            @if($advance->status)
+                                &nbsp;&nbsp;|&nbsp;&nbsp;
+                                Status: <span class="val-line">{{ strtoupper(str_replace('_', ' ', $advance->status)) }}</span>
+                            @endif
                         @endif
                     </div>
 
                     <table class="details-table">
                         <tr>
                             <td class="label">Employee Name:</td>
-                            <td class="val-line" style="width: 40%;">{{ $advance->employee?->name }}</td>
+                            <td style="width: 40%;">
+                                @if($isBlank)<div class="blank-field">{{ $blankLine }}</div>
+                                @else<span class="val-line">{{ $advance->employee?->name }}</span>@endif
+                            </td>
                             <td class="label" style="text-align: right;">Code No:</td>
-                            <td class="val-line">{{ $advance->employee?->employee?->employee_id ?? $advance->employee?->employee?->emy_code }}</td>
+                            <td>
+                                @if($isBlank)<div class="blank-field">{{ $blankShort }}</div>
+                                @else<span class="val-line">{{ $advance->employee?->employee?->employee_id ?? $advance->employee?->employee?->emy_code }}</span>@endif
+                            </td>
                         </tr>
                         <tr>
                             <td class="label">Department:</td>
-                            <td class="val-line">{{ $advance->employee?->employee?->department?->name ?? '—' }}</td>
+                            <td>
+                                @if($isBlank)<div class="blank-field">{{ $blankLine }}</div>
+                                @else<span class="val-line">{{ $advance->employee?->employee?->department?->name ?? '—' }}</span>@endif
+                            </td>
                             <td class="label" style="text-align: right;">Designation:</td>
-                            <td class="val-line">{{ $advance->employee?->employee?->designation?->name ?? '—' }}</td>
+                            <td>
+                                @if($isBlank)<div class="blank-field">{{ $blankLine }}</div>
+                                @else<span class="val-line">{{ $advance->employee?->employee?->designation?->name ?? '—' }}</span>@endif
+                            </td>
                         </tr>
                         <tr>
                             <td class="label">Branch / Division:</td>
-                            <td class="val-line" colspan="3">{{ $advance->branch?->name ?? $advance->employee?->employee?->branch?->name ?? '—' }}</td>
+                            <td colspan="3">
+                                @if($isBlank)<div class="blank-field">{{ $blankLine }}</div>
+                                @else<span class="val-line">{{ $advance->branch?->name ?? $advance->employee?->employee?->branch?->name ?? '—' }}</span>@endif
+                            </td>
                         </tr>
                     </table>
 
                     <div class="info-strip info-strip-salary">
-                        <strong>Present Salary:</strong> ₹ {{ number_format((float) $advance->present_salary_snapshot, 2) }}
-                        &nbsp;&nbsp;|&nbsp;&nbsp;
-                        <strong>Earned Till Date:</strong> ₹ {{ number_format((float) $advance->earned_salary_snapshot, 2) }}
-                        &nbsp;&nbsp;|&nbsp;&nbsp;
-                        <strong>Allowed Advance:</strong> ₹ {{ number_format((float) $advance->allowed_amount_snapshot, 2) }}
+                        @if($isBlank)
+                            <strong>Present Salary:</strong> ₹ {{ $blankShort }}
+                            &nbsp;&nbsp;|&nbsp;&nbsp;
+                            <strong>Earned Till Date:</strong> ₹ {{ $blankShort }}
+                            &nbsp;&nbsp;|&nbsp;&nbsp;
+                            <strong>Allowed Advance:</strong> ₹ {{ $blankShort }}
+                        @else
+                            <strong>Present Salary:</strong> ₹ {{ number_format((float) $advance->present_salary_snapshot, 2) }}
+                            &nbsp;&nbsp;|&nbsp;&nbsp;
+                            <strong>Earned Till Date:</strong> ₹ {{ number_format((float) $advance->earned_salary_snapshot, 2) }}
+                            &nbsp;&nbsp;|&nbsp;&nbsp;
+                            <strong>Allowed Advance:</strong> ₹ {{ number_format((float) $advance->allowed_amount_snapshot, 2) }}
+                        @endif
                     </div>
 
                     <table class="amount-table">
                         <tr>
                             <td class="label" style="width: 22%; background: #f8fafc;">Advance Amount:</td>
-                            <td class="amount-highlight">₹ {{ number_format((float) ($advance->approved_amount ?? $advance->requested_amount), 2) }}</td>
+                            <td>
+                                @if($isBlank)<div class="blank-field">{{ $blankLine }}</div>
+                                @else<span class="amount-highlight">₹ {{ number_format((float) ($advance->approved_amount ?? $advance->requested_amount), 2) }}</span>@endif
+                            </td>
                         </tr>
                         <tr>
                             <td class="label" style="background: #f8fafc;">Amount in Words:</td>
-                            <td class="val-line" style="font-size: 11px;">{{ $advance->amount_in_words }}</td>
+                            <td>
+                                @if($isBlank)<div class="blank-field">{{ $blankLine }}</div>
+                                @else<span class="val-line" style="font-size: 11px;">{{ $advance->amount_in_words }}</span>@endif
+                            </td>
                         </tr>
                     </table>
 
-                    <div class="info-strip info-strip-advance">
-                        <strong>Advance Requested:</strong> ₹ {{ number_format((float) $advance->requested_amount, 2) }}
-                        @if($advance->approved_amount && (float) $advance->approved_amount !== (float) $advance->requested_amount)
-                            &nbsp;&nbsp;|&nbsp;&nbsp;
-                            <strong>Approved:</strong> ₹ {{ number_format((float) $advance->approved_amount, 2) }}
-                        @endif
-                        @if((float) $advance->paid_amount > 0)
-                            &nbsp;&nbsp;|&nbsp;&nbsp;
-                            <strong>Recovered:</strong> ₹ {{ number_format((float) $advance->paid_amount, 2) }}
-                        @endif
-                    </div>
+                    @unless($isBlank)
+                        <div class="info-strip info-strip-advance">
+                            <strong>Advance Requested:</strong> ₹ {{ number_format((float) $advance->requested_amount, 2) }}
+                            @if($advance->approved_amount && (float) $advance->approved_amount !== (float) $advance->requested_amount)
+                                &nbsp;&nbsp;|&nbsp;&nbsp;
+                                <strong>Approved:</strong> ₹ {{ number_format((float) $advance->approved_amount, 2) }}
+                            @endif
+                            @if((float) $advance->paid_amount > 0)
+                                &nbsp;&nbsp;|&nbsp;&nbsp;
+                                <strong>Recovered:</strong> ₹ {{ number_format((float) $advance->paid_amount, 2) }}
+                            @endif
+                        </div>
+                    @endunless
 
                     <table class="reason-row">
                         <tr>
                             <td style="width: 70px; font-weight: bold; color: #475569; white-space: nowrap;">Purpose:</td>
-                            <td class="reason-line">{{ $advance->purpose }}</td>
+                            <td class="reason-line">@unless($isBlank){{ $advance->purpose }}@endunless</td>
                         </tr>
                     </table>
 
-                    @if($advance->remarks)
+                    @if(!$isBlank && $advance->remarks)
                         <table class="reason-row">
                             <tr>
                                 <td style="width: 70px; font-weight: bold; color: #475569; white-space: nowrap;">Remarks:</td>
                                 <td class="reason-line">{{ $advance->remarks }}</td>
+                            </tr>
+                        </table>
+                    @endif
+
+                    @if($isBlank)
+                        <table class="reason-row">
+                            <tr>
+                                <td style="width: 70px; font-weight: bold; color: #475569; white-space: nowrap;">Remarks:</td>
+                                <td class="reason-line"></td>
                             </tr>
                         </table>
                     @endif

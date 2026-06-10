@@ -12,12 +12,12 @@ use PhpOffice\PhpSpreadsheet\Style\Border;
 
 class LoanLedgerExport implements FromView, WithEvents, WithColumnWidths
 {
-    public function __construct(protected $employees, protected string $companyTitle) {}
+    public function __construct(protected $reportRows, protected string $companyTitle) {}
 
     public function view(): View
     {
         return view('exports.loan_ledger_excel', [
-            'employees' => $this->employees,
+            'reportRows' => $this->reportRows,
             'companyName' => $this->companyTitle,
             'reportTitle' => 'LOAN & ADVANCE LEDGER',
             'period' => 'AS OF ' . now()->format('d-M-Y'),

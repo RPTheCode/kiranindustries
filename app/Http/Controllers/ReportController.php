@@ -1040,34 +1040,45 @@ class ReportController extends Controller
             'employee_id' => decryptId($request->get('employee_id')),
         ]);
 
-
         $branchId = $request->get('branch_id');
         $categoryId = $request->get('category');
+        $empId = $request->get('employee_id');
         $branchName = ($branchId && $branchId !== 'all') ? (\App\Models\Branch::find($branchId)?->name ?? '') : '';
 
-        $employees = Employee::withoutGlobalScopes()
-            ->when($branchId && $branchId !== 'all', fn($q) => $q->where('branch_id', $branchId))
-            ->when($categoryId && $categoryId !== 'all', fn($q) => $q->where('category_id', $categoryId))
-            ->where('loan_total_amount', '>', 0)
+        $loans = \App\Models\SalaryPayroll\SalaryLoanRequest::query()
+            ->whereIn('status', [
+                \App\Models\SalaryPayroll\SalaryLoanRequest::STATUS_DISBURSED,
+                \App\Models\SalaryPayroll\SalaryLoanRequest::STATUS_RECOVERING,
+            ])
+            ->whereRaw('paid_amount < COALESCE(approved_amount, requested_amount)')
+            ->when($branchId && $branchId !== 'all', fn ($q) => $q->where('branch_id', $branchId))
+            ->when($categoryId && $categoryId !== 'all', fn ($q) => $q->whereHas(
+                'employee.employee',
+                fn ($eq) => $eq->where('category_id', $categoryId)
+            ))
+            ->when($empId && $empId !== 'all', fn ($q) => $q->where('employee_id', $empId))
+            ->with(['employee.employee'])
+            ->orderBy('employee_id')
             ->get();
 
-        $reportData = $employees->map(function ($emp) {
-            $rows = [];
-            $rows[] = [
-                'code' => $emp->emy_code ?? $emp->employee_id,
-                'name' => $emp->user->name ?? 'N/A',
-                'loan_type' => 'Loan',
-                'period' => $emp->loan_period ?? 0,
-                'total_amount' => number_format((float)$emp->loan_total_amount, 2),
-                'installment' => number_format((float)$emp->loan_installment_amount, 2),
+        $reportData = $loans->map(function ($loan) {
+            $emp = $loan->employee?->employee;
+
+            return [
+                'code' => $emp->emy_code ?? $emp->employee_id ?? '—',
+                'name' => $loan->employee?->name ?? 'N/A',
+                'loan_type' => 'Salary Loan',
+                'period' => $loan->installment_count ?? 0,
+                'total_amount' => number_format((float) ($loan->approved_amount ?? $loan->requested_amount), 2),
+                'installment' => number_format((float) ($loan->installment_amount ?? 0), 2),
+                'outstanding' => number_format((float) $loan->pending_amount, 2),
             ];
-            return $rows;
-        })->flatten(1);
+        })->values();
 
         $companyTitle = getSetting('titleText', 'KIRAN INDUSTRIES') . ($branchName ? " - " . $branchName : "");
 
         if ($request->get('is_excel_export')) {
-            return ['data' => $employees, 'companyTitle' => $companyTitle];
+            return ['data' => $reportData, 'companyTitle' => $companyTitle];
         }
 
         $data = [

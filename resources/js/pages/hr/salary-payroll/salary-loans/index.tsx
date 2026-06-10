@@ -8,16 +8,10 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { canAccessSalaryAdvance, canCreateSalaryAdvance, canDeleteSalaryAdvance, canEditSalaryAdvance } from '@/utils/authorization';
+import { canAccessSalaryLoan, canCreateSalaryLoan, canDeleteSalaryLoan, canEditSalaryLoan } from '@/utils/authorization';
 import { ConfirmActionDialog } from '../payroll-generate/components/ConfirmActionDialog';
 import { toast } from '@/components/custom-toast';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-700',
@@ -25,7 +19,7 @@ const statusColors: Record<string, string> = {
   approved: 'bg-blue-100 text-blue-800',
   disbursed: 'bg-green-100 text-green-800',
   recovering: 'bg-orange-100 text-orange-800',
-  recovered: 'bg-emerald-100 text-emerald-800',
+  closed: 'bg-emerald-100 text-emerald-800',
   rejected: 'bg-red-100 text-red-800',
   cancelled: 'bg-gray-100 text-gray-600',
 };
@@ -33,9 +27,7 @@ const statusColors: Record<string, string> = {
 const DELETABLE_STATUSES = ['draft', 'submitted', 'rejected', 'cancelled'];
 
 function formatCurrency(value: number) {
-  if (window.appSettings?.formatCurrency) {
-    return window.appSettings.formatCurrency(value);
-  }
+  if (window.appSettings?.formatCurrency) return window.appSettings.formatCurrency(value);
   return `₹${Number(value).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
 }
 
@@ -46,9 +38,9 @@ function formatDate(value?: string | null) {
   return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-export default function SalaryAdvancesIndex() {
+export default function SalaryLoansIndex() {
   const { t } = useTranslation();
-  const { auth, advances, filters = {}, statusOptions = {} } = usePage().props as any;
+  const { auth, loans, filters = {}, statusOptions = {} } = usePage().props as any;
   const permissions = auth?.permissions || [];
   const [search, setSearch] = useState(filters.search || '');
   const [status, setStatus] = useState(filters.status || 'all');
@@ -59,19 +51,19 @@ export default function SalaryAdvancesIndex() {
   const handleDeleteConfirm = () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
-    router.delete(route('hr.salary-advances.destroy', deleteTarget.id), {
+    router.delete(route('hr.salary-loans.destroy', deleteTarget.id), {
       onSuccess: (page: any) => {
         setDeleteTarget(null);
         if (page.props.flash?.success) toast.success(page.props.flash.success);
         if (page.props.flash?.error) toast.error(page.props.flash.error);
       },
-      onError: () => toast.error(t('Failed to delete salary advance request.')),
+      onError: () => toast.error(t('Failed to delete salary loan request.')),
       onFinish: () => setIsDeleting(false),
     });
   };
 
   const applyFilters = () => {
-    router.get(route('hr.salary-advances.index'), {
+    router.get(route('hr.salary-loans.index'), {
       search: search || undefined,
       status: status !== 'all' ? status : undefined,
       month_year: monthYear || undefined,
@@ -82,30 +74,30 @@ export default function SalaryAdvancesIndex() {
   const breadcrumbs = [
     { title: t('Dashboard'), href: route('dashboard') },
     { title: t('Salary Payroll') },
-    { title: t('Salary Advance') },
+    { title: t('Salary Loan') },
   ];
 
   const pageActions = [
-    ...(canAccessSalaryAdvance(permissions)
+    ...(canAccessSalaryLoan(permissions)
       ? [{
           label: t('Print Blank Form'),
           icon: <Printer className="h-4 w-4 mr-2" />,
           variant: 'outline' as const,
-          onClick: () => window.open(route('hr.salary-advances.print-blank'), '_blank', 'noopener,noreferrer'),
+          onClick: () => window.open(route('hr.salary-loans.print-blank'), '_blank', 'noopener,noreferrer'),
         }]
       : []),
-    ...(canCreateSalaryAdvance(permissions)
+    ...(canCreateSalaryLoan(permissions)
       ? [{
-          label: t('New Advance'),
+          label: t('New Loan'),
           icon: <Plus className="h-4 w-4 mr-2" />,
           variant: 'default' as const,
-          onClick: () => router.visit(route('hr.salary-advances.create')),
+          onClick: () => router.visit(route('hr.salary-loans.create')),
         }]
       : []),
   ];
 
   return (
-    <PageTemplate title={t('Salary Advance')} breadcrumbs={breadcrumbs} actions={pageActions} noPadding>
+    <PageTemplate title={t('Salary Loan')} breadcrumbs={breadcrumbs} actions={pageActions} noPadding>
       <div className="bg-white dark:bg-gray-900 rounded-lg shadow mb-4 p-4">
         <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
           <Input placeholder={t('Search employee...')} value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -121,10 +113,8 @@ export default function SalaryAdvancesIndex() {
           <Input type="month" value={monthYear} onChange={(e) => setMonthYear(e.target.value)} />
           <Button onClick={applyFilters}>{t('Filter')}</Button>
           <Button variant="outline" onClick={() => {
-            setSearch('');
-            setStatus('all');
-            setMonthYear('');
-            router.get(route('hr.salary-advances.index'));
+            setSearch(''); setStatus('all'); setMonthYear('');
+            router.get(route('hr.salary-loans.index'));
           }}>{t('Reset')}</Button>
         </div>
       </div>
@@ -136,13 +126,14 @@ export default function SalaryAdvancesIndex() {
               <TableHead className="text-xs font-semibold">{t('Date')}</TableHead>
               <TableHead className="text-xs font-semibold">{t('Employee')}</TableHead>
               <TableHead className="text-right text-xs font-semibold">{t('Amount')}</TableHead>
+              <TableHead className="text-xs font-semibold">{t('EMI')}</TableHead>
               <TableHead className="text-xs font-semibold">{t('Status')}</TableHead>
               <TableHead className="text-right text-xs font-semibold">{t('Pending')}</TableHead>
               <TableHead className="text-right text-xs font-semibold">{t('Actions')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {advances?.data?.length ? advances.data.map((row: any) => (
+            {loans?.data?.length ? loans.data.map((row: any) => (
               <TableRow key={row.id} className="hover:bg-slate-50/80">
                 <TableCell className="text-sm tabular-nums text-slate-600">{formatDate(row.application_date)}</TableCell>
                 <TableCell>
@@ -150,6 +141,7 @@ export default function SalaryAdvancesIndex() {
                   <div className="text-xs text-muted-foreground">{row.employee?.employee?.employee_id}</div>
                 </TableCell>
                 <TableCell className="text-right font-medium tabular-nums">{formatCurrency(row.approved_amount ?? row.requested_amount)}</TableCell>
+                <TableCell className="text-sm">{row.installment_count} × {formatCurrency(row.installment_amount ?? 0)}</TableCell>
                 <TableCell>
                   <Badge className={`capitalize border-0 ${statusColors[row.status] || ''}`}>{t(row.status)}</Badge>
                 </TableCell>
@@ -157,19 +149,19 @@ export default function SalaryAdvancesIndex() {
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-0.5">
                     <Button variant="ghost" size="icon" className="h-8 w-8" asChild title={t('View')}>
-                      <Link href={route('hr.salary-advances.show', row.id)}><Eye className="h-4 w-4" /></Link>
+                      <Link href={route('hr.salary-loans.show', row.id)}><Eye className="h-4 w-4" /></Link>
                     </Button>
-                    {canEditSalaryAdvance(permissions) && ['draft', 'submitted'].includes(row.status) && (
+                    {canEditSalaryLoan(permissions) && ['draft', 'submitted'].includes(row.status) && (
                       <Button variant="ghost" size="icon" className="h-8 w-8" asChild title={t('Edit')}>
-                        <Link href={route('hr.salary-advances.edit', row.id)}><Edit className="h-4 w-4" /></Link>
+                        <Link href={route('hr.salary-loans.edit', row.id)}><Edit className="h-4 w-4" /></Link>
                       </Button>
                     )}
                     <Button variant="ghost" size="icon" className="h-8 w-8" asChild title={t('Print')}>
-                      <a href={route('hr.salary-advances.print', row.id)} target="_blank" rel="noreferrer">
+                      <a href={route('hr.salary-loans.print', row.id)} target="_blank" rel="noreferrer">
                         <Printer className="h-4 w-4" />
                       </a>
                     </Button>
-                    {canDeleteSalaryAdvance(permissions) && DELETABLE_STATUSES.includes(row.status) && (
+                    {canDeleteSalaryLoan(permissions) && DELETABLE_STATUSES.includes(row.status) && (
                       <Button
                         variant="ghost"
                         size="icon"
@@ -185,8 +177,8 @@ export default function SalaryAdvancesIndex() {
               </TableRow>
             )) : (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                  {t('No salary advance requests found.')}
+                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                  {t('No salary loan requests found.')}
                 </TableCell>
               </TableRow>
             )}
@@ -194,11 +186,11 @@ export default function SalaryAdvancesIndex() {
         </Table>
 
         <Pagination
-          from={advances?.from || 0}
-          to={advances?.to || 0}
-          total={advances?.total || 0}
-          links={advances?.links}
-          entityName={t('salary advances')}
+          from={loans?.from || 0}
+          to={loans?.to || 0}
+          total={loans?.total || 0}
+          links={loans?.links}
+          entityName={t('salary loans')}
           onPageChange={(url) => router.get(url)}
         />
       </div>
@@ -206,10 +198,8 @@ export default function SalaryAdvancesIndex() {
       <ConfirmActionDialog
         open={!!deleteTarget}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
-        title={t('Delete salary advance?')}
-        description={t('Delete advance request for {{name}}? This cannot be undone. Approved or disbursed advances cannot be deleted.', {
-          name: deleteTarget?.name || '',
-        })}
+        title={t('Delete salary loan?')}
+        description={t('Delete loan request for {{name}}? This cannot be undone.', { name: deleteTarget?.name || '' })}
         confirmLabel={t('Delete')}
         cancelLabel={t('Cancel')}
         variant="destructive"

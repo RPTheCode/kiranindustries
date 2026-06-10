@@ -258,23 +258,47 @@ class SalaryAdvanceController extends Controller
         return back()->with('success', __('Advance disbursed. Recovery will apply in Generate Payroll.'));
     }
 
+    public function printBlank()
+    {
+        return view('exports.salary-advance-form', [
+            'blank' => true,
+            'advance' => null,
+            'companyName' => $this->printCompanyTitle(),
+            'printDate' => now()->format('d/m/Y H:i:s'),
+        ]);
+    }
+
     public function print(SalaryAdvanceRequest $salaryAdvanceRequest)
     {
         $this->authorizeRequest($salaryAdvanceRequest);
         $salaryAdvanceRequest->load(['employee.employee.department', 'employee.employee.designation', 'employee.employee.branch', 'creator', 'approver', 'branch']);
 
-        $companyTitle = strtoupper(getSetting('titleText', 'KIRAN INDUSTRIES PVT LTD.'));
-        $branchName = $salaryAdvanceRequest->branch?->name
-            ?? $salaryAdvanceRequest->employee?->employee?->branch?->name;
-        if ($branchName) {
-            $companyTitle .= ' - '.strtoupper($branchName);
-        }
+        $companyTitle = $this->printCompanyTitle(
+            $salaryAdvanceRequest->branch?->name
+                ?? $salaryAdvanceRequest->employee?->employee?->branch?->name
+        );
 
         return view('exports.salary-advance-form', [
+            'blank' => false,
             'advance' => $salaryAdvanceRequest,
             'companyName' => $companyTitle,
             'printDate' => now()->format('d/m/Y H:i:s'),
         ]);
+    }
+
+    private function printCompanyTitle(?string $branchName = null): string
+    {
+        $branchName = $branchName
+            ?? (($branchId = session('active_branch_id')) && $branchId !== 'all'
+                ? \App\Models\Branch::find($branchId)?->name
+                : null);
+
+        $companyTitle = strtoupper(getSetting('titleText', 'KIRAN INDUSTRIES PVT LTD.'));
+        if ($branchName) {
+            $companyTitle .= ' - '.strtoupper($branchName);
+        }
+
+        return $companyTitle;
     }
 
     public function eligibility(Request $request, int $userId)

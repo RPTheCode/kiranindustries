@@ -19,7 +19,8 @@ class SalaryPayrollCalculator
         private BranchPayrollSettingsService $branchPayrollSettings,
         private GovernmentWageSalaryService $govtWageSalary,
         private PfChallanBreakdownService $pfChallan,
-        private SalaryPayrollAdvanceRecoveryService $advanceRecovery
+        private SalaryPayrollAdvanceRecoveryService $advanceRecovery,
+        private SalaryPayrollLoanRecoveryService $loanRecovery
     ) {}
 
     /**
@@ -365,6 +366,15 @@ class SalaryPayrollCalculator
             $deductionsBreakdown['Govt Wage Adjustment'] = $govtWageAdjustmentAmount;
         }
 
+        $loanRecovery = $this->loanRecovery->compute(
+            $employee->id,
+            $context['pay_period_end'] ?? null
+        );
+        $loanAllocations = $loanRecovery['allocations'];
+        if ($loanRecovery['deduction'] > 0) {
+            $deductionsBreakdown[SalaryPayrollLoanRecoveryService::DEDUCTION_LABEL] = $loanRecovery['deduction'];
+        }
+
         $advanceRecovery = $this->advanceRecovery->compute(
             $employee->id,
             $context['pay_period_end'] ?? null,
@@ -441,6 +451,7 @@ class SalaryPayrollCalculator
             'mispunch_dates' => $attendance['mispunch_dates'] ?? [],
             'use_attendance' => $useAttendance,
             'advance_allocations' => $advanceAllocations,
+            'loan_allocations' => $loanAllocations,
         ];
     }
 
@@ -548,6 +559,7 @@ class SalaryPayrollCalculator
             'earnings_breakdown' => [],
             'deductions_breakdown' => [],
             'advance_allocations' => [],
+            'loan_allocations' => [],
             'pf_employee' => 0,
             'pf_wages' => 0,
             'pf_employer' => 0,

@@ -52,6 +52,7 @@ import {
   getAttendanceDaysBadgeTone,
   attendanceDaysBadgeDescription,
   salaryAdvanceRecoveryAmount,
+  salaryLoanRecoveryAmount,
 } from './components/PayrollEntryBreakdownPanel';
 import { StatutoryChallanPanel } from './components/StatutoryChallanPanel';
 import { cn } from '@/lib/utils';
@@ -730,6 +731,15 @@ export default function PayrollGenerateShow() {
         <span className="font-semibold text-slate-800">{t('Net')} <span className="text-green-700">₹{formatRupee(Number(run?.total_net || 0))}</span></span>
         <span className="text-slate-300">|</span>
         <span className="text-slate-600"><Users className="mr-1 inline h-3.5 w-3.5" />{run?.employee_count} {t('emp')}</span>
+        {Number(run?.total_loan_recovery ?? 0) > 0 && (
+          <>
+            <span className="text-slate-300">|</span>
+            <span className="font-semibold text-indigo-800">
+              {t('Loan recovery')} <span className="text-red-700">₹{formatRupee(Number(run?.total_loan_recovery ?? 0))}</span>
+              {' '}({run?.loan_recovery_employee_count} {t('emp')})
+            </span>
+          </>
+        )}
         {Number(run?.total_advance_recovery ?? 0) > 0 && (
           <>
             <span className="text-slate-300">|</span>
@@ -984,6 +994,19 @@ export default function PayrollGenerateShow() {
                                 <> · {[entry.category, entry.shift].filter(Boolean).join(' · ')}</>
                               )}
                             </div>
+                            {salaryLoanRecoveryAmount(entry) > 0 && (
+                              <span className="mt-0.5 inline-flex rounded bg-indigo-100 px-1.5 py-px text-[10px] font-bold text-indigo-900">
+                                {t('Loan')} −₹{formatRupee(salaryLoanRecoveryAmount(entry))}
+                              </span>
+                            )}
+                            {salaryLoanRecoveryAmount(entry) <= 0 && (entry.loan_recovery_deferred?.length ?? 0) > 0 && (
+                              <span
+                                className="mt-0.5 inline-flex rounded bg-amber-100 px-1.5 py-px text-[10px] font-bold text-amber-900"
+                                title={t('Loan disbursed after this payroll month — EMI recovers in a later payroll')}
+                              >
+                                {t('Loan deferred')} ₹{formatRupee(entry.loan_recovery_deferred[0].pending_amount)}
+                              </span>
+                            )}
                             {salaryAdvanceRecoveryAmount(entry) > 0 && (
                               <span className="mt-0.5 inline-flex rounded bg-teal-100 px-1.5 py-px text-[10px] font-bold text-teal-900">
                                 {t('Advance')} −₹{formatRupee(salaryAdvanceRecoveryAmount(entry))}

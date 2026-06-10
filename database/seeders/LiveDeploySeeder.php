@@ -95,6 +95,7 @@ class LiveDeploySeeder extends Seeder
             ['name' => 'edit-salary-payroll-runs', 'label' => 'Edit Generate Payroll', 'module' => 'Salary Payroll'],
             ['name' => 'delete-salary-payroll-runs', 'label' => 'Delete Generate Payroll', 'module' => 'Salary Payroll'],
             ['name' => 'finalize-salary-payroll-runs', 'label' => 'Finalize Generate Payroll', 'module' => 'Salary Payroll'],
+            ['name' => 'apply-salary-payroll-attendance-extra', 'label' => 'Apply OT No Extra Days to Net Salary', 'module' => 'Salary Payroll'],
             // Earning / Deduction
             ['name' => 'manage-earning-deduction-entry', 'label' => 'Manage Earning / Deduction', 'module' => 'Salary Payroll'],
             ['name' => 'manage-any-earning-deduction-entry', 'label' => 'Manage Any Earning / Deduction', 'module' => 'Salary Payroll'],
@@ -107,6 +108,20 @@ class LiveDeploySeeder extends Seeder
             ['name' => 'manage-payroll-settings', 'label' => 'Manage Payroll Settings', 'module' => 'Salary Payroll'],
             ['name' => 'view-payroll-settings', 'label' => 'View Payroll Settings', 'module' => 'Salary Payroll'],
             ['name' => 'edit-payroll-settings', 'label' => 'Edit Payroll Settings', 'module' => 'Salary Payroll'],
+            // Salary Advance
+            ['name' => 'manage-salary-advances', 'label' => 'Manage Salary Advance', 'module' => 'Salary Payroll'],
+            ['name' => 'manage-any-salary-advances', 'label' => 'Manage Any Salary Advance', 'module' => 'Salary Payroll'],
+            ['name' => 'view-salary-advances', 'label' => 'View Salary Advance', 'module' => 'Salary Payroll'],
+            ['name' => 'create-salary-advances', 'label' => 'Create Salary Advance', 'module' => 'Salary Payroll'],
+            ['name' => 'edit-salary-advances', 'label' => 'Edit Salary Advance', 'module' => 'Salary Payroll'],
+            ['name' => 'delete-salary-advances', 'label' => 'Delete Salary Advance', 'module' => 'Salary Payroll'],
+            // Salary Loan
+            ['name' => 'manage-salary-loans', 'label' => 'Manage Salary Loan', 'module' => 'Salary Payroll'],
+            ['name' => 'manage-any-salary-loans', 'label' => 'Manage Any Salary Loan', 'module' => 'Salary Payroll'],
+            ['name' => 'view-salary-loans', 'label' => 'View Salary Loan', 'module' => 'Salary Payroll'],
+            ['name' => 'create-salary-loans', 'label' => 'Create Salary Loan', 'module' => 'Salary Payroll'],
+            ['name' => 'edit-salary-loans', 'label' => 'Edit Salary Loan', 'module' => 'Salary Payroll'],
+            ['name' => 'delete-salary-loans', 'label' => 'Delete Salary Loan', 'module' => 'Salary Payroll'],
         ];
         foreach ($salaryPayrollPerms as $p) {
             Permission::firstOrCreate(
@@ -165,6 +180,8 @@ class LiveDeploySeeder extends Seeder
             'salary-payroll-runs' => 'Salary Payroll',
             'earning-deduction-entry' => 'Salary Payroll',
             'payroll-settings' => 'Salary Payroll',
+            'salary-advances' => 'Salary Payroll',
+            'salary-loans' => 'Salary Payroll',
 
             // Leave Management
             'leave-types' => 'Leave Management',
@@ -312,6 +329,12 @@ class LiveDeploySeeder extends Seeder
                     'view-salary-payroll-runs',
                     'create-salary-payroll-runs',
                     'finalize-salary-payroll-runs',
+                    'view-salary-advances',
+                    'create-salary-advances',
+                    'manage-salary-advances',
+                    'view-salary-loans',
+                    'create-salary-loans',
+                    'manage-salary-loans',
                     'view-employee-salaries',
                     'manage-employee-salaries',
                     'view-leave-applications',

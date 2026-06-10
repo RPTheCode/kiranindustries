@@ -62,6 +62,14 @@ class SalaryPayrollPermissionSeeder extends Seeder
             ['name' => 'create-salary-advances', 'label' => 'Create Salary Advance'],
             ['name' => 'edit-salary-advances', 'label' => 'Edit Salary Advance'],
             ['name' => 'delete-salary-advances', 'label' => 'Delete Salary Advance'],
+
+            // Salary Loan
+            ['name' => 'manage-salary-loans', 'label' => 'Manage Salary Loan'],
+            ['name' => 'manage-any-salary-loans', 'label' => 'Manage Any Salary Loan'],
+            ['name' => 'view-salary-loans', 'label' => 'View Salary Loan'],
+            ['name' => 'create-salary-loans', 'label' => 'Create Salary Loan'],
+            ['name' => 'edit-salary-loans', 'label' => 'Edit Salary Loan'],
+            ['name' => 'delete-salary-loans', 'label' => 'Delete Salary Loan'],
         ];
 
         $permissionNames = [];
@@ -83,6 +91,19 @@ class SalaryPayrollPermissionSeeder extends Seeder
             if ($role) {
                 $role->givePermissionTo($permissionNames);
             }
+        }
+
+        // HR / Manager — grant Salary Advance & Salary Loan (same module as payroll)
+        $advanceLoanPerms = array_values(array_filter(
+            $permissionNames,
+            fn (string $name) => str_contains($name, 'salary-advance') || str_contains($name, 'salary-loan')
+        ));
+        if ($advanceLoanPerms !== []) {
+            Role::query()
+                ->whereIn('name', ['hr', 'manager'])
+                ->each(function (Role $role) use ($advanceLoanPerms): void {
+                    $role->givePermissionTo($advanceLoanPerms);
+                });
         }
 
         $this->command?->info('Salary Payroll permissions seeded.');

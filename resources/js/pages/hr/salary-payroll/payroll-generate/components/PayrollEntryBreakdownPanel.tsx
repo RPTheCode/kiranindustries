@@ -103,9 +103,46 @@ export interface PayrollEntryBreakdown {
     disbursement_date?: string | null;
     pay_period_end?: string | null;
   }>;
+  loan_recovery_amount?: number;
+  loan_allocations?: Array<{
+    salary_loan_request_id: number;
+    salary_loan_installment_id?: number | null;
+    amount: number;
+    approved_amount?: number | null;
+    paid_before?: number | null;
+    paid_total?: number | null;
+    pending_amount?: number | null;
+    disbursement_date?: string | null;
+    application_date?: string | null;
+    status?: string | null;
+    installment_amount?: number | null;
+  }>;
+  loan_recovery_deferred?: Array<{
+    salary_loan_request_id: number;
+    pending_amount: number;
+    disbursement_date?: string | null;
+    pay_period_end?: string | null;
+    installment_amount?: number | null;
+  }>;
 }
 
+export const SALARY_LOAN_RECOVERY_LABEL = 'Salary Loan Recovery';
 export const SALARY_ADVANCE_RECOVERY_LABEL = 'Salary Advance Recovery';
+
+export function salaryLoanRecoveryAmount(entry: {
+  loan_recovery_amount?: number;
+  deductions_breakdown?: Record<string, number>;
+  loan_allocations?: PayrollEntryBreakdown['loan_allocations'];
+}): number {
+  if (entry.loan_recovery_amount != null && Number(entry.loan_recovery_amount) > 0) {
+    return Number(entry.loan_recovery_amount);
+  }
+  const fromBreakdown = Number(entry.deductions_breakdown?.[SALARY_LOAN_RECOVERY_LABEL] ?? 0);
+  if (fromBreakdown > 0) {
+    return fromBreakdown;
+  }
+  return (entry.loan_allocations ?? []).reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
+}
 
 export function salaryAdvanceRecoveryAmount(entry: {
   advance_recovery_amount?: number;
@@ -919,6 +956,87 @@ export function PayrollEntryBreakdownPanel({ entry, runUsesAttendance = true, to
                   epf: entry.pf_breakdown.epf_employer_pct,
                 })}
           </p>
+        </div>
+      )}
+
+      {(entry.loan_recovery_deferred ?? []).length > 0 && salaryLoanRecoveryAmount(entry) <= 0 && (
+        <div className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 text-[10px] text-amber-950">
+          <p className="mb-1.5 flex items-center gap-1 font-bold uppercase tracking-wide text-amber-900">
+            <Wallet className="h-3 w-3" />
+            {t('Salary loan not in this payroll')}
+          </p>
+          {(entry.loan_recovery_deferred ?? []).map((deferred) => (
+            <div key={deferred.salary_loan_request_id} className="mb-1 rounded border border-amber-200 bg-white/80 px-2 py-1.5 last:mb-0">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Link
+                  href={route('hr.salary-loans.show', deferred.salary_loan_request_id)}
+                  className="font-semibold text-amber-900 hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {t('Loan')} #{deferred.salary_loan_request_id}
+                </Link>
+                <strong className="tabular-nums">₹{formatRupee(deferred.pending_amount)} {t('pending')}</strong>
+              </div>
+              <p className="mt-1 text-[9px] leading-snug text-amber-900/90">
+                {t('Disbursed on {{disbursed}} — after this payroll period (ends {{periodEnd}}). EMI recovery will apply in the payroll month on or after disbursement.', {
+                  disbursed: deferred.disbursement_date ?? '—',
+                  periodEnd: deferred.pay_period_end ?? '—',
+                })}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {salaryLoanRecoveryAmount(entry) > 0 && (
+        <div className="mb-2 rounded-md border border-indigo-200 bg-indigo-50/60 px-2.5 py-2 text-[10px] text-slate-700">
+          <p className="mb-1.5 flex items-center gap-1 font-bold uppercase tracking-wide text-indigo-900">
+            <Wallet className="h-3 w-3" />
+            {t('Salary Loan Recovery')}
+          </p>
+          <div className="space-y-1">
+            {(entry.loan_allocations ?? []).map((allocation) => (
+              <div
+                key={`${allocation.salary_loan_request_id}-${allocation.salary_loan_installment_id ?? allocation.amount}`}
+                className="rounded border border-indigo-100 bg-white/80 px-2 py-1.5"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Link
+                    href={route('hr.salary-loans.show', allocation.salary_loan_request_id)}
+                    className="font-semibold text-indigo-900 hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {t('Loan')} #{allocation.salary_loan_request_id}
+                  </Link>
+                  <strong className="tabular-nums text-red-700">− ₹{formatRupee(allocation.amount)}</strong>
+                </div>
+                <div className="mt-1 grid gap-1 sm:grid-cols-2">
+                  {allocation.approved_amount != null && (
+                    <div className="flex justify-between gap-2 text-[9px] text-slate-600">
+                      <span>{t('Approved')}</span>
+                      <strong className="tabular-nums">₹{formatRupee(allocation.approved_amount)}</strong>
+                    </div>
+                  )}
+                  {allocation.installment_amount != null && allocation.installment_amount > 0 && (
+                    <div className="flex justify-between gap-2 text-[9px] text-slate-600">
+                      <span>{t('EMI')}</span>
+                      <strong className="tabular-nums">₹{formatRupee(allocation.installment_amount)}</strong>
+                    </div>
+                  )}
+                  {allocation.pending_amount != null && (
+                    <div className="flex justify-between gap-2 text-[9px] font-semibold text-orange-800 sm:col-span-2">
+                      <span>{t('Pending after this payroll')}</span>
+                      <strong className="tabular-nums">₹{formatRupee(allocation.pending_amount)}</strong>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-1.5 flex items-center justify-between rounded bg-indigo-100/80 px-2 py-1 text-[11px] font-semibold text-indigo-950">
+            <span>{t('Total loan EMI this month')}</span>
+            <strong className="tabular-nums text-red-700">− ₹{formatRupee(salaryLoanRecoveryAmount(entry))}</strong>
+          </div>
         </div>
       )}
 

@@ -21,24 +21,24 @@
         <th style="width:15%; background-color:#1a365d; color:#ffffff; font-weight:bold; text-align:right;">INSTALLMENT</th>
     </tr>
 
-    @php 
-        $sn = 1; 
+    @php
+        $sn = 1;
         $grandTotal = 0;
         $grandInstallment = 0;
     @endphp
-    @foreach($employees as $emp)
+    @foreach($reportRows as $row)
         @php
-            $grandTotal += $emp->loan_total_amount;
-            $grandInstallment += $emp->loan_installment_amount;
+            $grandTotal += (float) str_replace(',', '', $row['total_amount'] ?? 0);
+            $grandInstallment += (float) str_replace(',', '', $row['installment'] ?? 0);
         @endphp
         <tr>
             <td style="text-align:center;">{{ $sn++ }}</td>
-            <td style="text-align:center; font-weight:bold; color:#1a365d;">{{ $emp->emy_code ?? $emp->employee_id }}</td>
-            <td style="text-align:left; font-weight:bold; color:#334155;">{{ $emp->user->name ?? 'N/A' }}</td>
-            <td style="text-align:center;">Loan</td>
-            <td style="text-align:center;">{{ $emp->loan_period ?? 0 }}</td>
-            <td style="text-align:right; font-weight:bold; color:#0f766e;">{{ number_format((float)$emp->loan_total_amount, 2) }}</td>
-            <td style="text-align:right; font-weight:bold; color:#991b1b;">{{ number_format((float)$emp->loan_installment_amount, 2) }}</td>
+            <td style="text-align:center; font-weight:bold; color:#1a365d;">{{ $row['code'] ?? '—' }}</td>
+            <td style="text-align:left; font-weight:bold; color:#334155;">{{ $row['name'] ?? 'N/A' }}</td>
+            <td style="text-align:center;">{{ $row['loan_type'] ?? 'Salary Loan' }}</td>
+            <td style="text-align:center;">{{ $row['period'] ?? 0 }}</td>
+            <td style="text-align:right; font-weight:bold; color:#0f766e;">{{ $row['total_amount'] ?? '0.00' }}</td>
+            <td style="text-align:right; font-weight:bold; color:#991b1b;">{{ $row['installment'] ?? '0.00' }}</td>
         </tr>
     @endforeach
 

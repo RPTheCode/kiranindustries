@@ -9,6 +9,7 @@ use App\Models\Department;
 use App\Models\PayrollParameter;
 use App\Models\ProfessionalTaxSlab;
 use App\Models\SalaryPayroll\SalaryAdvanceRequest;
+use App\Models\SalaryPayroll\SalaryLoanRequest;
 use App\Models\SalaryPayroll\SalaryPayrollEntry;
 use App\Models\SalaryPayroll\SalaryPayrollRun;
 use App\Models\Shift;
@@ -222,14 +223,22 @@ class SalaryPayrollGenerateController extends Controller
             ->paginate($perPage)
             ->withQueryString();
 
-        $advanceMap = $this->advanceRequestsForEntries($entries->getCollection());
-        $deferredAdvanceMap = $this->deferredAdvanceRecoveriesForEmployees(
-            $entries->getCollection()->pluck('employee_id')->unique()->values()->all(),
-            $salaryPayrollRun
-        );
+        $entryCollection = $entries->getCollection();
+        $employeeIds = $entryCollection->pluck('employee_id')->unique()->values()->all();
+        $advanceMap = $this->advanceRequestsForEntries($entryCollection);
+        $deferredAdvanceMap = $this->deferredAdvanceRecoveriesForEmployees($employeeIds, $salaryPayrollRun);
+        $loanMap = $this->loanRequestsForEntries($entryCollection);
+        $deferredLoanMap = $this->deferredLoanRecoveriesForEmployees($employeeIds, $salaryPayrollRun);
 
-        $entries->getCollection()->transform(
-            fn ($entry) => $this->formatEntry($entry, $salaryPayrollRun, $advanceMap, $deferredAdvanceMap)
+        $entryCollection->transform(
+            fn ($entry) => $this->formatEntry(
+                $entry,
+                $salaryPayrollRun,
+                $advanceMap,
+                $deferredAdvanceMap,
+                $loanMap,
+                $deferredLoanMap
+            )
         );
 
         $mispunchCount = SalaryPayrollEntry::query()
@@ -824,6 +833,8 @@ class SalaryPayrollGenerateController extends Controller
             'total_pt_amount' => (float) ($run->total_pt_amount ?? 0),
             'total_advance_recovery' => $this->totalAdvanceRecoveryForRun($run),
             'advance_recovery_employee_count' => $this->advanceRecoveryEmployeeCountForRun($run),
+            'total_loan_recovery' => $this->totalLoanRecoveryForRun($run),
+            'loan_recovery_employee_count' => $this->loanRecoveryEmployeeCountForRun($run),
             'branch' => $run->branch ? ['id' => $run->branch->id, 'name' => $run->branch->name] : null,
             'creator' => $run->creator ? ['id' => $run->creator->id, 'name' => $run->creator->name] : null,
             'finalizer' => $run->finalizer ? ['id' => $run->finalizer->id, 'name' => $run->finalizer->name] : null,
@@ -836,9 +847,14 @@ class SalaryPayrollGenerateController extends Controller
         SalaryPayrollEntry $entry,
         ?SalaryPayrollRun $run = null,
         ?\Illuminate\Support\Collection $advanceMap = null,
-        ?\Illuminate\Support\Collection $deferredAdvanceMap = null
+        ?\Illuminate\Support\Collection $deferredAdvanceMap = null,
+        ?\Illuminate\Support\Collection $loanMap = null,
+        ?\Illuminate\Support\Collection $deferredLoanMap = null
     ): array {
         $attendanceExtra = $this->attendanceExtraForEntry($entry, $run);
+        $loanAllocations = $this->loanAllocationsPayload($entry, $loanMap);
+        $loanRecoveryAmount = round(collect($loanAllocations)->sum('amount'), 2);
+        $loanRecoveryDeferred = $this->loanRecoveryDeferredPayload($entry, $run, $deferredLoanMap);
         $advanceAllocations = $this->advanceAllocationsPayload($entry, $advanceMap);
         $advanceRecoveryAmount = round(collect($advanceAllocations)->sum('amount'), 2);
         $advanceRecoveryDeferred = $this->advanceRecoveryDeferredPayload($entry, $run, $deferredAdvanceMap);
@@ -916,6 +932,9 @@ class SalaryPayrollGenerateController extends Controller
             'pt_breakdown' => $this->ptBreakdownForEntry($entry, $run),
             'earnings_breakdown' => $this->componentEarningsBreakdown($entry->earnings_breakdown ?? []),
             'deductions_breakdown' => $entry->deductions_breakdown ?? [],
+            'loan_allocations' => $loanAllocations,
+            'loan_recovery_amount' => $loanRecoveryAmount,
+            'loan_recovery_deferred' => $loanRecoveryDeferred,
             'advance_allocations' => $advanceAllocations,
             'advance_recovery_amount' => $advanceRecoveryAmount,
             'advance_recovery_deferred' => $advanceRecoveryDeferred,
@@ -1440,6 +1459,160 @@ class SalaryPayrollGenerateController extends Controller
             ->get(['advance_allocations'])
             ->filter(function (SalaryPayrollEntry $entry) {
                 return collect($entry->advance_allocations ?? [])
+                    ->sum(fn (array $allocation) => (float) ($allocation['amount'] ?? 0)) > 0;
+            })
+            ->count();
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, SalaryPayrollEntry>  $entries
+     * @return \Illuminate\Support\Collection<int, SalaryLoanRequest>
+     */
+    private function loanRequestsForEntries(\Illuminate\Support\Collection $entries): \Illuminate\Support\Collection
+    {
+        $ids = $entries
+            ->flatMap(fn (SalaryPayrollEntry $entry) => collect($entry->loan_allocations ?? [])
+                ->pluck('salary_loan_request_id'))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($ids === []) {
+            return collect();
+        }
+
+        return SalaryLoanRequest::query()
+            ->whereIn('id', $ids)
+            ->get(['id', 'approved_amount', 'requested_amount', 'paid_amount', 'disbursement_date', 'status', 'application_date', 'installment_count', 'installment_amount'])
+            ->keyBy('id');
+    }
+
+    /**
+     * @param  array<int, int>  $employeeIds
+     * @return \Illuminate\Support\Collection<int, \Illuminate\Support\Collection<int, SalaryLoanRequest>>
+     */
+    private function deferredLoanRecoveriesForEmployees(array $employeeIds, SalaryPayrollRun $run): \Illuminate\Support\Collection
+    {
+        if ($employeeIds === [] || ! $run->pay_period_end) {
+            return collect();
+        }
+
+        $periodEnd = $run->pay_period_end->format('Y-m-d');
+
+        return SalaryLoanRequest::query()
+            ->whereIn('employee_id', $employeeIds)
+            ->whereIn('status', [SalaryLoanRequest::STATUS_DISBURSED, SalaryLoanRequest::STATUS_RECOVERING])
+            ->whereRaw('paid_amount < COALESCE(approved_amount, requested_amount)')
+            ->whereDate('disbursement_date', '>', $periodEnd)
+            ->orderBy('disbursement_date')
+            ->get(['id', 'employee_id', 'approved_amount', 'requested_amount', 'paid_amount', 'disbursement_date', 'status', 'installment_amount'])
+            ->groupBy('employee_id');
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, \Illuminate\Support\Collection<int, SalaryLoanRequest>>|null  $deferredLoanMap
+     * @return array<int, array<string, mixed>>
+     */
+    private function loanRecoveryDeferredPayload(
+        SalaryPayrollEntry $entry,
+        ?SalaryPayrollRun $run,
+        ?\Illuminate\Support\Collection $deferredLoanMap
+    ): array {
+        if (! $deferredLoanMap || ! $run?->pay_period_end) {
+            return [];
+        }
+
+        return $deferredLoanMap
+            ->get($entry->employee_id, collect())
+            ->map(fn (SalaryLoanRequest $loan) => [
+                'salary_loan_request_id' => $loan->id,
+                'pending_amount' => (float) $loan->pending_amount,
+                'disbursement_date' => $loan->disbursement_date?->format('Y-m-d'),
+                'pay_period_end' => $run->pay_period_end->format('Y-m-d'),
+                'installment_amount' => (float) ($loan->installment_amount ?? 0),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, SalaryLoanRequest>|null  $loanMap
+     * @return array<int, array<string, mixed>>
+     */
+    private function loanAllocationsPayload(SalaryPayrollEntry $entry, ?\Illuminate\Support\Collection $loanMap = null): array
+    {
+        $allocations = $entry->loan_allocations ?? [];
+        if ($allocations === []) {
+            return [];
+        }
+
+        $ids = collect($allocations)
+            ->pluck('salary_loan_request_id')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $loans = $loanMap ?? SalaryLoanRequest::query()
+            ->whereIn('id', $ids)
+            ->get(['id', 'approved_amount', 'requested_amount', 'paid_amount', 'disbursement_date', 'status', 'application_date', 'installment_count', 'installment_amount'])
+            ->keyBy('id');
+
+        return collect($allocations)
+            ->map(function (array $allocation) use ($loans) {
+                $requestId = (int) ($allocation['salary_loan_request_id'] ?? 0);
+                $installmentId = (int) ($allocation['salary_loan_installment_id'] ?? 0);
+                $amount = round((float) ($allocation['amount'] ?? 0), 2);
+                if ($requestId <= 0 || $amount <= 0) {
+                    return null;
+                }
+
+                /** @var SalaryLoanRequest|null $loan */
+                $loan = $loans->get($requestId);
+                $approved = $loan
+                    ? (float) ($loan->approved_amount ?? $loan->requested_amount)
+                    : null;
+                $paidTotal = $loan ? (float) $loan->paid_amount : null;
+                $paidBefore = $paidTotal !== null ? max(0, round($paidTotal - $amount, 2)) : null;
+
+                return [
+                    'salary_loan_request_id' => $requestId,
+                    'salary_loan_installment_id' => $installmentId > 0 ? $installmentId : null,
+                    'amount' => $amount,
+                    'approved_amount' => $approved,
+                    'paid_before' => $paidBefore,
+                    'paid_total' => $paidTotal,
+                    'pending_amount' => $loan ? (float) $loan->pending_amount : null,
+                    'disbursement_date' => $loan?->disbursement_date?->format('Y-m-d'),
+                    'application_date' => $loan?->application_date?->format('Y-m-d'),
+                    'status' => $loan?->status,
+                    'installment_amount' => $loan ? (float) ($loan->installment_amount ?? 0) : null,
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    private function totalLoanRecoveryForRun(SalaryPayrollRun $run): float
+    {
+        return (float) SalaryPayrollEntry::query()
+            ->where('salary_payroll_run_id', $run->id)
+            ->get(['loan_allocations'])
+            ->sum(function (SalaryPayrollEntry $entry) {
+                return collect($entry->loan_allocations ?? [])
+                    ->sum(fn (array $allocation) => (float) ($allocation['amount'] ?? 0));
+            });
+    }
+
+    private function loanRecoveryEmployeeCountForRun(SalaryPayrollRun $run): int
+    {
+        return SalaryPayrollEntry::query()
+            ->where('salary_payroll_run_id', $run->id)
+            ->get(['loan_allocations'])
+            ->filter(function (SalaryPayrollEntry $entry) {
+                return collect($entry->loan_allocations ?? [])
                     ->sum(fn (array $allocation) => (float) ($allocation['amount'] ?? 0)) > 0;
             })
             ->count();

@@ -386,6 +386,12 @@ class DefaultCompanyUserSeeder extends Seeder
             'manage-payroll-settings',
             'view-payroll-settings',
             'edit-payroll-settings',
+            'view-salary-advances',
+            'create-salary-advances',
+            'manage-salary-advances',
+            'view-salary-loans',
+            'create-salary-loans',
+            'manage-salary-loans',
 
             // Payslips management
             'manage-payslips',
@@ -1068,6 +1074,19 @@ class DefaultCompanyUserSeeder extends Seeder
             'manage-payroll-settings',
             'view-payroll-settings',
             'edit-payroll-settings',
+            'apply-salary-payroll-attendance-extra',
+            'manage-salary-advances',
+            'manage-any-salary-advances',
+            'view-salary-advances',
+            'create-salary-advances',
+            'edit-salary-advances',
+            'delete-salary-advances',
+            'manage-salary-loans',
+            'manage-any-salary-loans',
+            'view-salary-loans',
+            'create-salary-loans',
+            'edit-salary-loans',
+            'delete-salary-loans',
 
             // Payroll Runs management
             'manage-payroll-runs',
