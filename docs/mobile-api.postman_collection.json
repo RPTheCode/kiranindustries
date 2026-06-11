@@ -1,0 +1,277 @@
+{
+  "info": {
+    "name": "MonitorHR Mobile Employee API",
+    "description": "Staff & Worker self-service API (Sanctum Bearer token).\n\n**Live sync with OpenAPI (recommended):**\n1. Postman → Import → Link\n2. URL: `https://staging.kiranindustries.monitorhr.in/api/v1/mobile/docs/openapi.yaml`\n3. Edit `docs/mobile-api.openapi.yaml` in code → deploy → Postman → Sync on linked import\n\n**This collection:** pre-built requests; Login auto-saves `{{token}}`.\n\nSwagger UI: https://editor.swagger.io → import same URL above.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "https://staging.kiranindustries.monitorhr.in/api/v1/mobile" },
+    { "key": "base_url_production", "value": "https://kiranindustries.monitorhr.in/api/v1/mobile" },
+    { "key": "base_url_local", "value": "http://127.0.0.1:8000/api/v1/mobile" },
+    { "key": "token", "value": "" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    if (json.token) {",
+                  "        pm.collectionVariables.set('token', json.token);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"login\": \"3\",\n  \"password\": \"password\",\n  \"device_id\": \"postman-device-001\",\n  \"fcm_token\": \"your-fcm-token-here\",\n  \"latitude\": 23.0225,\n  \"longitude\": 72.5714\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{base_url}}/auth/login"
+          }
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{base_url}}/auth/me"
+          }
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_password\": \"password\",\n  \"password\": \"new-password\",\n  \"password_confirmation\": \"new-password\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{base_url}}/auth/password"
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{base_url}}/auth/logout"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": "{{base_url}}/dashboard"
+      }
+    },
+    {
+      "name": "Profile",
+      "item": [
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{base_url}}/profile"
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Name\",\n  \"email\": \"employee@example.com\",\n  \"phone\": \"9876543210\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{base_url}}/profile"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Attendance",
+      "item": [
+        {
+          "name": "Today",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{base_url}}/attendance/today"
+          }
+        },
+        {
+          "name": "Clock In",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": 23.0225,\n  \"longitude\": 72.5714\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{base_url}}/attendance/clock-in"
+          }
+        },
+        {
+          "name": "Clock Out",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": 23.0230,\n  \"longitude\": 72.5720\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{base_url}}/attendance/clock-out"
+          }
+        },
+        {
+          "name": "History",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/attendance/history?month=2026-06",
+              "host": ["{{base_url}}"],
+              "path": ["attendance", "history"],
+              "query": [{ "key": "month", "value": "2026-06" }]
+            }
+          }
+        },
+        {
+          "name": "Mispunch (read-only)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{base_url}}/attendance/mispunch"
+          }
+        },
+        {
+          "name": "Biometric (deprecated)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/attendance/biometric?month=2026-06",
+              "host": ["{{base_url}}"],
+              "path": ["attendance", "biometric"],
+              "query": [{ "key": "month", "value": "2026-06" }]
+            }
+          }
+        },
+        {
+          "name": "Shift",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{base_url}}/shift"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Holidays",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{base_url}}/holidays?from=2026-06-01&to=2026-08-31",
+          "host": ["{{base_url}}"],
+          "path": ["holidays"],
+          "query": [
+            { "key": "from", "value": "2026-06-01" },
+            { "key": "to", "value": "2026-08-31" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Leave",
+      "item": [
+        {
+          "name": "Balances",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{base_url}}/leave/balances"
+          }
+        },
+        {
+          "name": "Applications",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{base_url}}/leave/applications"
+          }
+        },
+        {
+          "name": "Leave Types",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{base_url}}/leave/types"
+          }
+        },
+        {
+          "name": "Apply Leave",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"leave_type_id\": 1,\n  \"start_date\": \"2026-06-10\",\n  \"end_date\": \"2026-06-11\",\n  \"reason\": \"Personal\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{base_url}}/leave/applications"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payslips",
+      "item": [
+        {
+          "name": "List Payslips",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{base_url}}/payslips"
+          }
+        },
+        {
+          "name": "Download Payslip",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{base_url}}/payslips/1/download"
+          }
+        }
+      ]
+    }
+  ]
+}

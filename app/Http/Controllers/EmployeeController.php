@@ -164,7 +164,8 @@ class EmployeeController extends Controller
         $designations = $designationsQuery->get(['id', 'name', 'department_id']);
 
         // Fetch available skills - filtered by active branch and active status
-        $skillsQuery = \App\Models\Skill::whereIn('created_by', getCompanyAndUsersId())
+        $skillsQuery = \App\Models\Skill::withoutGlobalScopes()
+            ->whereIn('created_by', getCompanyAndUsersId())
             ->where('status', true);
         if ($activeBranchId) {
             $skillsQuery->where('branch_id', $activeBranchId);
@@ -264,8 +265,9 @@ class EmployeeController extends Controller
         }
         $attendancePolicies = $attendancePoliciesQuery->get(['id', 'name', 'branch_id']);
 
-        $skillsQuery = \App\Models\Skill::whereIn('created_by', getCompanyAndUsersId())
-            ->where('status', 1);
+        $skillsQuery = \App\Models\Skill::withoutGlobalScopes()
+            ->whereIn('created_by', getCompanyAndUsersId())
+            ->where('status', true);
         if ($activeBranchId) {
             $skillsQuery->where('branch_id', $activeBranchId);
         }
@@ -415,8 +417,8 @@ class EmployeeController extends Controller
             }
             $user->save();
 
-            // Assign Role
-            $employeeRole = Role::where('name', 'employee')->first();
+            // Assign Role (company-scoped employee or staff role)
+            $employeeRole = resolveEmployeeSpatieRole(getCompanyOwnerId());
             if ($employeeRole) {
                 $user->assignRole($employeeRole);
             }
@@ -444,7 +446,9 @@ class EmployeeController extends Controller
             $employee->attendance_policy_id = $request->attendance_policy_id;
             $employee->date_of_joining = $request->date_of_joining;
             $employee->confirm_date = $request->confirm_date;
-            $employee->employment_type = $request->employment_type;
+            $employee->employment_type = $request->filled('employment_type')
+                ? $request->employment_type
+                : null;
             $employee->po_status = $request->po_status;
             $employee->daily_option = (bool) ($request->daily_option ?? false);
             $employee->working_days = null;
@@ -512,6 +516,11 @@ class EmployeeController extends Controller
             );
 
             $employee->created_by = creatorId();
+
+            if (! filled($employee->employment_type)) {
+                $employee->employment_type = $employee->resolvedEmploymentType();
+            }
+
             $employee->save();
 
             // Refine profile image naming
@@ -589,12 +598,26 @@ class EmployeeController extends Controller
     /**
      * Display the specified resource.
      */
+    public function myProfile()
+    {
+        $employee = auth()->user()?->employee()?->withoutGlobalScopes()->first();
+        if (! $employee) {
+            return redirect()->route('dashboard')->with('error', __('Employee profile not found.'));
+        }
+
+        return $this->show($employee);
+    }
+
     public function show(Employee $employee)
     {
         // Check if employee belongs to current company
         $companyUserIds = getCompanyAndUsersId();
         if (!in_array($employee->created_by, $companyUserIds)) {
             return redirect()->back()->with('error', __('You do not have permission to view this employee'));
+        }
+
+        if (userIsEmployeeSelfServiceOnly() && $employee->user_id !== auth()->id()) {
+            abort(403, __('You can only view your own profile.'));
         }
 
         // Load user with employee relationships
@@ -718,8 +741,9 @@ class EmployeeController extends Controller
 
         $branchForCategories = $employee->branch_id ?? $activeBranchId;
 
-        $skillsQuery = \App\Models\Skill::whereIn('created_by', getCompanyAndUsersId())
-            ->where('status', 1);
+        $skillsQuery = \App\Models\Skill::withoutGlobalScopes()
+            ->whereIn('created_by', getCompanyAndUsersId())
+            ->where('status', true);
         if ($branchForCategories) {
             $skillsQuery->where('branch_id', $branchForCategories);
         }
@@ -995,6 +1019,13 @@ class EmployeeController extends Controller
             }
             $user->save();
 
+            if ($user->roles()->count() === 0) {
+                $employeeRole = resolveEmployeeSpatieRole(getCompanyOwnerId());
+                if ($employeeRole) {
+                    $user->assignRole($employeeRole);
+                }
+            }
+
             // Update Employee
             $employee->employee_id = $request->employee_id;
             $employee->emy_code = $request->emy_code ?? $request->employee_id;
@@ -1015,10 +1046,16 @@ class EmployeeController extends Controller
             $employee->shift_id = $request->shift_id;
             $employee->attendance_policy_id = $request->attendance_policy_id;
             $employee->date_of_joining = $request->date_of_joining;
-            $employee->employment_type = $request->employment_type;
+            $employee->employment_type = $request->filled('employment_type')
+                ? $request->employment_type
+                : $employee->employment_type;
             $employee->po_status = $request->po_status;
             $employee->daily_option = (bool) ($request->daily_option ?? false);
             $employee->working_days = null;
+
+            if (! filled($employee->employment_type)) {
+                $employee->employment_type = $employee->resolvedEmploymentType();
+            }
 
             // Address & Personal
             $employee->address_line_1 = $request->address_line_1;
@@ -1858,8 +1895,9 @@ class EmployeeController extends Controller
             ->orderBy('name')
             ->get(['id', 'name']);
 
-        $skills = \App\Models\Skill::whereIn('created_by', $companyIds)
-            ->where('status', 1)
+        $skills = \App\Models\Skill::withoutGlobalScopes()
+            ->whereIn('created_by', $companyIds)
+            ->where('status', true)
             ->where('branch_id', $branchId)
             ->orderBy('name')
             ->get(['id', 'name']);

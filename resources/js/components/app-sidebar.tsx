@@ -247,10 +247,20 @@ export function AppSidebar() {
         }
 
         // Employee Section
-        if ((hasPermission(permissions, 'manage-employees') || hasPermission(permissions, 'view-employees'))) {
+        const canManageAnyEmployees = hasPermission(permissions, 'manage-employees')
+            || hasPermission(permissions, 'manage-any-employees');
+
+        if (canManageAnyEmployees) {
             items.push({
                 title: t('Employees'),
                 href: route('hr.employees.index'),
+                icon: UsersRound,
+                group: 'workforce',
+            });
+        } else if (hasPermission(permissions, 'manage-own-employees')) {
+            items.push({
+                title: t('My Profile'),
+                href: route('hr.employees.my-profile'),
                 icon: UsersRound,
                 group: 'workforce',
             });
@@ -266,7 +276,12 @@ export function AppSidebar() {
             });
         }
         
-        if ((hasPermission(permissions, 'manage-attendance-regularizations') || hasPermission(permissions, 'view-attendance-regularizations')) || hasPermission(permissions, 'view-attendance-regularizations')) {
+        const canManageMispunch = hasPermission(permissions, 'manage-attendance-regularizations')
+            || hasPermission(permissions, 'manage-any-attendance-regularizations')
+            || hasPermission(permissions, 'manage-attendance-records')
+            || hasPermission(permissions, 'manage-any-attendance-records');
+
+        if (canManageMispunch) {
             attendanceItems.push({
                 title: t('MisPunch'),
                 href: route('hr.attendance.sync', { status: 'MIS' }),
@@ -402,14 +417,14 @@ export function AppSidebar() {
             });
         }
 
-        if ((hasPermission(permissions, 'manage-leave-applications') || hasPermission(permissions, 'view-leave-applications'))) {
+        if ((hasPermission(permissions, 'manage-leave-applications') || hasPermission(permissions, 'view-leave-applications') || hasPermission(permissions, 'manage-own-leave-applications'))) {
             leaveChildren.push({
                 title: t('Leave Applications'),
                 href: route('hr.leave-applications.index')
             });
         }
 
-        if ((hasPermission(permissions, 'manage-leave-balances') || hasPermission(permissions, 'view-leave-balances'))) {
+        if ((hasPermission(permissions, 'manage-leave-balances') || hasPermission(permissions, 'view-leave-balances') || hasPermission(permissions, 'manage-own-leave-balances'))) {
             leaveChildren.push({
                 title: t('Leave Balances'),
                 href: route('hr.leave-balances.index')

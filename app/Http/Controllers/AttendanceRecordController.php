@@ -339,116 +339,34 @@ class AttendanceRecordController extends Controller
         }
     }
 
-    public function clockIn(Request $request)
+    public function clockIn(Request $request, \App\Services\Attendance\AttendanceClockService $clockService)
     {
-        try {
-            $validated = $request->validate([
-                'employee_id' => 'required|exists:users,id',
-            ]);
+        $validated = $request->validate([
+            'employee_id' => 'required|exists:users,id',
+        ]);
 
-            $today = Carbon::today();
-            $now = Carbon::now();
+        $result = $clockService->clockIn((int) $validated['employee_id']);
 
-            // Check if already clocked in today
-            $existingRecord = AttendanceRecord::where('employee_id', $validated['employee_id'])
-                ->where('date', $today)
-                ->first();
-
-            if ($existingRecord && $existingRecord->clock_in) {
-                return redirect()->back()->with('error', __('Already clocked in today.'));
-            }
-
-            // Get employee with shift and policy
-            $employee = \App\Models\Employee::where('user_id', $validated['employee_id'])->first();
-
-            if (!$employee) {
-                return redirect()->back()->with('error', __('Employee profile not found.'));
-            }
-
-            // Use employee's assigned shift and policy, or get defaults
-            $shift = $employee->shift_id ?
-                Shift::find($employee->shift_id) :
-                Shift::whereIn('created_by', getCompanyAndUsersId())->where('status', 'active')->first();
-
-            $policy = $employee->attendance_policy_id ?
-                AttendancePolicy::find($employee->attendance_policy_id) :
-                AttendancePolicy::whereIn('created_by', getCompanyAndUsersId())->where('status', 'active')->first();
-
-
-            if (!$shift || !$policy) {
-                return redirect()->back()->with('error', __('No active shift or attendance policy found. Please contact HR.'));
-            }
-
-            if ($existingRecord) {
-                $existingRecord->update([
-                    'clock_in' => $now->format('H:i:s'),
-                    'shift_id' => $shift->id,
-                    'attendance_policy_id' => $policy->id,
-                    'status' => 'present',
-                ]);
-                $record = $existingRecord;
-            } else {
-                $record = AttendanceRecord::create([
-                    'employee_id' => $validated['employee_id'],
-                    'date' => $today,
-                    'clock_in' => $now->format('H:i:s'),
-                    'shift_id' => $shift->id,
-                    'attendance_policy_id' => $policy->id,
-                    'is_weekend' => $today->isWeekend(),
-                    'status' => 'present',
-                    'created_by' => creatorId(),
-                ]);
-            }
-
-            // Check for late arrival if methods exist
-            if (method_exists($record, 'checkLateArrival')) {
-                $record->checkLateArrival();
-                $record->save();
-            }
-
-            return redirect()->back()->with('success', __('Clocked in successfully.'));
-        } catch (\Exception $e) {
-            \Log::error('Clock in failed: ' . $e->getMessage());
-            return redirect()->back()->with('error', __('Failed to clock in. Please try again.'));
+        if ($result['success']) {
+            return redirect()->back()->with('success', $result['message']);
         }
+
+        return redirect()->back()->with('error', $result['message']);
     }
 
-    public function clockOut(Request $request)
+    public function clockOut(Request $request, \App\Services\Attendance\AttendanceClockService $clockService)
     {
-        try {
-            $validated = $request->validate([
-                'employee_id' => 'required|exists:users,id',
-            ]);
+        $validated = $request->validate([
+            'employee_id' => 'required|exists:users,id',
+        ]);
 
-            $today = Carbon::today();
-            $now = Carbon::now();
+        $result = $clockService->clockOut((int) $validated['employee_id']);
 
-            $record = AttendanceRecord::where('employee_id', $validated['employee_id'])
-                ->where('date', $today)
-                ->first();
-
-            if (!$record || !$record->clock_in) {
-                return redirect()->back()->with('error', __('Must clock in first.'));
-            }
-
-            if ($record->clock_out) {
-                return redirect()->back()->with('error', __('Already clocked out today.'));
-            }
-
-            $record->update([
-                'clock_out' => $now->format('H:i:s'),
-            ]);
-
-            // Process complete attendance calculation if method exists
-            if (method_exists($record, 'processAttendance')) {
-                $record->processAttendance();
-            }
-
-            return redirect()->back()->with('success', __('Clocked out successfully.'));
-        } catch (\Exception $e) {
-            \Log::error('Clock out failed: ' . $e->getMessage());
-            return redirect()->back()->with('error', __('Failed to clock out. Please try again.'));
+        if ($result['success']) {
+            return redirect()->back()->with('success', $result['message']);
         }
+
+        return redirect()->back()->with('error', $result['message']);
     }
 
     public function getTodayAttendance(Request $request)

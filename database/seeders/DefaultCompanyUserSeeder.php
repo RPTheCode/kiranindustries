@@ -128,6 +128,7 @@ class DefaultCompanyUserSeeder extends Seeder
     private function getEmployeePermissions(): array
     {
         return [
+            'access-mobile-app',
             'manage-dashboard',
             'view-dashboard',
 

@@ -420,10 +420,11 @@ class EmployeesImport implements ToModel, WithHeadingRow, WithValidation, SkipsO
                 }
             }
 
-            if (!$user->hasRole('employee')) {
-                $employeeRole = Role::where('name', 'employee')->first();
-                if ($employeeRole)
+            if (! $user->hasAnyRole(['employee', 'staff'])) {
+                $employeeRole = resolveEmployeeSpatieRole(getCompanyOwnerId());
+                if ($employeeRole) {
                     $user->assignRole($employeeRole);
+                }
             }
 
             // Handle Skills

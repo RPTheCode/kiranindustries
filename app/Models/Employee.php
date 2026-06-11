@@ -47,6 +47,7 @@ class Employee extends Model
         'section_id',
         'category_id',
         'shift_id',
+        'attendance_mode',
         'lunch_time',
         'week_off',
         'week_off_type',
@@ -203,6 +204,25 @@ class Employee extends Model
     public function category()
     {
         return $this->belongsTo(Category::class);
+    }
+
+    /**
+     * Employee or Labour — used by leave policies, week-offs, and mobile API.
+     */
+    public function resolvedEmploymentType(): string
+    {
+        if (filled($this->employment_type)) {
+            return $this->employment_type;
+        }
+
+        $this->loadMissing('category');
+        $categoryName = strtoupper((string) ($this->category?->name ?? ''));
+
+        if (str_contains($categoryName, 'WORKER') || str_contains($categoryName, 'LABOUR') || str_contains($categoryName, 'LABOR')) {
+            return 'Labour';
+        }
+
+        return 'Employee';
     }
 
     /**

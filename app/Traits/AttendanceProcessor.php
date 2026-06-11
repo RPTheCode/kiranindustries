@@ -14,7 +14,7 @@ trait AttendanceProcessor
         $shift = $emp->shift;
         $dateStr = $record['attendance_date'];
 
-        // Protect manually edited records from being overwritten during automatic biometric syncs
+        // Protect manually edited or mobile-only records from automatic overwrites (ESSL sync passes primary_source=essl)
         if (!($record['is_manual'] ?? false)) {
             $existing = BiometricAttendance::where('employee_id', $emp->id)
                 ->whereDate('attendance_date', $dateStr)
@@ -22,11 +22,19 @@ trait AttendanceProcessor
             if ($existing && $existing->is_manual) {
                 return $existing;
             }
+            $incomingSource = $record['primary_source'] ?? null;
+            if (
+                $existing
+                && $existing->primary_source === 'mobile'
+                && ! in_array($incomingSource, ['essl', 'mixed', 'mobile'], true)
+            ) {
+                return $existing;
+            }
         }
 
-        // Ensure we are working with Carbon instances
-        $inTime = $record['in_time'] ? Carbon::parse($record['in_time']) : null;
-        $outTime = $record['out_time'] ? Carbon::parse($record['out_time']) : null;
+        // Ensure we are working with Carbon instances (company wall-clock, not UTC)
+        $inTime = $record['in_time'] ? attendanceWallClock($record['in_time']) : null;
+        $outTime = $record['out_time'] ? attendanceWallClock($record['out_time']) : null;
 
         // Remove seconds for cleaner calculations
         if ($inTime)
@@ -243,34 +251,55 @@ trait AttendanceProcessor
             }
         }
 
-        return BiometricAttendance::updateOrCreate(
-            ['employee_id' => $emp->id, 'attendance_date' => $dateStr],
-            [
-                'employee_code' => $emp->emy_code,
-                'department_id' => $emp->department_id,
-                'branch_id' => $emp->branch_id,
-                'category_id' => $emp->category_id,
-                'section_id' => $emp->section_id,
-                'base_shift' => $emp->shift?->short_code ?? '---',
-                'shift_code' => $shiftCode,
-                'shift_slot_id' => $matchedSlot?->id,
-                'in_time' => $inTime,
-                'out_time' => $outTime,
-                'in_count' => $record['in_count'] ?? ($inTime ? 1 : 0),
-                'out_count' => $record['out_count'] ?? ($outTime ? 1 : 0),
-                'punch_count' => ($record['in_count'] ?? ($inTime ? 1 : 0)) + ($record['out_count'] ?? ($outTime ? 1 : 0)),
-                'total_minutes' => $totalMinutes,
-                'late_in' => $this->formatMinutes($lateMin),
-                'early_out' => $this->formatMinutes($earlyMin),
-                'ot_minutes' => $otMin,
-                'duty_value' => $duty,
-                'status' => $status,
-                'is_manual' => $record['is_manual'] ?? false,
-                'manual_by' => $record['manual_by'] ?? null,
-                'manual_remarks' => $record['manual_remarks'] ?? null,
-                'log_details' => $logDetails,
-            ]
-        );
+        $attributes = [
+            'employee_code' => $emp->emy_code,
+            'department_id' => $emp->department_id,
+            'branch_id' => $emp->branch_id,
+            'category_id' => $emp->category_id,
+            'section_id' => $emp->section_id,
+            'base_shift' => $emp->shift?->short_code ?? '---',
+            'shift_code' => $shiftCode,
+            'shift_slot_id' => $matchedSlot?->id,
+            'in_time' => $inTime,
+            'out_time' => $outTime,
+            'in_count' => $record['in_count'] ?? ($inTime ? 1 : 0),
+            'out_count' => $record['out_count'] ?? ($outTime ? 1 : 0),
+            'punch_count' => ($record['in_count'] ?? ($inTime ? 1 : 0)) + ($record['out_count'] ?? ($outTime ? 1 : 0)),
+            'total_minutes' => $totalMinutes,
+            'late_in' => $this->formatMinutes($lateMin),
+            'early_out' => $this->formatMinutes($earlyMin),
+            'ot_minutes' => $otMin,
+            'duty_value' => $duty,
+            'status' => $status,
+            'is_manual' => $record['is_manual'] ?? false,
+            'primary_source' => $record['primary_source'] ?? ($record['is_manual'] ?? false ? 'manual' : null),
+            'manual_by' => $record['manual_by'] ?? null,
+            'manual_remarks' => $record['manual_remarks'] ?? null,
+            'log_details' => $logDetails,
+        ];
+
+        foreach (['clock_in_latitude', 'clock_in_longitude', 'clock_out_latitude', 'clock_out_longitude'] as $locationField) {
+            if (array_key_exists($locationField, $record)) {
+                $attributes[$locationField] = $record[$locationField];
+            }
+        }
+
+        $existingSameDay = BiometricAttendance::query()
+            ->where('employee_id', $emp->id)
+            ->whereDate('attendance_date', $dateStr)
+            ->orderBy('id')
+            ->first();
+
+        if ($existingSameDay) {
+            $existingSameDay->update($attributes);
+
+            return $existingSameDay->fresh();
+        }
+
+        return BiometricAttendance::create(array_merge([
+            'employee_id' => $emp->id,
+            'attendance_date' => $dateStr,
+        ], $attributes));
     }
 
     protected function formatMinutes($minutes)

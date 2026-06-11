@@ -16,11 +16,12 @@ use Spatie\Permission\Models\Role;
 use Spatie\Permission\Models\Permission;
 
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Laravel\Sanctum\HasApiTokens;
 
 class User extends BaseAuthenticatable implements MustVerifyEmail
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasRoles, HasFactory, Notifiable, Impersonate, SoftDeletes, \App\Traits\RecordsActivity;
+    use HasApiTokens, HasRoles, HasFactory, Notifiable, Impersonate, SoftDeletes, \App\Traits\RecordsActivity;
 
     /**
      * The attributes that are mass assignable.
@@ -487,6 +488,7 @@ class User extends BaseAuthenticatable implements MustVerifyEmail
     private function getEmployeePermissions(): array
     {
         return [
+            'access-mobile-app',
             'manage-dashboard',
             'view-dashboard',
 

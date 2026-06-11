@@ -70,7 +70,10 @@ class AttendanceManagementController extends Controller
                 ];
             })->values();
 
+        $selfServiceOnly = userIsAttendanceSelfServiceOnly();
+
         return Inertia::render('hr/attendance/AttendanceModule', [
+            'self_service_only' => $selfServiceOnly,
             'branches' => Branch::whereIn('created_by', getCompanyAndUsersId())->where('status', 'active')->get(),
             'departments' => Department::whereIn('created_by', getCompanyAndUsersId())->where('status', 'active')
                 ->when($activeBranchId, function ($q) use ($activeBranchId) {
@@ -104,12 +107,35 @@ class AttendanceManagementController extends Controller
 
     public function getGridData(Request $request)
     {
+        if (! userHasAnyPermission(auth()->user(), [
+            'view-attendance-records',
+            'manage-attendance-records',
+            'manage-any-attendance-records',
+            'manage-own-attendance-records',
+        ]) && auth()->user()?->type !== 'employee') {
+            abort(403, __('You do not have permission to view attendance records.'));
+        }
+
         $month = $request->month ?? now()->format('Y-m');
         $startDate = Carbon::parse($month)->startOfMonth();
         $endDate = Carbon::parse($month)->endOfMonth();
         $daysInMonth = $startDate->daysInMonth;
 
         $query = Employee::active()->with(['user', 'department', 'designation', 'category', 'shift.slots.dutyRules']);
+
+        if (userIsAttendanceSelfServiceOnly()) {
+            $ownEmployeeId = auth()->user()?->employee()?->withoutGlobalScopes()->value('id');
+            if (! $ownEmployeeId) {
+                return response()->json([
+                    'employees' => [],
+                    'global_summary' => ['present' => 0, 'absent' => 0, 'half_day' => 0, 'mis' => 0, 'ot_count' => 0],
+                    'pagination' => ['current_page' => 1, 'last_page' => 1, 'per_page' => 25, 'total' => 0, 'from' => null, 'to' => null],
+                    'days_in_month' => $daysInMonth,
+                    'month_name' => $startDate->format('F Y'),
+                ]);
+            }
+            $query->where('employees.id', $ownEmployeeId);
+        }
 
         // Filters
         if ($request->department_id && $request->department_id !== 'all') {
@@ -306,6 +332,10 @@ class AttendanceManagementController extends Controller
 
     public function updateRecord(Request $request)
     {
+        if (userIsAttendanceSelfServiceOnly()) {
+            abort(403, __('You can only view your own attendance.'));
+        }
+
         $request->validate([
             'employee_id' => 'required',
             'date' => 'required|date',
@@ -374,6 +404,10 @@ class AttendanceManagementController extends Controller
 
     public function bulkPresent(Request $request)
     {
+        if (userIsAttendanceSelfServiceOnly()) {
+            abort(403, __('Bulk attendance is not available for your account.'));
+        }
+
         $request->validate([
             'target' => 'required|in:all,department,designation,category,shift,employee',
             'department_id' => 'required_if:target,department|nullable|integer',

@@ -690,9 +690,15 @@ class ActivityLogger
         $module = class_basename($model);
 
         if (in_array($module, ['BiometricAttendance', 'AttendanceRecord'], true)) {
-            $model->loadMissing('employee.user');
-            $date = $model->attendance_date
-                ? \Carbon\Carbon::parse($model->attendance_date)->format('d M Y')
+            if ($module === 'AttendanceRecord') {
+                $model->loadMissing('employee');
+            } else {
+                $model->loadMissing('employee.user');
+            }
+
+            $dateField = $module === 'AttendanceRecord' ? $model->date : $model->attendance_date;
+            $date = $dateField
+                ? \Carbon\Carbon::parse($dateField)->format('d M Y')
                 : '';
 
             return self::resolveEmployeeName($model->employee).($date ? " on {$date}" : '');
@@ -893,10 +899,14 @@ class ActivityLogger
         return 'Unknown employee';
     }
 
-    protected static function resolveEmployeeName(?Employee $employee): string
+    protected static function resolveEmployeeName(Employee|\App\Models\User|null $employee): string
     {
         if (! $employee) {
             return 'Unknown employee';
+        }
+
+        if ($employee instanceof \App\Models\User) {
+            return $employee->name ?? $employee->email ?? 'Unknown employee';
         }
 
         $employee->loadMissing('user');

@@ -26,7 +26,7 @@ class NewRolesSeeder extends Seeder
                 'description' => 'Branch-wise administrative access.',
                 'permissions' => [
                     // Dashboard
-                    'view-dashboard',
+                    'manage-dashboard',
                     // Attendance (including mispunch / manual entry)
                     'view-attendance-records', 'manage-own-attendance-records', 'create-attendance-records', 'edit-attendance-records', 'delete-attendance-records',
                     'view-attendance-regularizations', 'manage-own-attendance-regularizations', 'create-attendance-regularizations', 'edit-attendance-regularizations', 'approve-attendance-regularizations', 'reject-attendance-regularizations',
@@ -47,12 +47,32 @@ class NewRolesSeeder extends Seeder
                 ]
             ],
             [
+                'name' => 'employee',
+                'label' => 'Employee',
+                'description' => 'Mobile app and self-service access for workers and staff.',
+                'permissions' => [
+                    'access-mobile-app',
+                    'manage-dashboard',
+                    'view-attendance-records',
+                    'manage-own-attendance-records',
+                    'clock-in-out',
+                    'manage-own-employees',
+                    'view-leave-applications',
+                    'manage-own-leave-applications',
+                    'create-leave-applications',
+                    'view-leave-balances',
+                    'manage-own-leave-balances',
+                    'view-media',
+                ],
+            ],
+            [
                 'name' => 'staff',
                 'label' => 'Staff',
                 'description' => 'Branch-wise operational access.',
                 'permissions' => [
+                    'access-mobile-app',
                     // Dashboard
-                    'view-dashboard',
+                    'manage-dashboard',
                     // Attendance
                     'view-attendance-records', 'manage-own-attendance-records',
                     'view-attendance-regularizations', 'manage-own-attendance-regularizations', 'create-attendance-regularizations',
@@ -89,6 +109,6 @@ class NewRolesSeeder extends Seeder
             }
         }
 
-        $this->command->info('New Roles (Admin, Manager, Staff) created successfully for Company ID 1.');
+        $this->command->info('New Roles (Admin, Manager, Staff, Employee) created successfully for Company ID 1.');
     }
 }

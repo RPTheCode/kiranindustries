@@ -15,7 +15,7 @@ import { SearchAndFilterBar } from '@/components/ui/search-and-filter-bar';
 
 export default function LeaveApplications() {
   const { t } = useTranslation();
-  const { auth, leaveApplications, employees, leaveTypes, leavePolicies, filters: pageFilters = {} } = usePage().props as any;
+  const { auth, leaveApplications, employees, leaveTypes, leavePolicies, filters: pageFilters = {}, self_service_only = false } = usePage().props as any;
   const permissions = auth?.permissions || [];
 
   // State
@@ -114,10 +114,14 @@ export default function LeaveApplications() {
   };
 
   const handleFormSubmit = (formData: any) => {
+    const payload = self_service_only && auth?.user?.id
+      ? { ...formData, employee_id: auth.user.id }
+      : formData;
+
     if (formMode === 'create') {
       toast.loading(t('Creating leave application...'));
 
-      router.post(route('hr.leave-applications.store'), formData, {
+      router.post(route('hr.leave-applications.store'), payload, {
         onSuccess: (page: any) => {
           setIsFormModalOpen(false);
           toast.dismiss();
@@ -139,7 +143,7 @@ export default function LeaveApplications() {
     } else if (formMode === 'edit') {
       toast.loading(t('Updating leave application...'));
 
-      router.put(route('hr.leave-applications.update', currentItem.id), formData, {
+      router.put(route('hr.leave-applications.update', currentItem.id), payload, {
         onSuccess: (page: any) => {
           setIsFormModalOpen(false);
           toast.dismiss();
@@ -246,7 +250,7 @@ export default function LeaveApplications() {
 
   // Define table columns
   const columns = [
-    {
+    ...(!self_service_only ? [{
       key: 'employee',
       label: t('Employee'),
       render: (value: any, row: any) => {
@@ -262,7 +266,7 @@ export default function LeaveApplications() {
           </div>
         );
       }
-    },
+    }] : []),
     {
       key: 'leave_type',
       label: t('Leave Type'),
@@ -365,13 +369,18 @@ export default function LeaveApplications() {
   ];
 
   // Prepare options for filters and forms
-  const employeeOptions = [
-    { value: 'all', label: t('All Employees') },
-    ...(employees || []).map((emp: any) => ({
-      value: emp.id.toString(),
-      label: emp.employee_id ? `${emp.name} (${emp.employee_id})` : emp.name
-    }))
-  ];
+  const employeeOptions = self_service_only
+    ? (employees || []).map((emp: any) => ({
+        value: emp.id.toString(),
+        label: emp.employee_id ? `${emp.name} (${emp.employee_id})` : emp.name,
+      }))
+    : [
+        { value: 'all', label: t('All Employees') },
+        ...(employees || []).map((emp: any) => ({
+          value: emp.id.toString(),
+          label: emp.employee_id ? `${emp.name} (${emp.employee_id})` : emp.name,
+        })),
+      ];
 
   const leaveTypeOptions = [
     { value: 'all', label: t('All Leave Types') },
@@ -403,14 +412,14 @@ export default function LeaveApplications() {
           onSearchChange={setSearchTerm}
           onSearch={handleSearch}
           filters={[
-            {
+            ...(!self_service_only ? [{
               name: 'employee_id',
               label: t('Employee'),
-              type: 'combobox',
+              type: 'combobox' as const,
               value: selectedEmployee,
               onChange: setSelectedEmployee,
-              options: employeeOptions
-            },
+              options: employeeOptions,
+            }] : []),
             {
               name: 'leave_type_id',
               label: t('Leave Type'),
@@ -496,34 +505,32 @@ export default function LeaveApplications() {
                 label: type.name
               })) : []
             },
-            {
+            ...(!self_service_only ? [{
               name: 'employee_id',
               label: t('Employee'),
-              type: 'combobox',
+              type: 'combobox' as const,
               required: true,
               options: (formData: any) => {
                 const allEmpOptions = (employees || []).map((emp: any) => ({
                   value: emp.id.toString(),
                   label: emp.employee_id ? `${emp.name} (${emp.employee_id})` : emp.name,
-                  category_id: emp.category_id
+                  category_id: emp.category_id,
                 }));
 
                 if (!formData.leave_type_id) return allEmpOptions;
 
-                // Find policy for selected leave type
                 const policy = leavePolicies.find((p: any) => p.leave_type_id.toString() === formData.leave_type_id.toString());
-                
+
                 if (!policy || !policy.applicable_categories || policy.applicable_categories.length === 0) {
                   return allEmpOptions;
                 }
 
-                // Filter employees whose category is in the applicable_categories
                 return allEmpOptions.filter((emp: any) => {
                   const empCatId = String(emp.category_id);
                   return policy.applicable_categories.some((catId: any) => String(catId) === empCatId);
                 });
-              }
-            },
+              },
+            }] : []),
             { name: 'start_date', label: t('Start Date'), type: 'date', required: true },
             { name: 'end_date', label: t('End Date'), type: 'date', required: true },
             { name: 'reason', label: t('Reason'), type: 'textarea', required: true },

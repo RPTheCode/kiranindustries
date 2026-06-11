@@ -23,6 +23,14 @@ trait SafeMigration
             return false;
         }
 
+        if (DB::getDriverName() === 'sqlite') {
+            $indexes = collect(DB::select("PRAGMA index_list('{$table}')"))
+                ->pluck('name')
+                ->unique();
+
+            return $indexes->contains($indexName);
+        }
+
         $indexes = collect(DB::select("SHOW INDEX FROM `{$table}`"))
             ->pluck('Key_name')
             ->unique();

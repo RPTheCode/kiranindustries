@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\UserRequest;
+use App\Models\Employee;
 use App\Models\Role;
 use App\Models\User;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
@@ -61,14 +63,21 @@ class UserController extends BaseController
         // Handle pagination
         $perPage = $request->input('per_page', 10);
         $users = $userQuery->where('type', '!=', 'employee')->paginate($perPage)->withQueryString();
+        $users->getCollection()->transform(function (User $user) {
+            $employee = mobileUserEmployee($user);
+            $user->employee_code = $employee?->emy_code ?: $employee?->employee_id;
 
-        # Roles listing - Get all roles without filtering
+            return $user;
+        });
+
+        # Company roles for the user form (include employee for workforce / mobile logins).
         if ($authUserRole == 'company') {
-            // $roles = Role::where('created_by', $authUser->id)->get();
-            $roles = Role::where('created_by', $authUser->id)
-                ->where('name', '!=', 'employee')
-                ->get();
+            $roles = Role::where('created_by', $authUser->id)->get();
         } else {
+            $roles = Role::where('created_by', getCompanyOwnerId())->get();
+        }
+
+        if ($roles->isEmpty()) {
             $roles = Role::get();
         }
 
@@ -108,6 +117,87 @@ class UserController extends BaseController
                 'per_page' => $perPage,
                 'sort_field' => $request->sort_field ?? 'created_at',
                 'sort_direction' => $request->sort_direction ?? 'desc',
+            ],
+        ]);
+    }
+
+    /**
+     * Look up employee details by emp code for user linking.
+     */
+    public function lookupEmployee(Request $request): JsonResponse
+    {
+        if (! Auth::user()->hasPermissionTo('view-users')) {
+            abort(403, 'Unauthorized Access Prevented');
+        }
+
+        $code = trim((string) $request->query('code', ''));
+        if ($code === '') {
+            return response()->json(['employee' => null]);
+        }
+
+        $employee = Employee::withoutGlobalScopes()
+            ->with(['user.roles', 'department', 'designation', 'branch'])
+            ->where(function ($query) use ($code) {
+                $query->where('employee_id', $code)
+                    ->orWhere('emy_code', $code);
+            })
+            ->first();
+
+        if (! $employee) {
+            return response()->json([
+                'employee' => null,
+                'message' => __('Employee not found for this code.'),
+            ], 404);
+        }
+
+        $linkedUser = $employee->user;
+
+        return response()->json([
+            'employee' => [
+                'id' => $employee->id,
+                'code' => $employee->employee_id,
+                'emy_code' => $employee->emy_code,
+                'name' => $linkedUser?->name,
+                'email' => $linkedUser?->email,
+                'department' => $employee->department?->name,
+                'designation' => $employee->designation?->name,
+                'branch' => $employee->branch?->name,
+                'phone' => $employee->phone,
+                'linked_user_id' => $employee->user_id,
+                'linked_user' => $linkedUser ? [
+                    'id' => $linkedUser->id,
+                    'name' => $linkedUser->name,
+                    'email' => $linkedUser->email,
+                    'type' => $linkedUser->type,
+                    'role' => $linkedUser->roles->first()?->label ?: $linkedUser->roles->first()?->name,
+                ] : null,
+                'is_login_enabled' => (int) ($linkedUser?->is_enable_login ?? 0) === 1,
+            ],
+        ]);
+    }
+
+    /**
+     * User record for the edit modal (includes employee-type logins not shown in the list).
+     */
+    public function formData(User $user): JsonResponse
+    {
+        if (! Auth::user()->hasPermissionTo('edit-users')) {
+            abort(403, 'Unauthorized Access Prevented');
+        }
+
+        $user->load(['roles', 'assignedBranches']);
+        $employee = mobileUserEmployee($user);
+
+        return response()->json([
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'type' => $user->type,
+                'roles' => $user->roles,
+                'assigned_branches' => $user->assignedBranches,
+                'employee_code' => $employee?->emy_code ?: $employee?->employee_id,
+                'phone' => $employee?->phone,
             ],
         ]);
     }
@@ -171,6 +261,28 @@ class UserController extends BaseController
                 $user->assignedBranches()->sync($request->branches);
             }
 
+            if ($request->filled('employee_code')) {
+                $existingEmployee = findEmployeeByCode($request->employee_code);
+                if ($existingEmployee?->user_id) {
+                    $existingUser = User::find($existingEmployee->user_id);
+
+                    return redirect()->back()->withInput()->withErrors([
+                        'employee_code' => __('This employee already has a login (:email). Close this form, search that user in the list or click "Edit existing login", then change Role to Admin.', [
+                            'email' => $existingUser?->email ?? '#'.$existingEmployee->user_id,
+                        ]),
+                    ]);
+                }
+
+                $employee = linkUserToEmployeeByCode($user, $request->employee_code);
+                if (! $employee) {
+                    return redirect()->back()->withInput()->withErrors([
+                        'employee_code' => __('Employee not found for this code.'),
+                    ]);
+                }
+            }
+
+            syncEmployeePhoneForUser($user, $request->input('phone'));
+
             // Trigger email notification
             event(new \App\Events\UserCreated($user, $request->password));
 
@@ -193,6 +305,10 @@ class UserController extends BaseController
             $user->name = $request->name;
             $user->email = $request->email;
 
+            if ($request->filled('password')) {
+                $user->password = Hash::make($request->password);
+            }
+
             // find and syncing role
             if ($request->roles) {
                 if (!in_array(auth()->user()->type, ['superadmin', 'company'])) {
@@ -213,6 +329,17 @@ class UserController extends BaseController
             }
 
             $user->save();
+
+            if ($request->filled('employee_code')) {
+                $employee = linkUserToEmployeeByCode($user, $request->employee_code);
+                if (! $employee) {
+                    return redirect()->back()->withInput()->withErrors([
+                        'employee_code' => __('Employee not found for this code.'),
+                    ]);
+                }
+            }
+
+            syncEmployeePhoneForUser($user, $request->input('phone'));
             
             return redirect()->route('users.index')->with('success', __('User updated with roles'));
         }

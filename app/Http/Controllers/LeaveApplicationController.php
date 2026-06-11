@@ -66,40 +66,43 @@ class LeaveApplicationController extends Controller
         $leaveApplications = $query->paginate($request->per_page ?? 10);
 
         $activeBranchId = session('active_branch_id');
+        $selfServiceOnly = userIsLeaveApplicationSelfServiceOnly();
 
-        // Get employees for filter dropdown (All Branches)
-        $employeeQuery = User::join('employees', 'users.id', '=', 'employees.user_id')
-            ->where('users.type', 'employee')
-            ->whereIn('users.created_by', getCompanyAndUsersId());
+        if ($selfServiceOnly) {
+            $employees = collect(selfServiceEmployeeOptions());
+        } else {
+            $employeeQuery = User::join('employees', 'users.id', '=', 'employees.user_id')
+                ->where('users.type', 'employee')
+                ->whereIn('users.created_by', getCompanyAndUsersId());
 
-        // If a leave type filter is active, only show employees who are applicable for that leave type's policy
-        if ($request->has('leave_type_id') && !empty($request->leave_type_id) && $request->leave_type_id !== 'all') {
-            $policy = LeavePolicy::where('leave_type_id', $request->leave_type_id)
-                ->where(function($q) use ($activeBranchId) {
-                    $q->where('branch_id', $activeBranchId);
-                    if ($activeBranchId) {
-                        $q->orWhereNull('branch_id');
-                    }
-                })
-                ->where('status', 'active')
-                ->orderByRaw('branch_id IS NULL ASC')
-                ->first();
-            
-            if ($policy && $policy->applicable_categories && count($policy->applicable_categories) > 0) {
-                $employeeQuery->whereIn('employees.category_id', $policy->applicable_categories);
+            if ($request->has('leave_type_id') && !empty($request->leave_type_id) && $request->leave_type_id !== 'all') {
+                $policy = LeavePolicy::where('leave_type_id', $request->leave_type_id)
+                    ->where(function ($q) use ($activeBranchId) {
+                        $q->where('branch_id', $activeBranchId);
+                        if ($activeBranchId) {
+                            $q->orWhereNull('branch_id');
+                        }
+                    })
+                    ->where('status', 'active')
+                    ->orderByRaw('branch_id IS NULL ASC')
+                    ->first();
+
+                if ($policy && $policy->applicable_categories && count($policy->applicable_categories) > 0) {
+                    $employeeQuery->whereIn('employees.category_id', $policy->applicable_categories);
+                }
             }
-        }
 
-        $employees = $employeeQuery->select('users.id', 'users.name', 'employees.employee_id', 'employees.category_id')
-            ->get()
-            ->map(function ($user) {
-                return [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'employee_id' => $user->employee_id ?? '',
-                    'category_id' => $user->category_id
-                ];
-            });
+            $employees = $employeeQuery->select('users.id', 'users.name', 'employees.employee_id', 'employees.category_id')
+                ->get()
+                ->map(function ($user) {
+                    return [
+                        'id' => $user->id,
+                        'name' => $user->name,
+                        'employee_id' => $user->employee_id ?? '',
+                        'category_id' => $user->category_id,
+                    ];
+                });
+        }
 
         // Get leave types for filter dropdown (Respect branch scope)
         $leaveTypes = LeaveType::whereIn('created_by', getCompanyAndUsersId())
@@ -120,12 +123,17 @@ class LeaveApplicationController extends Controller
             'employees' => $employees,
             'leaveTypes' => $leaveTypes,
             'leavePolicies' => $leavePolicies,
+            'self_service_only' => $selfServiceOnly,
             'filters' => $request->all(['search', 'employee_id', 'leave_type_id', 'status', 'sort_field', 'sort_direction', 'per_page']),
         ]);
     }
 
     public function store(Request $request)
     {
+        if (userIsLeaveApplicationSelfServiceOnly()) {
+            $request->merge(['employee_id' => auth()->id()]);
+        }
+
         $validated = $request->validate([
             'employee_id' => 'required|exists:users,id',
             'leave_type_id' => 'required|exists:leave_types,id',
@@ -241,9 +249,9 @@ class LeaveApplicationController extends Controller
         $validated['status'] = $leavePolicy->requires_approval ? 'pending' : 'approved';
 
         $leaveApplication = new LeaveApplication($validated);
-        if ($activeBranchId) {
-            $leaveApplication->branch_id = $activeBranchId;
-        }
+        $leaveApplication->branch_id = $activeBranchId
+            ?? $employee->employee->branch_id
+            ?? session('active_branch_id');
         $leaveApplication->save();
 
         // Create attendance records if auto-approved
@@ -261,7 +269,15 @@ class LeaveApplicationController extends Controller
             ->first();
 
         if ($leaveApplication) {
+            if (userIsLeaveApplicationSelfServiceOnly() && (int) $leaveApplication->employee_id !== (int) auth()->id()) {
+                abort(403, __('You can only update your own leave applications.'));
+            }
+
             try {
+                if (userIsLeaveApplicationSelfServiceOnly()) {
+                    $request->merge(['employee_id' => auth()->id()]);
+                }
+
                 $validated = $request->validate([
                     'employee_id' => 'required|exists:users,id',
                     'leave_type_id' => 'required|exists:leave_types,id',
@@ -336,6 +352,10 @@ class LeaveApplicationController extends Controller
             ->first();
 
         if ($leaveApplication) {
+            if (userIsLeaveApplicationSelfServiceOnly() && (int) $leaveApplication->employee_id !== (int) auth()->id()) {
+                abort(403, __('You can only delete your own leave applications.'));
+            }
+
             try {
                 $leaveApplication->delete();
                 return redirect()->back()->with('success', __('Leave application deleted successfully'));

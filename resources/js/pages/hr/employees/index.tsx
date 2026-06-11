@@ -484,6 +484,13 @@ export default function Employees() {
       requiredPermission: 'edit-employees'
     },
     {
+      label: t('Change Password'),
+      icon: 'KeyRound',
+      action: 'change-password',
+      className: 'text-violet-500',
+      requiredPermission: 'edit-employees'
+    },
+    {
       label: t('Delete'),
       icon: 'Trash2',
       action: 'delete',

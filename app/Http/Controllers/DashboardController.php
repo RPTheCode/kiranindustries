@@ -22,13 +22,7 @@ class DashboardController extends Controller
             return $this->renderDashboard();
         }
 
-        // Check if user has dashboard permission (skip if permission doesn't exist)
-        try {
-            if ($user->hasPermissionTo('manage-dashboard')) {
-                return $this->renderDashboard();
-            }
-        } catch (\Exception $e) {
-            // Permission doesn't exist, continue to dashboard for authenticated users
+        if (userHasPermission($user, 'manage-dashboard') || userHasPermission($user, 'view-dashboard')) {
             return $this->renderDashboard();
         }
 
@@ -40,15 +34,20 @@ class DashboardController extends Controller
     {
         $user = auth()->user();
 
-        // Define available routes with their permissions
         $routes = [
+            ['route' => 'hr.employees.my-profile', 'permission' => 'manage-own-employees'],
+            ['route' => 'hr.attendance.module', 'permission' => 'view-attendance-records'],
+            ['route' => 'hr.attendance.module', 'permission' => 'manage-attendance-records'],
+            ['route' => 'hr.leave-applications.index', 'permission' => 'view-leave-applications'],
+            ['route' => 'hr.leave-applications.index', 'permission' => 'manage-leave-applications'],
+            ['route' => 'hr.employees.index', 'permission' => 'view-employees'],
             ['route' => 'hr.branches.index', 'permission' => 'manage-branches'],
-            ['route' => 'hr.week-offs.index', 'permission' => 'manage-week-offs'],
+            ['route' => 'hr.week-offs.index', 'permission' => 'view-week-offs'],
+            ['route' => 'hr.week-offs.index', 'permission' => 'manage-any-week-offs'],
             ['route' => 'hr.departments.index', 'permission' => 'manage-departments'],
             ['route' => 'hr.designations.index', 'permission' => 'manage-designations'],
             ['route' => 'hr.employees.index', 'permission' => 'manage-employees'],
             ['route' => 'hr.attendance-records.index', 'permission' => 'manage-attendance-records'],
-            ['route' => 'hr.leave-applications.index', 'permission' => 'manage-leave-applications'],
             ['route' => 'users.index', 'permission' => 'manage-users'],
             ['route' => 'roles.index', 'permission' => 'manage-roles'],
             ['route' => 'plans.index', 'permission' => 'manage-plans'],
@@ -56,9 +55,8 @@ class DashboardController extends Controller
             ['route' => 'settings.index', 'permission' => 'manage-settings'],
         ];
 
-        // Find first available route
         foreach ($routes as $routeData) {
-            if ($user->hasPermissionTo($routeData['permission'])) {
+            if (userHasPermission($user, $routeData['permission'])) {
                 return redirect()->route($routeData['route']);
             }
         }

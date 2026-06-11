@@ -934,6 +934,9 @@ class PermissionSeeder extends Seeder
             ['name' => 'download-payslips', 'module' => 'payslips', 'label' => 'Download Payslips', 'description' => 'Can download payslips'],
             ['name' => 'send-payslips', 'module' => 'payslips', 'label' => 'Send Payslips', 'description' => 'Can send payslips via email'],
 
+            // Mobile App
+            ['name' => 'access-mobile-app', 'module' => 'Mobile App', 'label' => 'Access Mobile App', 'description' => 'Can login to the employee mobile application'],
+
             // Calendar permissions
             ['name' => 'manage-calendar', 'module' => 'calendar', 'label' => 'Manage Calendar', 'description' => 'Can manage calendar'],
             ['name' => 'view-calendar', 'module' => 'calendar', 'label' => 'View Calendar', 'description' => 'Can view calendar'],

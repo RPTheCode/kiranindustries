@@ -13,12 +13,17 @@ class BiometricAttendanceLog extends Model
         'punch_time',
         'punch_type',
         'is_manual',
-        'manually_by'
+        'source',
+        'latitude',
+        'longitude',
+        'manually_by',
     ];
 
     protected $casts = [
         'punch_time' => 'datetime',
         'is_manual' => 'boolean',
+        'latitude' => 'decimal:7',
+        'longitude' => 'decimal:7',
     ];
 
     public function biometricAttendance()

@@ -41,6 +41,7 @@ trait AutoApplyPermissionCheck
         }
 
         $moduleSlug = str_replace('_', '-', $module);
+        $modelClass = get_class($query->getModel());
 
         // 1. High-level permissions: check for 'manage-any' first to bypass branch restriction
         try {
@@ -54,12 +55,37 @@ trait AutoApplyPermissionCheck
             // Permission does not exist, continue to other checks
         }
 
+        // 1b. Self-service: own leave/balance rows are keyed by employee_id, not branch assignment
+        try {
+            if ($user->hasPermissionTo("manage-own-{$moduleSlug}")
+                && in_array($modelClass, [
+                    \App\Models\LeaveApplication::class,
+                    \App\Models\LeaveBalance::class,
+                ], true)
+                && Schema::hasColumn($query->getModel()->getTable(), 'employee_id')) {
+                return $query->where('employee_id', $user->id);
+            }
+        } catch (PermissionDoesNotExist $e) {
+            // continue
+        }
+
+        if ($user->type === 'employee' && in_array($modelClass, [
+            \App\Models\LeaveApplication::class,
+            \App\Models\LeaveBalance::class,
+            \App\Models\AttendanceRecord::class,
+            \App\Models\AttendanceRegularization::class,
+        ], true)) {
+            return $this->applyEmployeeRoleFiltering($query, $user, null, $moduleSlug);
+        }
+
         // 2. Branch restriction: For non-company users, restrict to assigned branches if table has branch_id
-        if (!$user->hasRole(['company'])) {
+        if (! $user->hasRole(['company']) && $user->type !== 'employee') {
             $tableName = $query->getModel()->getTable();
             if (Schema::hasColumn($tableName, 'branch_id')) {
                 $allowedBranchIds = $user->branches()->pluck('branches.id')->toArray();
-                $query->whereIn($tableName . '.branch_id', $allowedBranchIds);
+                if (! empty($allowedBranchIds)) {
+                    $query->whereIn($tableName . '.branch_id', $allowedBranchIds);
+                }
             }
         }
 
@@ -76,6 +102,7 @@ trait AutoApplyPermissionCheck
                 if (Schema::hasColumn($query->getModel()->getTable(), 'created_by')) {
                     return $query->where('created_by', $user->id);
                 }
+
                 return $query;
             }
         } catch (PermissionDoesNotExist $e) {

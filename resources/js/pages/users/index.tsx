@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { usersConfig } from '@/config/crud/users';
 import { PageTemplate } from '@/components/page-template';
 import { usePage, router } from '@inertiajs/react';
+import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Pagination } from '@/components/ui/pagination';
 import { SearchAndFilterBar } from '@/components/ui/search-and-filter-bar';
@@ -16,6 +17,7 @@ import { Filter, Search, Plus, Eye, Edit, Trash2, KeyRound, Lock, Unlock, Layout
 import { hasPermission } from '@/utils/authorization';
 import { CrudTable } from '@/components/CrudTable';
 import { CrudFormModal } from '@/components/CrudFormModal';
+import { UserFormModal } from '@/components/users/UserFormModal';
 import { CrudDeleteModal } from '@/components/CrudDeleteModal';
 import { toast } from '@/components/custom-toast';
 import { useInitials } from '@/hooks/use-initials';
@@ -149,6 +151,20 @@ export default function Users() {
     setCurrentItem(null);
     setFormMode('create');
     setIsFormModalOpen(true);
+  };
+
+  const handleEditLinkedUser = async (userId: number) => {
+    try {
+      toast.loading(t('Loading user...'));
+      const response = await axios.get(route('users.form-data', userId));
+      setCurrentItem(response.data.user);
+      setFormMode('edit');
+      toast.dismiss();
+      toast.success(t('Edit this account and set Role to Admin, then Save.'));
+    } catch {
+      toast.dismiss();
+      toast.error(t('Could not load user for editing.'));
+    }
   };
 
   const handleFormSubmit = (formData: any) => {
@@ -655,55 +671,21 @@ export default function Users() {
       )}
 
       {/* Form Modal */}
-      <CrudFormModal
+      <UserFormModal
         isOpen={isFormModalOpen}
         onClose={() => setIsFormModalOpen(false)}
         onSubmit={handleFormSubmit}
-        formConfig={{
-          fields: [
-            { name: 'name', label: t('Name'), type: 'text', required: true },
-            { name: 'email', label: t('Email'), type: 'email', required: true },
-            {
-              name: 'password',
-              label: t('Password'),
-              type: 'password',
-              required: true,
-              conditional: (mode) => mode === 'create'
-            },
-            {
-              name: 'password_confirmation',
-              label: t('Confirm Password'),
-              type: 'password',
-              required: true,
-              conditional: (mode) => mode === 'create'
-            },
-            {
-              name: 'roles',
-              label: t('Role'),
-              type: 'select',
-              options: roles ? roles.map((role: any) => ({
-                value: role.id.toString(),
-                label: role.label || role.name
-              })) : [],
-              required: true
-            },
-            {
-              name: 'branches',
-              label: t('Assigned Branches'),
-              type: 'multi-select',
-              options: auth.branches ? auth.branches.map((branch: any) => ({
-                value: branch.id.toString(),
-                label: branch.name
-              })) : [],
-              required: false
-            }
-          ],
-          modalSize: 'lg'
-        }}
+        mode={formMode}
+        currentUserId={currentItem?.id}
+        roles={roles || []}
+        branches={auth.branches || []}
+        onEditLinkedUser={handleEditLinkedUser}
         initialData={currentItem ? {
           ...currentItem,
           roles: currentItem.roles && currentItem.roles.length > 0 ? currentItem.roles[0].id.toString() : '',
-          branches: currentItem.assigned_branches ? currentItem.assigned_branches.map((b: any) => b.id.toString()) : []
+          branches: currentItem.assigned_branches ? currentItem.assigned_branches.map((b: any) => b.id.toString()) : [],
+          employee_code: currentItem.employee_code || '',
+          phone: currentItem.phone || '',
         } : null}
         title={
           formMode === 'create'
@@ -712,7 +694,6 @@ export default function Users() {
               ? t('Edit User')
               : t('View User')
         }
-        mode={formMode}
       />
 
       {/* Delete Modal */}

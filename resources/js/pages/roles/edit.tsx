@@ -88,7 +88,7 @@ export default function EditRole() {
             <div>
               <h3 className="text-amber-800 font-semibold">{t("System Role")}</h3>
               <p className="text-amber-700 text-sm mt-1">
-                {t("This is a system role. Its name cannot be changed, but you may update its permissions.")}
+                {t("This is a system role. Its name cannot be changed, but you can update description and permissions below.")}
               </p>
             </div>
           </div>

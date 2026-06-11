@@ -10,6 +10,10 @@ return new class extends Migration {
      */
     public function up(): void
     {
+        if (\Illuminate\Support\Facades\DB::getDriverName() !== 'mysql') {
+            return;
+        }
+
         \Illuminate\Support\Facades\DB::statement("ALTER TABLE payroll_runs MODIFY COLUMN status ENUM('draft', 'processing', 'in_review', 'completed', 'cancelled') NOT NULL DEFAULT 'draft'");
     }
 
@@ -18,6 +22,10 @@ return new class extends Migration {
      */
     public function down(): void
     {
+        if (\Illuminate\Support\Facades\DB::getDriverName() !== 'mysql') {
+            return;
+        }
+
         \Illuminate\Support\Facades\DB::statement("ALTER TABLE payroll_runs MODIFY COLUMN status ENUM('draft', 'processing', 'completed', 'cancelled') NOT NULL DEFAULT 'draft'");
     }
 };

@@ -12,7 +12,10 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Change the status column from ENUM to VARCHAR to support dynamic statuses like 'HD' (Half Day)
+        if (DB::getDriverName() !== 'mysql') {
+            return;
+        }
+
         DB::statement("ALTER TABLE `biometric_attendances` MODIFY `status` VARCHAR(10) NOT NULL DEFAULT 'A'");
     }
 
@@ -21,7 +24,8 @@ return new class extends Migration
      */
     public function down(): void
     {
-        // Revert back to ENUM
-        DB::statement("ALTER TABLE `biometric_attendances` MODIFY `status` ENUM('P','A','MIS','H','W') NOT NULL DEFAULT 'A'");
+        if (DB::getDriverName() === 'mysql') {
+            DB::statement("ALTER TABLE `biometric_attendances` MODIFY `status` ENUM('P','A','MIS','H','W') NOT NULL DEFAULT 'A'");
+        }
     }
 };

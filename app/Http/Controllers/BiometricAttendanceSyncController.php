@@ -319,6 +319,7 @@ class BiometricAttendanceSyncController extends Controller
                     'is_mis_punch' => $isMisPunch,
                     'actual_work_minutes' => $analysis['work_minutes'],
                     'log_details' => $analysis['log_details'],
+                    'primary_source' => 'essl',
                 ];
 
                 $this->saveAttendanceRecord($emp, $consolidated);
@@ -767,7 +768,7 @@ class BiometricAttendanceSyncController extends Controller
                 ->whereDate('attendance_date', $dateStr)
                 ->first();
 
-            if ($existing && $existing->is_manual) {
+            if ($existing && ($existing->is_manual || $existing->primary_source === 'mobile')) {
                 $current->addDay();
                 continue;
             }
@@ -816,7 +817,7 @@ class BiometricAttendanceSyncController extends Controller
                 ->whereDate('attendance_date', $dateStr)
                 ->first();
 
-            if ($existing && $existing->is_manual) {
+            if ($existing && ($existing->is_manual || $existing->primary_source === 'mobile')) {
                 $current->addDay();
                 continue;
             }

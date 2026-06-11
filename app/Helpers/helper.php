@@ -89,6 +89,67 @@ if (!function_exists('settings')) {
     }
 }
 
+if (!function_exists('companyDisplayTimezone')) {
+    /** Company timezone for attendance/API display (defaults to IST when unset). */
+    function companyDisplayTimezone(): string
+    {
+        $tz = data_get(settings(), 'defaultTimezone', config('app.timezone', 'Asia/Kolkata'));
+
+        if (! $tz || $tz === 'UTC') {
+            return 'Asia/Kolkata';
+        }
+
+        return $tz;
+    }
+}
+
+if (!function_exists('companyToday')) {
+    function companyToday(): Carbon
+    {
+        return Carbon::today(companyDisplayTimezone());
+    }
+}
+
+if (!function_exists('attendanceWallClock')) {
+    /** Parse/store attendance punch as company wall-clock (no UTC shift). */
+    function attendanceWallClock(mixed $value): ?Carbon
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        $tz = companyDisplayTimezone();
+
+        if ($value instanceof Carbon) {
+            return Carbon::parse($value->copy()->timezone($tz)->format('Y-m-d H:i:s'), $tz);
+        }
+
+        return Carbon::parse((string) $value, $tz);
+    }
+}
+
+if (!function_exists('attendanceWallClockString')) {
+    function attendanceWallClockString(mixed $value): ?string
+    {
+        return attendanceWallClock($value)?->format('Y-m-d H:i:s');
+    }
+}
+
+if (!function_exists('attendanceNowWallClock')) {
+    function attendanceNowWallClock(): Carbon
+    {
+        return attendanceWallClock(Carbon::now($tz = companyDisplayTimezone()));
+    }
+}
+
+if (!function_exists('formatAttendanceApiTime')) {
+    /** Wall-clock time (H:i:s) in company timezone for mobile API responses. */
+    function formatAttendanceApiTime(mixed $value): ?string
+    {
+        return attendanceWallClock($value)?->format('H:i:s');
+    }
+}
+
 if (!function_exists('formatDateTime')) {
     function formatDateTime($date, $includeTime = true)
     {
@@ -2655,6 +2716,497 @@ if (!function_exists('getCompanyAndUsersId')) {
     }
 }
 
+if (!function_exists('getCompanyOwnerId')) {
+    function getCompanyOwnerId(?\App\Models\User $user = null): int
+    {
+        $user = $user ?? Auth::user();
+
+        if (! $user) {
+            return 0;
+        }
+
+        if ($user->type === 'company') {
+            return (int) $user->id;
+        }
+
+        return (int) ($user->created_by ?: $user->id);
+    }
+}
+
+if (!function_exists('userHasPermission')) {
+    /**
+     * Check permission without throwing when the permission row is missing.
+     */
+    function userHasPermission($user, string $permission): bool
+    {
+        if (! \Spatie\Permission\Models\Permission::where('name', $permission)->where('guard_name', 'web')->exists()) {
+            return false;
+        }
+
+        return $user->hasPermissionTo($permission);
+    }
+}
+
+if (!function_exists('userHasAnyPermission')) {
+    function userHasAnyPermission($user, array $permissions): bool
+    {
+        foreach ($permissions as $permission) {
+            if (userHasPermission($user, $permission)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+if (!function_exists('userCanAccessMobileApp')) {
+    /**
+     * Mobile login is allowed when the account is active and has access-mobile-app (role permission).
+     */
+    function userCanAccessMobileApp($user = null): bool
+    {
+        $user = $user ?? Auth::user();
+        if (! $user) {
+            return false;
+        }
+
+        if ((int) $user->is_enable_login !== 1 || $user->status !== 'active') {
+            return false;
+        }
+
+        if (! \Spatie\Permission\Models\Permission::where('name', 'access-mobile-app')->where('guard_name', 'web')->exists()) {
+            return true;
+        }
+
+        return userHasPermission($user, 'access-mobile-app');
+    }
+}
+
+if (!function_exists('mobileUserEmployee')) {
+    /**
+     * Load the user's workforce profile without branch/global scopes (mobile API).
+     * Matches by linked user_id first, then by emp code (employee_id / emy_code = user id).
+     */
+    function mobileUserEmployee($user = null): ?\App\Models\Employee
+    {
+        $user = $user ?? Auth::user();
+        if (! $user) {
+            return null;
+        }
+
+        $baseQuery = \App\Models\Employee::withoutGlobalScopes();
+
+        $employee = (clone $baseQuery)->where('user_id', $user->id)->first();
+        if ($employee) {
+            return $employee;
+        }
+
+        $userId = (string) $user->id;
+
+        return $baseQuery
+            ->where(function ($query) use ($userId) {
+                $query->where('employee_id', $userId)
+                    ->orWhere('emy_code', $userId);
+            })
+            ->first();
+    }
+}
+
+if (!function_exists('findEmployeeByCode')) {
+    function findEmployeeByCode(?string $code): ?\App\Models\Employee
+    {
+        $code = trim((string) $code);
+        if ($code === '') {
+            return null;
+        }
+
+        return \App\Models\Employee::withoutGlobalScopes()
+            ->where(function ($query) use ($code) {
+                $query->where('employee_id', $code)
+                    ->orWhere('emy_code', $code);
+            })
+            ->first();
+    }
+}
+
+if (!function_exists('assignWorkforceEmployeeRole')) {
+    /**
+     * Assign company Employee role and sync users.type for workforce / mobile logins.
+     */
+    function assignWorkforceEmployeeRole(\App\Models\User $user): void
+    {
+        $role = resolveEmployeeSpatieRole();
+        if (! $role) {
+            return;
+        }
+
+        $user->syncRoles([$role->name]);
+        $user->update([
+            'type' => 'employee',
+            'is_enable_login' => 1,
+            'status' => 'active',
+        ]);
+    }
+}
+
+if (!function_exists('mobileMenuUsesWorkforcePermissions')) {
+    /** Workforce mobile menu when users.type is employee and profile is linked. */
+    function mobileMenuUsesWorkforcePermissions(\App\Models\User $user): bool
+    {
+        return $user->type === 'employee' && mobileUserEmployee($user) !== null;
+    }
+}
+
+if (!function_exists('userHasPermissionForMobileMenu')) {
+    function userHasPermissionForMobileMenu(\App\Models\User $user, string $permission): bool
+    {
+        if (mobileMenuUsesWorkforcePermissions($user)) {
+            $role = resolveEmployeeSpatieRole();
+            if (! $role) {
+                return false;
+            }
+
+            if (! \Spatie\Permission\Models\Permission::where('name', $permission)->where('guard_name', 'web')->exists()) {
+                return false;
+            }
+
+            return $role->hasPermissionTo($permission);
+        }
+
+        return userHasPermission($user, $permission);
+    }
+}
+
+if (!function_exists('userHasAnyPermissionForMobileMenu')) {
+    function userHasAnyPermissionForMobileMenu(\App\Models\User $user, array $permissions): bool
+    {
+        foreach ($permissions as $permission) {
+            if (userHasPermissionForMobileMenu($user, $permission)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+if (!function_exists('linkUserToEmployeeByCode')) {
+    /**
+     * Link a user account to an employee record by emp code and enable login.
+     */
+    function linkUserToEmployeeByCode(\App\Models\User $user, ?string $code): ?\App\Models\Employee
+    {
+        $employee = findEmployeeByCode($code);
+        if (! $employee) {
+            return null;
+        }
+
+        $employee->update(['user_id' => $user->id]);
+
+        $user->update([
+            'is_enable_login' => 1,
+            'status' => 'active',
+        ]);
+
+        $workforceRole = resolveEmployeeSpatieRole();
+        $currentRoleName = $user->roles()->first()?->name;
+        $isWorkforceRole = in_array($currentRoleName, ['employee', 'staff'], true);
+
+        if ($user->type === 'employee' || $isWorkforceRole) {
+            assignWorkforceEmployeeRole($user->fresh());
+        }
+
+        return $employee->fresh(['user', 'department', 'designation', 'branch']);
+    }
+}
+
+if (!function_exists('syncEmployeePhoneForUser')) {
+    function syncEmployeePhoneForUser(\App\Models\User $user, ?string $phone): void
+    {
+        $phone = trim((string) $phone);
+        if ($phone === '') {
+            return;
+        }
+
+        $employee = mobileUserEmployee($user);
+        if ($employee) {
+            $employee->update(['phone' => $phone]);
+        }
+    }
+}
+
+if (!function_exists('mobileAppPermissionNames')) {
+    /**
+     * Permissions that are relevant to the mobile employee app (not full HR admin panel).
+     *
+     * @return list<string>
+     */
+    function mobileAppPermissionNames(): array
+    {
+        return [
+            'access-mobile-app',
+            'manage-dashboard',
+            'clock-in-out',
+            'view-attendance-records',
+            'manage-own-attendance-records',
+            'view-attendance-regularizations',
+            'manage-own-attendance-regularizations',
+            'create-attendance-regularizations',
+            'view-leave-applications',
+            'manage-own-leave-applications',
+            'create-leave-applications',
+            'view-leave-balances',
+            'manage-own-leave-balances',
+            'download-payslips',
+            'view-payslips',
+            'manage-own-payslips',
+            'view-salary-payroll-employee-salary',
+            'manage-own-salary-payroll-employee-salary',
+            'view-calendar',
+            'manage-calendar',
+            'view-holidays',
+            'manage-holidays',
+            'manage-own-employees',
+            'view-media',
+            'create-media',
+            'edit-media',
+        ];
+    }
+}
+
+if (!function_exists('userMobileAppPermissions')) {
+    /**
+     * All role permissions for the mobile session (menu + API gating on client).
+     *
+     * @return list<string>
+     */
+    function userMobileAppPermissions($user = null): array
+    {
+        $user = $user ?? Auth::user();
+        if (! $user) {
+            return [];
+        }
+
+        return $user->getAllPermissions()->pluck('name')->values()->all();
+    }
+}
+
+if (!function_exists('userCanManageAnyAttendance')) {
+    function userCanManageAnyAttendance($user = null): bool
+    {
+        $user = $user ?? Auth::user();
+        if (! $user) {
+            return false;
+        }
+
+        if (in_array($user->type, ['superadmin', 'super admin', 'company', 'admin'], true)) {
+            return true;
+        }
+
+        return userHasAnyPermission($user, [
+            'manage-attendance-records',
+            'manage-any-attendance-records',
+        ]);
+    }
+}
+
+if (!function_exists('userIsAttendanceSelfServiceOnly')) {
+    function userIsAttendanceSelfServiceOnly($user = null): bool
+    {
+        $user = $user ?? Auth::user();
+        if (! $user || userCanManageAnyAttendance($user)) {
+            return false;
+        }
+
+        return $user->type === 'employee'
+            || userHasAnyPermission($user, [
+                'view-attendance-records',
+                'manage-own-attendance-records',
+            ]);
+    }
+}
+
+if (!function_exists('userCanManageAnyEmployees')) {
+    function userCanManageAnyEmployees($user = null): bool
+    {
+        $user = $user ?? Auth::user();
+        if (! $user) {
+            return false;
+        }
+
+        if (in_array($user->type, ['superadmin', 'super admin', 'company', 'admin'], true)) {
+            return true;
+        }
+
+        return userHasAnyPermission($user, [
+            'manage-employees',
+            'manage-any-employees',
+        ]);
+    }
+}
+
+if (!function_exists('userIsEmployeeSelfServiceOnly')) {
+    function userIsEmployeeSelfServiceOnly($user = null): bool
+    {
+        $user = $user ?? Auth::user();
+        if (! $user || userCanManageAnyEmployees($user)) {
+            return false;
+        }
+
+        return $user->type === 'employee'
+            || userHasPermission($user, 'manage-own-employees');
+    }
+}
+
+if (!function_exists('userCanManageAnyLeaveApplications')) {
+    function userCanManageAnyLeaveApplications($user = null): bool
+    {
+        $user = $user ?? Auth::user();
+        if (! $user) {
+            return false;
+        }
+
+        if (in_array($user->type, ['superadmin', 'super admin', 'company', 'admin'], true)) {
+            return true;
+        }
+
+        if ($user->type === 'employee') {
+            return userHasAnyPermission($user, [
+                'manage-any-leave-applications',
+                'approve-leave-applications',
+            ]);
+        }
+
+        return userHasAnyPermission($user, [
+            'manage-leave-applications',
+            'manage-any-leave-applications',
+            'approve-leave-applications',
+        ]);
+    }
+}
+
+if (!function_exists('userIsLeaveApplicationSelfServiceOnly')) {
+    function userIsLeaveApplicationSelfServiceOnly($user = null): bool
+    {
+        $user = $user ?? Auth::user();
+        if (! $user || userCanManageAnyLeaveApplications($user)) {
+            return false;
+        }
+
+        return $user->type === 'employee'
+            || userHasAnyPermission($user, [
+                'view-leave-applications',
+                'manage-own-leave-applications',
+            ]);
+    }
+}
+
+if (!function_exists('userCanManageAnyLeaveBalances')) {
+    function userCanManageAnyLeaveBalances($user = null): bool
+    {
+        $user = $user ?? Auth::user();
+        if (! $user) {
+            return false;
+        }
+
+        if (in_array($user->type, ['superadmin', 'super admin', 'company', 'admin'], true)) {
+            return true;
+        }
+
+        if ($user->type === 'employee') {
+            return userHasPermission($user, 'manage-any-leave-balances');
+        }
+
+        return userHasAnyPermission($user, [
+            'manage-leave-balances',
+            'manage-any-leave-balances',
+        ]);
+    }
+}
+
+if (!function_exists('userIsLeaveBalanceSelfServiceOnly')) {
+    function userIsLeaveBalanceSelfServiceOnly($user = null): bool
+    {
+        $user = $user ?? Auth::user();
+        if (! $user || userCanManageAnyLeaveBalances($user)) {
+            return false;
+        }
+
+        return $user->type === 'employee'
+            || userHasAnyPermission($user, [
+                'view-leave-balances',
+                'manage-own-leave-balances',
+            ]);
+    }
+}
+
+if (!function_exists('selfServiceEmployeeOptions')) {
+    /**
+     * @return list<array{id: int, name: string, employee_id: string, category_id: mixed}>
+     */
+    function selfServiceEmployeeOptions($user = null): array
+    {
+        $user = $user ?? Auth::user();
+        if (! $user) {
+            return [];
+        }
+
+        $employee = mobileUserEmployee($user);
+        if (! $employee) {
+            return [];
+        }
+
+        return [[
+            'id' => $user->id,
+            'name' => $user->name,
+            'employee_id' => $employee->employee_id ?? '',
+            'category_id' => $employee->category_id,
+        ]];
+    }
+}
+
+if (!function_exists('userCanManageAttendanceRegularizations')) {
+    function userCanManageAttendanceRegularizations($user = null): bool
+    {
+        $user = $user ?? Auth::user();
+        if (! $user) {
+            return false;
+        }
+
+        if (userCanManageAnyAttendance($user)) {
+            return true;
+        }
+
+        return userHasAnyPermission($user, [
+            'manage-attendance-regularizations',
+            'manage-any-attendance-regularizations',
+        ]);
+    }
+}
+
+if (!function_exists('resolveEmployeeSpatieRole')) {
+    /**
+     * Role assigned to HR-created employees. Prefers company-scoped "employee", then "staff".
+     */
+    function resolveEmployeeSpatieRole(?int $companyId = null): ?\Spatie\Permission\Models\Role
+    {
+        $companyId = $companyId ?: getCompanyOwnerId();
+
+        foreach (['employee', 'staff'] as $roleName) {
+            $role = \Spatie\Permission\Models\Role::where('name', $roleName)
+                ->where('created_by', $companyId)
+                ->first();
+
+            if ($role) {
+                return $role;
+            }
+        }
+
+        return \Spatie\Permission\Models\Role::whereIn('name', ['employee', 'staff'])->first();
+    }
+}
+
 // Get Image URL Path
 if (!function_exists('getImageUrlPrefix')) {
     function getImageUrlPrefix(): string
@@ -2777,6 +3329,23 @@ if (!function_exists('isDemo')) {
 }
 
 
+
+if (!function_exists('legacyPayrollPermissionModules')) {
+    /**
+     * Legacy Payroll Management modules — hidden from Roles UI (replaced by Salary Payroll).
+     */
+    function legacyPayrollPermissionModules(): array
+    {
+        return [
+            'Payroll Management',
+            'payroll_runs',
+            'payslips',
+            'payroll_adjustments',
+            'employee_salaries',
+            'employee_advances',
+        ];
+    }
+}
 
 if (!function_exists('isNotEditableRoles')) {
     function isNotEditableRoles()

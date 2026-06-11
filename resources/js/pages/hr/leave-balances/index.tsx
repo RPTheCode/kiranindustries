@@ -14,7 +14,7 @@ import { SearchAndFilterBar } from '@/components/ui/search-and-filter-bar';
 
 export default function LeaveBalances() {
   const { t } = useTranslation();
-  const { auth, leaveBalances, employees, leaveTypes, leavePolicies, years, filters: pageFilters = {} } = usePage().props as any;
+  const { auth, leaveBalances, employees, leaveTypes, leavePolicies, years, filters: pageFilters = {}, self_service_only = false } = usePage().props as any;
   const permissions = auth?.permissions || [];
 
   // State
@@ -245,11 +245,11 @@ export default function LeaveBalances() {
 
   // Define table columns
   const columns = [
-    {
+    ...(!self_service_only ? [{
       key: 'employee',
       label: t('Employee'),
-      render: (value: any, row: any) => row.employee?.name || '-'
-    },
+      render: (value: any, row: any) => row.employee?.name || '-',
+    }] : []),
     {
       key: 'leave_type',
       label: t('Leave Type'),
@@ -384,14 +384,14 @@ export default function LeaveBalances() {
           onSearchChange={setSearchTerm}
           onSearch={handleSearch}
           filters={[
-            {
+            ...(!self_service_only ? [{
               name: 'employee_id',
               label: t('Employee'),
-              type: 'combobox',
+              type: 'combobox' as const,
               value: selectedEmployee,
               onChange: setSelectedEmployee,
-              options: employeeOptions
-            },
+              options: employeeOptions,
+            }] : []),
             {
               name: 'leave_type_id',
               label: t('Leave Type'),

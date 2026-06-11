@@ -462,6 +462,8 @@ Route::middleware(['auth', 'verified', 'setting'])->group(function () {
         // Users routes with granular permissions
         Route::middleware('permission:manage-users')->group(function () {
             Route::get('users', [UserController::class, 'index'])->middleware('permission:manage-users')->name('users.index');
+            Route::get('users/lookup-employee', [UserController::class, 'lookupEmployee'])->middleware('permission:view-users')->name('users.lookup-employee');
+            Route::get('users/{user}/form-data', [UserController::class, 'formData'])->middleware('permission:edit-users')->name('users.form-data');
             Route::get('users/create', [UserController::class, 'create'])->middleware('permission:create-users')->name('users.create');
             Route::post('users', [UserController::class, 'store'])->middleware('permission:create-users')->name('users.store');
             Route::get('users/{user}', [UserController::class, 'show'])->middleware('permission:view-users')->name('users.show');
@@ -602,6 +604,11 @@ Route::middleware(['auth', 'verified', 'setting'])->group(function () {
         Route::post('payroll-settings/parameters', [\App\Http\Controllers\PayrollSettingController::class, 'updateParameters'])->middleware('permission:edit-payroll-settings|manage-payroll-settings|manage-settings|edit-settings')->name('hr.payroll-settings.parameters.update');
         Route::post('payroll-settings/salary-rules', [\App\Http\Controllers\PayrollSettingController::class, 'updateSalaryRules'])->middleware('permission:edit-payroll-settings|manage-payroll-settings|manage-settings|edit-settings')->name('hr.payroll-settings.salary-rules.update');
         Route::post('payroll-settings/slabs', [\App\Http\Controllers\PayrollSettingController::class, 'updateSlabs'])->middleware('permission:edit-payroll-settings|manage-payroll-settings|manage-settings|edit-settings')->name('hr.payroll-settings.slabs.update');
+
+        // Employee self-service profile
+        Route::get('my-profile', [EmployeeController::class, 'myProfile'])
+            ->middleware('permission:manage-own-employees|view-employees')
+            ->name('hr.employees.my-profile');
 
         // Employee Routes
         Route::middleware('permission:manage-employees')->group(function () {
@@ -1247,16 +1254,16 @@ Route::middleware(['auth', 'verified', 'setting'])->group(function () {
         });
 
         // Leave Applications routes
-        Route::middleware('permission:manage-leave-applications')->group(function () {
+        Route::middleware('permission:manage-leave-applications|view-leave-applications|manage-own-leave-applications')->group(function () {
             Route::get('leave-applications', [\App\Http\Controllers\LeaveApplicationController::class, 'index'])->name('hr.leave-applications.index');
             Route::post('leave-applications', [\App\Http\Controllers\LeaveApplicationController::class, 'store'])->middleware('permission:create-leave-applications')->name('hr.leave-applications.store');
-            Route::put('leave-applications/{leaveApplication}', [\App\Http\Controllers\LeaveApplicationController::class, 'update'])->middleware('permission:edit-leave-applications')->name('hr.leave-applications.update');
-            Route::delete('leave-applications/{leaveApplication}', [\App\Http\Controllers\LeaveApplicationController::class, 'destroy'])->middleware('permission:delete-leave-applications')->name('hr.leave-applications.destroy');
+            Route::put('leave-applications/{leaveApplication}', [\App\Http\Controllers\LeaveApplicationController::class, 'update'])->middleware('permission:edit-leave-applications|manage-own-leave-applications')->name('hr.leave-applications.update');
+            Route::delete('leave-applications/{leaveApplication}', [\App\Http\Controllers\LeaveApplicationController::class, 'destroy'])->middleware('permission:delete-leave-applications|manage-own-leave-applications')->name('hr.leave-applications.destroy');
             Route::put('leave-applications/{leaveApplication}/status', [\App\Http\Controllers\LeaveApplicationController::class, 'updateStatus'])->middleware('permission:approve-leave-applications')->name('hr.leave-applications.update-status');
         });
 
         // Leave Balances routes
-        Route::middleware('permission:manage-leave-balances')->group(function () {
+        Route::middleware('permission:manage-leave-balances|view-leave-balances|manage-own-leave-balances')->group(function () {
             Route::get('leave-balances', [\App\Http\Controllers\LeaveBalanceController::class, 'index'])->name('hr.leave-balances.index');
             Route::get('leave-balances/suggest-carry-forward', [\App\Http\Controllers\LeaveBalanceController::class, 'suggestCarryForward'])->name('hr.leave-balances.suggest-carry-forward');
             Route::post('leave-balances', [\App\Http\Controllers\LeaveBalanceController::class, 'store'])->middleware('permission:create-leave-balances')->name('hr.leave-balances.store');

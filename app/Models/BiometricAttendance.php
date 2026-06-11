@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\CompanyWallClockDatetime;
 use Illuminate\Database\Eloquent\Model;
 
 class BiometricAttendance extends Model
@@ -18,6 +19,10 @@ class BiometricAttendance extends Model
         'base_shift',
         'in_time',
         'out_time',
+        'clock_in_latitude',
+        'clock_in_longitude',
+        'clock_out_latitude',
+        'clock_out_longitude',
         'in_count',
         'out_count',
         'punch_count',
@@ -30,6 +35,7 @@ class BiometricAttendance extends Model
         'is_holiday',
         'is_weekly_off',
         'is_manual',
+        'primary_source',
         'manual_by',
         'manual_remarks',
         'remarks',
@@ -39,8 +45,8 @@ class BiometricAttendance extends Model
 
     protected $casts = [
         'attendance_date' => 'date',
-        'in_time' => 'datetime',
-        'out_time' => 'datetime',
+        'in_time' => CompanyWallClockDatetime::class,
+        'out_time' => CompanyWallClockDatetime::class,
         'duty_value' => 'decimal:1',
         'is_holiday' => 'boolean',
         'is_weekly_off' => 'boolean',
@@ -226,11 +232,24 @@ class BiometricAttendance extends Model
                                  $isManualPunch = !$isPunchBiometric;
                             }
 
-                            BiometricAttendanceLog::withoutEvents(function () use ($attendance, $punchDatetime, $typeStr, $isManualPunch) {
+                            $logSource = null;
+                            if ($attendance->primary_source === 'mobile') {
+                                $logSource = 'mobile';
+                                $isManualPunch = false;
+                            } elseif ($isManualPunch || $attendance->is_manual) {
+                                $logSource = 'manual';
+                            } elseif (! $isPunchBiometric) {
+                                $logSource = 'manual';
+                            } else {
+                                $logSource = 'essl';
+                            }
+
+                            BiometricAttendanceLog::withoutEvents(function () use ($attendance, $punchDatetime, $typeStr, $isManualPunch, $logSource) {
                                 $attendance->logs()->create([
                                     'punch_time' => $punchDatetime,
                                     'punch_type' => $typeStr,
                                     'is_manual' => $isManualPunch,
+                                    'source' => $logSource,
                                     'manually_by' => $isManualPunch ? $attendance->manual_by : null,
                                 ]);
                             });

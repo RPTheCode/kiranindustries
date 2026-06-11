@@ -142,7 +142,7 @@ const COLOR_MAP: Record<string, string> = {
     blue: 'text-blue-600 bg-blue-50 border-blue-200',
 };
 
-export default function AttendanceModule({ branches, departments, sections, categories, designations, initial_filters, shifts_for_rules = [] }: any) {
+export default function AttendanceModule({ branches, departments, sections, categories, designations, initial_filters, shifts_for_rules = [], self_service_only = false }: any) {
     const [filters, setFilters] = useState(initial_filters);
     const [loading, setLoading] = useState(false);
     const [data, setData] = useState<{ employees: EmployeeData[], days_in_month: number, month_name: string, pagination?: any } | null>(null);
@@ -150,6 +150,10 @@ export default function AttendanceModule({ branches, departments, sections, cate
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedRecord, setSelectedRecord] = useState<{emp: any, day: number, record: AttendanceRecord} | null>(null);
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+
+    const handleCellClick = self_service_only
+        ? undefined
+        : (emp: any, d: number, r: any) => setSelectedRecord({ emp, day: d, record: r });
 
     useEffect(() => {
         // Handle tab from URL query param
@@ -695,21 +699,25 @@ export default function AttendanceModule({ branches, departments, sections, cate
                                         </DropdownMenuItem>
                                     </DropdownMenuContent>
                                 </DropdownMenu> */}
-                                <Button 
-                                    variant="outline" 
-                                    size="sm"
-                                    onClick={() => setRulesDialogOpen(true)}
-                                    className="h-9 border-amber-200 bg-amber-50/50 text-amber-700 hover:bg-amber-100 font-bold gap-2 px-3 rounded-lg mr-2"
-                                >
-                                    <Info className="w-4 h-4" />
-                                    Rules
-                                </Button>
-                                <Button size="sm" className="shadow-md shadow-primary/20 mr-2" onClick={() => setBulkAttendanceOpen(true)}>
-                                    <Layers className="w-4 h-4 mr-2" /> Bulk Attendance
-                                </Button>
-                                <Button size="sm" className="shadow-md shadow-primary/20" onClick={() => setManualEntryOpen(true)}>
-                                    <Plus className="w-4 h-4 mr-2" /> Manual Entry
-                                </Button>
+                                {!self_service_only && (
+                                    <>
+                                        <Button 
+                                            variant="outline" 
+                                            size="sm"
+                                            onClick={() => setRulesDialogOpen(true)}
+                                            className="h-9 border-amber-200 bg-amber-50/50 text-amber-700 hover:bg-amber-100 font-bold gap-2 px-3 rounded-lg mr-2"
+                                        >
+                                            <Info className="w-4 h-4" />
+                                            Rules
+                                        </Button>
+                                        <Button size="sm" className="shadow-md shadow-primary/20 mr-2" onClick={() => setBulkAttendanceOpen(true)}>
+                                            <Layers className="w-4 h-4 mr-2" /> Bulk Attendance
+                                        </Button>
+                                        <Button size="sm" className="shadow-md shadow-primary/20" onClick={() => setManualEntryOpen(true)}>
+                                            <Plus className="w-4 h-4 mr-2" /> Manual Entry
+                                        </Button>
+                                    </>
+                                )}
                     </div>
                 </div>
 
@@ -730,63 +738,67 @@ export default function AttendanceModule({ branches, departments, sections, cate
                                 </div>
                             </div>
 
-                            <div className="space-y-1.5">
-                                <label className="text-[11px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">Department</label>
-                                <Select value={filters.department_id} onValueChange={(v) => setFilters({...filters, department_id: v, page: 1})}>
-                                    <SelectTrigger className="h-11 border-gray-200 dark:border-gray-800 text-[13px] font-medium bg-white dark:bg-gray-950">
-                                        <SelectValue placeholder="All Departments" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="all">All Departments</SelectItem>
-                                        {departments.map((d: any) => (
-                                            <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-1.5">
-                                <label className="text-[11px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">Section</label>
-                                <Select value={filters.section_id} onValueChange={(v) => setFilters({...filters, section_id: v, page: 1})}>
-                                    <SelectTrigger className="h-11 border-gray-200 dark:border-gray-800 text-[13px] font-medium bg-white dark:bg-gray-950">
-                                        <SelectValue placeholder="All Sections" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="all">All Sections</SelectItem>
-                                        {sections.map((s: any) => (
-                                            <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-1.5">
-                                <label className="text-[11px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">Category</label>
-                                <Select value={filters.category_id} onValueChange={(v) => setFilters({...filters, category_id: v, page: 1})}>
-                                    <SelectTrigger className="h-11 border-gray-200 dark:border-gray-800 text-[13px] font-medium bg-white dark:bg-gray-950">
-                                        <SelectValue placeholder="All Categories" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="all">All Categories</SelectItem>
-                                        {categories.map((c: any) => (
-                                            <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-1.5">
-                                <label className="text-[11px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">Search</label>
-                                <div className="relative">
-                                    <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                                    <Input 
-                                        placeholder="Name/Code..." 
-                                        className="pl-10 h-11 border-gray-200 dark:border-gray-800 focus:ring-primary/20 text-[13px] bg-white dark:bg-gray-950"
-                                        value={searchQuery}
-                                        onChange={(e) => {
-                                            setSearchQuery(e.target.value);
-                                            setFilters(prev => ({ ...prev, page: 1 }));
-                                        }}
-                                    />
-                                </div>
-                            </div>
+                            {!self_service_only && (
+                                <>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[11px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">Department</label>
+                                        <Select value={filters.department_id} onValueChange={(v) => setFilters({...filters, department_id: v, page: 1})}>
+                                            <SelectTrigger className="h-11 border-gray-200 dark:border-gray-800 text-[13px] font-medium bg-white dark:bg-gray-950">
+                                                <SelectValue placeholder="All Departments" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">All Departments</SelectItem>
+                                                {departments.map((d: any) => (
+                                                    <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[11px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">Section</label>
+                                        <Select value={filters.section_id} onValueChange={(v) => setFilters({...filters, section_id: v, page: 1})}>
+                                            <SelectTrigger className="h-11 border-gray-200 dark:border-gray-800 text-[13px] font-medium bg-white dark:bg-gray-950">
+                                                <SelectValue placeholder="All Sections" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">All Sections</SelectItem>
+                                                {sections.map((s: any) => (
+                                                    <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[11px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">Category</label>
+                                        <Select value={filters.category_id} onValueChange={(v) => setFilters({...filters, category_id: v, page: 1})}>
+                                            <SelectTrigger className="h-11 border-gray-200 dark:border-gray-800 text-[13px] font-medium bg-white dark:bg-gray-950">
+                                                <SelectValue placeholder="All Categories" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">All Categories</SelectItem>
+                                                {categories.map((c: any) => (
+                                                    <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[11px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">Search</label>
+                                        <div className="relative">
+                                            <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                                            <Input 
+                                                placeholder="Name/Code..." 
+                                                className="pl-10 h-11 border-gray-200 dark:border-gray-800 focus:ring-primary/20 text-[13px] bg-white dark:bg-gray-950"
+                                                value={searchQuery}
+                                                onChange={(e) => {
+                                                    setSearchQuery(e.target.value);
+                                                    setFilters(prev => ({ ...prev, page: 1 }));
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                </>
+                            )}
                         </form>
                     </CardContent>
                 </Card>
@@ -810,10 +822,12 @@ export default function AttendanceModule({ branches, departments, sections, cate
                                     <Timer className="w-4 h-4 text-gray-500 group-data-[state=active]:scale-110 transition-transform" /> 
                                     <span className="text-gray-400 group-data-[state=active]:text-gray-700">HOURS</span>
                                 </TabsTrigger>
-                                <TabsTrigger value="mispunch" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-lg px-5 h-12 text-[10px] font-black transition-all flex flex-col items-center justify-center gap-1 border border-transparent data-[state=active]:border-orange-100 group">
-                                    <AlertCircle className="w-4 h-4 text-orange-500 group-data-[state=active]:scale-110 transition-transform" /> 
-                                    <span className="text-gray-400 group-data-[state=active]:text-orange-700">MISPUNCH</span>
-                                </TabsTrigger>
+                                {!self_service_only && (
+                                    <TabsTrigger value="mispunch" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-lg px-5 h-12 text-[10px] font-black transition-all flex flex-col items-center justify-center gap-1 border border-transparent data-[state=active]:border-orange-100 group">
+                                        <AlertCircle className="w-4 h-4 text-orange-500 group-data-[state=active]:scale-110 transition-transform" /> 
+                                        <span className="text-gray-400 group-data-[state=active]:text-orange-700">MISPUNCH</span>
+                                    </TabsTrigger>
+                                )}
                                 <TabsTrigger value="overtime" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-lg px-5 h-12 text-[10px] font-black transition-all flex flex-col items-center justify-center gap-1 border border-transparent data-[state=active]:border-blue-100 group">
                                     <Timer className="w-4 h-4 text-blue-500 group-data-[state=active]:scale-110 transition-transform" /> 
                                     <span className="text-gray-400 group-data-[state=active]:text-blue-700">OVERTIME</span>
@@ -932,26 +946,28 @@ export default function AttendanceModule({ branches, departments, sections, cate
                         
                         <div className="relative pt-4">
                             <TabsContent value="status" className="m-0 border-none">
-                                <AttendanceGrid data={data} type="status" getStatusIcon={getStatusIcon} loading={loading} onCellClick={(emp: any, d: number, r: any) => setSelectedRecord({emp, day: d, record: r})} />
+                                <AttendanceGrid data={data} type="status" getStatusIcon={getStatusIcon} loading={loading} onCellClick={handleCellClick} />
                             </TabsContent>
                             <TabsContent value="inout" className="m-0 border-none">
-                                <AttendanceGrid data={data} type="inout" getStatusIcon={getStatusIcon} formatTime={formatTime} loading={loading} onCellClick={(emp: any, d: number, r: any) => setSelectedRecord({emp, day: d, record: r})} />
+                                <AttendanceGrid data={data} type="inout" getStatusIcon={getStatusIcon} formatTime={formatTime} loading={loading} onCellClick={handleCellClick} />
                             </TabsContent>
                             <TabsContent value="hours" className="m-0 border-none">
-                                <AttendanceGrid data={data} type="hours" getStatusIcon={getStatusIcon} formatHours={formatHours} loading={loading} onCellClick={(emp: any, d: number, r: any) => setSelectedRecord({emp, day: d, record: r})} />
+                                <AttendanceGrid data={data} type="hours" getStatusIcon={getStatusIcon} formatHours={formatHours} loading={loading} onCellClick={handleCellClick} />
                             </TabsContent>
-                            <TabsContent value="mispunch" className="m-0 border-none">
-                                {viewMode === 'list' ? (
-                                    <MispunchResolutionList data={data} loading={loading} onResolveClick={(emp: any, d: number, r: any) => setSelectedRecord({emp, day: d, record: r})} />
-                                ) : (
-                                    <AttendanceGrid data={data} type="mispunch" getStatusIcon={getStatusIcon} formatTime={formatTime} loading={loading} onCellClick={(emp: any, d: number, r: any) => setSelectedRecord({emp, day: d, record: r})} />
-                                )}
-                            </TabsContent>
+                            {!self_service_only && (
+                                <TabsContent value="mispunch" className="m-0 border-none">
+                                    {viewMode === 'list' ? (
+                                        <MispunchResolutionList data={data} loading={loading} onResolveClick={(emp: any, d: number, r: any) => setSelectedRecord({emp, day: d, record: r})} />
+                                    ) : (
+                                        <AttendanceGrid data={data} type="mispunch" getStatusIcon={getStatusIcon} formatTime={formatTime} loading={loading} onCellClick={handleCellClick} />
+                                    )}
+                                </TabsContent>
+                            )}
                             <TabsContent value="overtime" className="m-0 border-none">
-                                <AttendanceGrid data={data} type="overtime" getStatusIcon={getStatusIcon} formatHours={formatHours} loading={loading} onCellClick={(emp: any, d: number, r: any) => setSelectedRecord({emp, day: d, record: r})} />
+                                <AttendanceGrid data={data} type="overtime" getStatusIcon={getStatusIcon} formatHours={formatHours} loading={loading} onCellClick={handleCellClick} />
                             </TabsContent>
                             <TabsContent value="logdetails" className="m-0 border-none">
-                                <AttendanceGrid data={data} type="logdetails" getStatusIcon={getStatusIcon} loading={loading} onCellClick={(emp: any, d: number, r: any) => setSelectedRecord({emp, day: d, record: r})} />
+                                <AttendanceGrid data={data} type="logdetails" getStatusIcon={getStatusIcon} loading={loading} onCellClick={handleCellClick} />
                             </TabsContent>
                         </div>
                     </Tabs>

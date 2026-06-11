@@ -70,25 +70,23 @@ class RoleController extends BaseController
     /**
      * Get permissions filtered by user role
      */
-    private function getFilteredPermissions()
+    private function getFilteredPermissions(): array
     {
         $user = Auth::user();
         $userType = $user->type ?? 'company';
+        $legacyModules = legacyPayrollPermissionModules();
 
-        // Superadmin sees all permissions
-        if (in_array($userType, ['superadmin', 'super admin'])) {
-            return Permission::all()->groupBy('module');
+        $query = Permission::query()->whereNotIn('module', $legacyModules);
+
+        if (! in_array($userType, ['superadmin', 'super admin'], true)) {
+            $allowedModules = config('role-permissions.'.$userType, config('role-permissions.company'));
+            $query->whereIn('module', $allowedModules);
         }
 
-        // Get allowed modules for current user role
-        $allowedModules = config('role-permissions.' . $userType, config('role-permissions.company'));
-
-        // Filter permissions by allowed modules
-        $query = Permission::whereIn('module', $allowedModules);
-
-        $permissions = $query->get()->groupBy('module');
-
-        return $permissions;
+        return $query->get()
+            ->groupBy('module')
+            ->map(fn ($group) => $group->values()->all())
+            ->all();
     }
 
     /**
@@ -98,8 +96,11 @@ class RoleController extends BaseController
     {
         $user = Auth::user();
         $userType = $user->type ?? 'company';
+        $legacyModules = legacyPayrollPermissionModules();
+        $legacyNames = Permission::whereIn('module', $legacyModules)->pluck('name')->toArray();
+        $permissionNames = array_values(array_diff($permissionNames, $legacyNames));
 
-        // Superadmin can assign any permission
+        // Superadmin can assign any permission except legacy payroll
         if (in_array($userType, ['superadmin', 'super admin'])) {
             return $permissionNames;
         }
@@ -113,10 +114,11 @@ class RoleController extends BaseController
 
         $validPermissions = $query->pluck('name')->toArray();
 
-        // If editing an existing role, preserve permissions from unallowed modules
+        // If editing an existing role, preserve permissions from unallowed modules (not legacy payroll)
         if ($role) {
             $existingUnallowed = $role->permissions()
                 ->whereNotIn('module', $allowedModules)
+                ->whereNotIn('module', $legacyModules)
                 ->pluck('name')
                 ->toArray();
 
@@ -188,9 +190,6 @@ class RoleController extends BaseController
         $role = Role::with('permissions')->findOrFail($id);
 
         $role->is_editable = !in_array($role->name, isNotEditableRoles());
-        if (!$role->is_editable) {
-            return redirect()->route('roles.index')->with('error', __('System roles cannot be edited.'));
-        }
 
         $permissions = $this->getFilteredPermissions();
 
@@ -210,14 +209,18 @@ class RoleController extends BaseController
             // Validate permissions against user's allowed modules
             $validatedPermissions = $this->validatePermissions($request->permissions ?? [], $role);
 
-            $newSlug = Str::slug($request->label);
+            $isSystemRole = in_array($role->name, isNotEditableRoles(), true);
 
-            // Only update name if it's different to avoid duplicate key error
-            if ($role->name !== $newSlug) {
-                $role->name = $newSlug;
+            if (! $isSystemRole) {
+                $newSlug = Str::slug($request->label);
+
+                if ($role->name !== $newSlug) {
+                    $role->name = $newSlug;
+                }
+
+                $role->label = $request->label;
             }
 
-            $role->label = $request->label;
             $role->description = $request->description;
 
             $role->save();

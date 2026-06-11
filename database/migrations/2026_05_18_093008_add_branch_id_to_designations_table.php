@@ -18,8 +18,17 @@ return new class extends Migration
             }
         });
 
-        // Backfill branch_id from department's branch_id
-        DB::statement('UPDATE designations d JOIN departments dept ON d.department_id = dept.id SET d.branch_id = dept.branch_id WHERE d.branch_id IS NULL');
+        $pairs = DB::table('designations')
+            ->join('departments', 'designations.department_id', '=', 'departments.id')
+            ->whereNull('designations.branch_id')
+            ->select('designations.id', 'departments.branch_id')
+            ->get();
+
+        foreach ($pairs as $pair) {
+            DB::table('designations')
+                ->where('id', $pair->id)
+                ->update(['branch_id' => $pair->branch_id]);
+        }
     }
 
     /**

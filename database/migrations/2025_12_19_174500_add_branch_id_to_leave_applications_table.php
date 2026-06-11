@@ -14,8 +14,17 @@ return new class extends Migration {
             });
         }
 
-        // Backfill branch_id from employee's branch_id
-        DB::statement('UPDATE leave_applications la JOIN employees e ON la.employee_id = e.user_id SET la.branch_id = e.branch_id');
+        // Backfill branch_id from employee's branch_id (portable across MySQL/SQLite)
+        $pairs = DB::table('leave_applications')
+            ->join('employees', 'leave_applications.employee_id', '=', 'employees.user_id')
+            ->select('leave_applications.id', 'employees.branch_id')
+            ->get();
+
+        foreach ($pairs as $pair) {
+            DB::table('leave_applications')
+                ->where('id', $pair->id)
+                ->update(['branch_id' => $pair->branch_id]);
+        }
     }
 
     public function down(): void
