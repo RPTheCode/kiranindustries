@@ -21,7 +21,14 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
-import { canAccessPayslips, canDownloadPayslips } from '@/utils/authorization';
+import {
+    canAccessPayslips,
+    canDownloadAllPayslips,
+    canDownloadPayslips,
+    canOpenPayrollRunFromPayslips,
+    canPreviewPayslips,
+    isPayslipSelfServiceOnly,
+} from '@/utils/authorization';
 import { getImagePath } from '@/utils/helpers';
 import { cn } from '@/lib/utils';
 import { Link, router, usePage } from '@inertiajs/react';
@@ -127,11 +134,16 @@ export default function PayslipsIndex() {
         activeBranchName,
         filters = {},
         flash,
+        payslipAccess = {},
     } = usePage().props as any;
 
     const permissions = auth?.permissions || [];
-    const canView = canAccessPayslips(permissions);
-    const canDownload = canDownloadPayslips(permissions);
+    const canView = payslipAccess.can_access ?? canAccessPayslips(permissions);
+    const canPreview = payslipAccess.can_preview ?? canPreviewPayslips(permissions);
+    const canDownload = payslipAccess.can_download ?? canDownloadPayslips(permissions);
+    const canDownloadAll = payslipAccess.can_download_all ?? canDownloadAllPayslips(permissions);
+    const isSelfService = payslipAccess.is_self_service ?? isPayslipSelfServiceOnly(permissions);
+    const canOpenPayrollRun = payslipAccess.can_open_payroll_run ?? canOpenPayrollRunFromPayslips(permissions);
 
     const [search, setSearch] = useState(filters.search || '');
     const [status, setStatus] = useState(filters.status || 'all');
@@ -171,13 +183,17 @@ export default function PayslipsIndex() {
         : null;
 
     const openPreview = useCallback((row: PayslipRow) => {
+        if (!canPreview) {
+            toast.error(t('You do not have permission to view payslips.'));
+            return;
+        }
         if (!row.can_download) {
             toast.error(t('Payslip is available only for locked or finalized payroll entries.'));
             return;
         }
         setPreviewRow(row);
         setPreviewLoading(true);
-    }, [t]);
+    }, [canPreview, t]);
 
     const closePreview = useCallback(() => {
         setPreviewRow(null);
@@ -210,7 +226,7 @@ export default function PayslipsIndex() {
     ];
 
     const pageActions = [];
-    if (run?.id) {
+    if (canOpenPayrollRun && run?.id) {
         pageActions.push({
             label: t('Open Payroll Run'),
             icon: <ExternalLink className="mr-2 h-4 w-4" />,
@@ -218,7 +234,7 @@ export default function PayslipsIndex() {
             onClick: () => router.visit(route('hr.salary-payroll.generate.show', run.id)),
         });
     }
-    if (canDownload && run?.id && summary?.employee_count > 0) {
+    if (canDownloadAll && run?.id && summary?.employee_count > 0) {
         pageActions.push({
             label: t('Download All'),
             icon: <Download className="mr-2 h-4 w-4" />,
@@ -241,7 +257,11 @@ export default function PayslipsIndex() {
     return (
         <PageTemplate
             title={t('Payslips')}
-            description={t('View payslips in preview, then download PDF when ready.')}
+            description={
+                isSelfService
+                    ? t('View and download your own payslips month by month.')
+                    : t('View payslips in preview, then download PDF when ready.')
+            }
             breadcrumbs={breadcrumbs}
             actions={pageActions}
         >
@@ -313,10 +333,15 @@ export default function PayslipsIndex() {
                         </p>
                     ) : (
                         <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
-                            {t('No payroll generated for this month yet.')}{' '}
-                            <Link href={route('hr.salary-payroll.generate.create')} className="font-medium underline">
-                                {t('Generate Payroll')}
-                            </Link>
+                            {t('No payroll generated for this month yet.')}
+                            {canOpenPayrollRun ? (
+                                <>
+                                    {' '}
+                                    <Link href={route('hr.salary-payroll.generate.create')} className="font-medium underline">
+                                        {t('Generate Payroll')}
+                                    </Link>
+                                </>
+                            ) : null}
                         </p>
                     )}
                 </div>
@@ -488,11 +513,13 @@ export default function PayslipsIndex() {
                             <p className="max-w-md text-xs text-slate-500">
                                 {t('Lock employees in Generate Payroll or finalize the run to enable payslip download.')}
                             </p>
-                            <Button asChild variant="outline" size="sm" className="mt-2">
-                                <Link href={route('hr.salary-payroll.generate.show', run.id)}>
-                                    {t('Open Payroll Run')}
-                                </Link>
-                            </Button>
+                            {canOpenPayrollRun ? (
+                                <Button asChild variant="outline" size="sm" className="mt-2">
+                                    <Link href={route('hr.salary-payroll.generate.show', run.id)}>
+                                        {t('Open Payroll Run')}
+                                    </Link>
+                                </Button>
+                            ) : null}
                         </div>
                     )}
                 </div>

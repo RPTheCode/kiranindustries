@@ -729,8 +729,8 @@ class User extends BaseAuthenticatable implements MustVerifyEmail
             'view-employee-salaries',
 
             // Payslips — own only
-            'view-payslips',
             'manage-own-payslips',
+            'view-payslips',
             'download-payslips',
         ];
     }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Models\SalaryPayroll\SalaryPayrollPayslip;
+use App\Services\SalaryPayroll\PayslipAuthorizationService;
 use App\Services\SalaryPayroll\SalaryPayrollPayslipService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -12,14 +13,15 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 class PayslipController extends Controller
 {
     public function __construct(
-        private SalaryPayrollPayslipService $payslipService
+        private SalaryPayrollPayslipService $payslipService,
+        private PayslipAuthorizationService $payslipAuth
     ) {}
 
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
 
-        if (! $this->canAccessPayslips($user)) {
+        if (! $this->payslipAuth->canAccessModule($user)) {
             return response()->json(['message' => __('Payslips are not available for your account.')], 403);
         }
 
@@ -49,18 +51,18 @@ class PayslipController extends Controller
     {
         $user = $request->user();
 
-        if (! $this->canAccessPayslips($user)) {
-            return response()->json(['message' => __('Payslips are not available for your account.')], 403);
-        }
-
-        if ((int) $payslip->employee_id !== (int) $user->id) {
-            return response()->json(['message' => __('Forbidden.')], 403);
-        }
-
         try {
             $entry = $payslip->entry ?? $payslip->entry()->first();
             if (! $entry) {
                 return response()->json(['message' => __('Payslip entry not found.')], 404);
+            }
+
+            if (! $this->payslipAuth->canDownload($user)) {
+                return response()->json(['message' => __('Payslips are not available for your account.')], 403);
+            }
+
+            if (! $this->payslipAuth->canViewAll($user) && (int) $entry->employee_id !== (int) $user->id) {
+                return response()->json(['message' => __('Forbidden.')], 403);
             }
 
             $payslip = $this->payslipService->ensurePayslip($entry);
@@ -74,18 +76,4 @@ class PayslipController extends Controller
         }
     }
 
-    private function canAccessPayslips($user): bool
-    {
-        return userHasAnyPermission($user, [
-            'download-payslips',
-            'view-payslips',
-            'view-salary-payroll-employee-salary',
-            'manage-own-payslips',
-            'manage-own-salary-payroll-employee-salary',
-            'manage-any-salary-payroll-employee-salary',
-            'view-employee-salaries',
-            'manage-employee-salaries',
-            'manage-any-employee-salaries',
-        ]);
-    }
 }

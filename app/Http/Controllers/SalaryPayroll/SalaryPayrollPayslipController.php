@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Branch;
 use App\Models\SalaryPayroll\SalaryPayrollEntry;
 use App\Models\SalaryPayroll\SalaryPayrollRun;
+use App\Services\SalaryPayroll\PayslipAuthorizationService;
 use App\Services\SalaryPayroll\SalaryPayrollPayslipService;
 use App\Services\SalaryPayroll\SalaryPayrollRunService;
 use Carbon\Carbon;
@@ -19,7 +20,8 @@ class SalaryPayrollPayslipController extends Controller
 {
     public function __construct(
         private SalaryPayrollRunService $runService,
-        private SalaryPayrollPayslipService $payslipService
+        private SalaryPayrollPayslipService $payslipService,
+        private PayslipAuthorizationService $payslipAuth
     ) {}
 
     public function index(Request $request)
@@ -43,7 +45,10 @@ class SalaryPayrollPayslipController extends Controller
             $monthYear = $defaultMonth;
         }
 
-        $monthEmployeeCounts = $this->monthEmployeeCounts($branchId, $financialYear);
+        $ownOnly = $this->payslipAuth->isSelfServiceOnly();
+        $ownEmployeeId = $ownOnly ? auth()->id() : null;
+
+        $monthEmployeeCounts = $this->monthEmployeeCounts($branchId, $financialYear, $ownEmployeeId);
         $months = array_map(function (array $month) use ($monthEmployeeCounts) {
             $count = $monthEmployeeCounts[$month['value']] ?? 0;
             $month['has_payroll'] = $count > 0;
@@ -74,7 +79,8 @@ class SalaryPayrollPayslipController extends Controller
         if ($run) {
             $baseQuery = SalaryPayrollEntry::query()
                 ->where('salary_payroll_run_id', $run->id)
-                ->when(! $run->isFinalized(), fn ($q) => $q->where('is_locked', true));
+                ->when(! $run->isFinalized(), fn ($q) => $q->where('is_locked', true))
+                ->when($ownEmployeeId, fn ($q) => $q->where('employee_id', $ownEmployeeId));
 
             $summaryQuery = (clone $baseQuery);
             $summary['employee_count'] = (clone $summaryQuery)->count();
@@ -144,6 +150,7 @@ class SalaryPayrollPayslipController extends Controller
             'activeBranchId' => $branchId,
             'activeBranchName' => $branchName,
             'filters' => $request->only(['search', 'status', 'per_page']),
+            'payslipAccess' => $this->payslipAuth->frontendCapabilities(),
         ]);
     }
 
@@ -151,6 +158,7 @@ class SalaryPayrollPayslipController extends Controller
     {
         $this->assertBranchAccess($salaryPayrollRun);
         $this->assertEntryBelongsToRun($salaryPayrollRun, $salaryPayrollEntry);
+        $this->payslipAuth->assertCanPreviewEntry($salaryPayrollEntry);
 
         try {
             $path = $this->payslipService->previewPathForEntry($salaryPayrollEntry);
@@ -174,6 +182,7 @@ class SalaryPayrollPayslipController extends Controller
     {
         $this->assertBranchAccess($salaryPayrollRun);
         $this->assertEntryBelongsToRun($salaryPayrollRun, $salaryPayrollEntry);
+        $this->payslipAuth->assertCanDownloadEntry($salaryPayrollEntry);
 
         try {
             $payslip = $this->payslipService->ensurePayslip($salaryPayrollEntry);
@@ -278,7 +287,7 @@ class SalaryPayrollPayslipController extends Controller
     /**
      * @return array<string, int>
      */
-    private function monthEmployeeCounts(?int $branchId, string $financialYear): array
+    private function monthEmployeeCounts(?int $branchId, string $financialYear, ?int $employeeUserId = null): array
     {
         $runs = SalaryPayrollRun::query()
             ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
@@ -290,6 +299,7 @@ class SalaryPayrollPayslipController extends Controller
             $count = SalaryPayrollEntry::query()
                 ->where('salary_payroll_run_id', $run->id)
                 ->when(! $run->isFinalized(), fn ($q) => $q->where('is_locked', true))
+                ->when($employeeUserId, fn ($q) => $q->where('employee_id', $employeeUserId))
                 ->count();
 
             if ($count > 0) {

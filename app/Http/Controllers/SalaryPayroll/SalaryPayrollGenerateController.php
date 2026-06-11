@@ -19,6 +19,7 @@ use App\Services\SalaryPayroll\SalaryPayrollBatchProcessor;
 use App\Services\SalaryPayroll\SalaryPayrollChallanReportBuilder;
 use App\Services\SalaryPayroll\SalaryPayrollChallanReportExportService;
 use App\Services\SalaryPayroll\SalaryPayrollMispunchService;
+use App\Services\SalaryPayroll\PayslipAuthorizationService;
 use App\Services\SalaryPayroll\SalaryPayrollPayslipService;
 use App\Services\SalaryPayroll\SalaryPayrollRegisterBuilder;
 use App\Services\SalaryPayroll\SalaryPayrollRegisterExportService;
@@ -34,6 +35,7 @@ class SalaryPayrollGenerateController extends Controller
         private SalaryPayrollRunService $runService,
         private SalaryPayrollBatchProcessor $batchProcessor,
         private SalaryPayrollPayslipService $payslipService,
+        private PayslipAuthorizationService $payslipAuth,
         private SalaryPayrollRegisterBuilder $registerBuilder,
         private SalaryPayrollRegisterExportService $registerExportService,
         private SalaryPayrollChallanReportBuilder $challanReportBuilder,
@@ -503,6 +505,8 @@ class SalaryPayrollGenerateController extends Controller
             abort(404);
         }
 
+        $this->payslipAuth->assertCanDownloadEntry($salaryPayrollEntry);
+
         try {
             $payslip = $this->payslipService->ensurePayslip($salaryPayrollEntry);
             $path = $this->payslipService->downloadPath($payslip);
@@ -518,6 +522,10 @@ class SalaryPayrollGenerateController extends Controller
     public function downloadAllPayslips(SalaryPayrollRun $salaryPayrollRun)
     {
         $this->assertBranchAccess($salaryPayrollRun);
+
+        if (! $this->payslipAuth->canDownloadAll()) {
+            abort(403, __('You do not have permission to download all payslips.'));
+        }
 
         try {
             $zipPath = $this->payslipService->createZipForRun($salaryPayrollRun);

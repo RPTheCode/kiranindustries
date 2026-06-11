@@ -3330,119 +3330,6 @@ if (!function_exists('isDemo')) {
 
 
 
-if (!function_exists('payslipAccessPermissionNames')) {
-    /**
-     * @return list<string>
-     */
-    function payslipAccessPermissionNames(): array
-    {
-        return [
-            'view-payslips',
-            'manage-payslips',
-            'manage-any-payslips',
-            'manage-own-payslips',
-            'download-payslips',
-            'create-payslips',
-            'send-payslips',
-        ];
-    }
-}
-
-if (!function_exists('payslipDownloadPermissionNames')) {
-    /**
-     * @return list<string>
-     */
-    function payslipDownloadPermissionNames(): array
-    {
-        return [
-            'download-payslips',
-            'manage-payslips',
-            'manage-any-payslips',
-            'create-payslips',
-            'send-payslips',
-        ];
-    }
-}
-
-if (!function_exists('payslipViewAnyPermissionNames')) {
-    /**
-     * Permissions that allow viewing all employees' payslips (not own-only).
-     *
-     * @return list<string>
-     */
-    function payslipViewAnyPermissionNames(): array
-    {
-        return [
-            'view-payslips',
-            'manage-payslips',
-            'manage-any-payslips',
-            'create-payslips',
-            'send-payslips',
-        ];
-    }
-}
-
-if (!function_exists('userCanAccessPayslips')) {
-    function userCanAccessPayslips($user = null): bool
-    {
-        $user = $user ?? auth()->user();
-        if (! $user) {
-            return false;
-        }
-
-        foreach (payslipAccessPermissionNames() as $permission) {
-            if ($user->hasPermissionTo($permission)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-}
-
-if (!function_exists('userCanDownloadPayslips')) {
-    function userCanDownloadPayslips($user = null): bool
-    {
-        $user = $user ?? auth()->user();
-        if (! $user) {
-            return false;
-        }
-
-        foreach (payslipDownloadPermissionNames() as $permission) {
-            if ($user->hasPermissionTo($permission)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-}
-
-if (!function_exists('userCanViewAnyPayslips')) {
-    function userCanViewAnyPayslips($user = null): bool
-    {
-        $user = $user ?? auth()->user();
-        if (! $user) {
-            return false;
-        }
-
-        foreach (payslipViewAnyPermissionNames() as $permission) {
-            if ($user->hasPermissionTo($permission)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-}
-
-if (!function_exists('userPayslipsScopedToSelf')) {
-    function userPayslipsScopedToSelf($user = null): bool
-    {
-        return userCanAccessPayslips($user) && ! userCanViewAnyPayslips($user);
-    }
-}
-
 if (!function_exists('legacyPayrollPermissionModules')) {
     /**
      * Legacy Payroll Management modules — hidden from Roles UI (replaced by Salary Payroll).
@@ -3452,6 +3339,7 @@ if (!function_exists('legacyPayrollPermissionModules')) {
         return [
             'Payroll Management',
             'payroll_runs',
+            'payslips',
             'payroll_adjustments',
             'employee_salaries',
             'employee_advances',

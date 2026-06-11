@@ -99,27 +99,31 @@ export const canFinalizeSalaryPayrollRuns = (userPermissions: string[]) =>
     ]) || hasAnyPermission(userPermissions, ['manage-employee-salaries', 'manage-any-employee-salaries']);
 
 export const canAccessPayslips = (userPermissions: string[]) =>
-    hasAnyPermission(userPermissions, [
-        'view-payslips',
-        'manage-payslips',
-        'manage-any-payslips',
-        'download-payslips',
-        'view-salary-payroll-runs',
-        'manage-salary-payroll-runs',
-        'manage-any-salary-payroll-runs',
-        'finalize-salary-payroll-runs',
-    ]) || canAccessSalaryPayrollRuns(userPermissions);
+    canAccessEntity(userPermissions, 'payslips')
+    || hasAnyPermission(userPermissions, ['download-payslips', 'create-payslips', 'send-payslips']);
+
+export const canViewAllPayslips = (userPermissions: string[]) =>
+    hasAnyPermission(userPermissions, ['view-payslips', 'manage-payslips', 'manage-any-payslips']);
+
+export const isPayslipSelfServiceOnly = (userPermissions: string[]) =>
+    canAccessPayslips(userPermissions) && !canViewAllPayslips(userPermissions);
+
+export const canPreviewPayslips = (userPermissions: string[]) => canAccessPayslips(userPermissions);
 
 export const canDownloadPayslips = (userPermissions: string[]) =>
     hasAnyPermission(userPermissions, [
         'download-payslips',
         'manage-payslips',
         'manage-any-payslips',
-        'view-payslips',
-        'finalize-salary-payroll-runs',
-        'manage-salary-payroll-runs',
-        'manage-any-salary-payroll-runs',
-    ]) || canAccessSalaryPayrollRuns(userPermissions);
+        'manage-own-payslips',
+        'create-payslips',
+    ]);
+
+export const canDownloadAllPayslips = (userPermissions: string[]) =>
+    canViewAllPayslips(userPermissions) && canDownloadPayslips(userPermissions);
+
+export const canOpenPayrollRunFromPayslips = (userPermissions: string[]) =>
+    canViewAllPayslips(userPermissions) && canAccessSalaryPayrollRuns(userPermissions);
 
 export const canApplySalaryPayrollAttendanceExtra = (userPermissions: string[]) =>
     hasAnyPermission(userPermissions, [

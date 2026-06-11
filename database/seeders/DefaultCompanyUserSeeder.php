@@ -394,8 +394,9 @@ class DefaultCompanyUserSeeder extends Seeder
             'create-salary-loans',
             'manage-salary-loans',
 
-            // Payslips management
-            'manage-payslips',
+            // Payslips — own only
+            'manage-own-payslips',
+            'view-payslips',
             'download-payslips',
         ];
     }

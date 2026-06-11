@@ -71,6 +71,10 @@ php /app/artisan storage:link --force 2>/dev/null || php /app/artisan storage:li
 # Run pending migrations on deploy (production requires --force)
 php /app/artisan migrate --force
 
+# Sync permission definitions (firstOrCreate — safe on every deploy, no data wipe)
+php /app/artisan db:seed --class=PermissionSeeder --force
+php /app/artisan permission:cache-reset 2>/dev/null || true
+
 # Setup MS SQL Server ODBC driver configuration dynamically at runtime
 printf '[essl]\nDriver=ODBC Driver 17 for SQL Server\nServer=%s,%s\nDatabase=%s\nEncrypt=no\nTrustServerCertificate=yes\n' "$ESSL_DB_HOST" "${ESSL_DB_PORT:-1433}" "$ESSL_DB_DATABASE" > /etc/odbc.ini
 
