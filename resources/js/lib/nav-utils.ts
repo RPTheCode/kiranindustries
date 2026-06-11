@@ -174,6 +174,82 @@ export function isNavBranchActive(children: NavItem[] | undefined, activeHref: s
     );
 }
 
+/** Filter navigation tree by title and optional keywords (sidebar search). */
+export function filterNavItems(items: NavItem[], query: string): NavItem[] {
+    if (!query) {
+        return items;
+    }
+
+    const lowerQuery = query.toLowerCase();
+
+    const itemMatches = (item: NavItem) =>
+        item.title.toLowerCase().includes(lowerQuery)
+        || item.keywords?.some((keyword) => keyword.toLowerCase().includes(lowerQuery));
+
+    return items.reduce((acc: NavItem[], item) => {
+        if (itemMatches(item)) {
+            acc.push({ ...item, defaultOpen: true });
+            return acc;
+        }
+
+        if (item.children) {
+            const filteredChildren = filterNavItems(item.children, query);
+            if (filteredChildren.length > 0) {
+                acc.push({
+                    ...item,
+                    children: filteredChildren,
+                    defaultOpen: true,
+                });
+            }
+        }
+
+        return acc;
+    }, []);
+}
+
+const EMPLOYEE_ROLES = new Set(['employee']);
+
+function isEmployeePriorityNavItem(item: NavItem): boolean {
+    if (!item.href) {
+        return false;
+    }
+
+    const path = normalizeNavPath(item.href);
+
+    return (
+        path.includes('/my-profile')
+        || path.includes('/payslips')
+        || path.includes('/leave-applications')
+        || path.includes('/leave-balances')
+        || path.includes('/attendance')
+    );
+}
+
+function reorderChildrenForEmployee(children: NavItem[]): NavItem[] {
+    return [...children]
+        .map((child) => ({
+            ...child,
+            children: child.children ? reorderChildrenForEmployee(child.children) : undefined,
+        }))
+        .sort((a, b) => {
+            const aFirst = isEmployeePriorityNavItem(a) ? 0 : 1;
+            const bFirst = isEmployeePriorityNavItem(b) ? 0 : 1;
+            return aFirst - bFirst;
+        });
+}
+
+/** Prioritize employee-facing links within each group without hiding admin items. */
+export function reorderNavForRole(items: NavItem[], userRole?: string): NavItem[] {
+    if (!userRole || !EMPLOYEE_ROLES.has(userRole)) {
+        return items;
+    }
+
+    return items.map((item) => ({
+        ...item,
+        children: item.children ? reorderChildrenForEmployee(item.children) : undefined,
+    }));
+}
+
 export function groupNavItems(items: NavItem[]): { id: NavGroupId; label: string; items: NavItem[] }[] {
     const buckets = new Map<NavGroupId, NavItem[]>();
 

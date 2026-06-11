@@ -44,6 +44,10 @@ export interface NavItem {
     group?: NavGroupId;
     /** Ziggy route pattern e.g. hr.reports.* */
     routePattern?: string;
+    /** Short hint shown in sidebar tooltip */
+    description?: string;
+    /** Alternate search terms for sidebar filter */
+    keywords?: string[];
     badge?: {
         label: string;
         variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost';

@@ -22,7 +22,79 @@ import { router, usePage } from '@inertiajs/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useTranslation } from 'react-i18next';
+
+function navTooltipContent(item: NavItem) {
+    if (!item.description) {
+        return item.title;
+    }
+
+    return (
+        <span className="flex flex-col gap-0.5">
+            <span className="font-medium">{item.title}</span>
+            <span className="text-xs font-normal opacity-80">{item.description}</span>
+        </span>
+    );
+}
+
+/** Show styled tooltip only when label text is truncated (expanded sidebar). */
+function NavItemLabel({
+    item,
+    title,
+    searchTerm,
+    isSearching,
+    className,
+}: {
+    item: NavItem;
+    title: string;
+    searchTerm: string;
+    isSearching: boolean;
+    className?: string;
+}) {
+    const labelRef = useRef<HTMLSpanElement>(null);
+    const [isTruncated, setIsTruncated] = useState(false);
+
+    const checkTruncation = useCallback(() => {
+        const el = labelRef.current;
+        if (!el) {
+            return;
+        }
+        setIsTruncated(el.scrollWidth > el.clientWidth);
+    }, []);
+
+    useEffect(() => {
+        checkTruncation();
+        const el = labelRef.current;
+        if (!el) {
+            return;
+        }
+
+        const observer = new ResizeObserver(checkTruncation);
+        observer.observe(el);
+
+        return () => observer.disconnect();
+    }, [checkTruncation, title, isSearching, searchTerm]);
+
+    const label = (
+        <span ref={labelRef} className={cn('block min-w-0 truncate', className)}>
+            {isSearching ? highlightNavTitle(title, searchTerm) : title}
+        </span>
+    );
+
+    if (!isTruncated) {
+        return label;
+    }
+
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>{label}</TooltipTrigger>
+            <TooltipContent side="right" align="center">
+                {navTooltipContent(item)}
+            </TooltipContent>
+        </Tooltip>
+    );
+}
 
 function isNestedExpandKey(key: string): boolean {
     return /^\d+-/.test(key);
@@ -159,11 +231,24 @@ export function NavMain({
         syncExpandedToActiveRoute(page.url);
     }, [page.url, syncExpandedToActiveRoute, isSearching, items]);
 
-    const renderTitle = (title: string) => (
-        <span className="truncate" title={title}>
-            {isSearching ? highlightNavTitle(title, searchTerm) : title}
-        </span>
-    );
+    const renderTitle = (title: string, item?: NavItem) => {
+        if (item) {
+            return (
+                <NavItemLabel
+                    item={item}
+                    title={title}
+                    searchTerm={searchTerm}
+                    isSearching={isSearching}
+                />
+            );
+        }
+
+        return (
+            <span className="truncate">
+                {isSearching ? highlightNavTitle(title, searchTerm) : title}
+            </span>
+        );
+    };
 
     // Scroll active menu item into view after navigation.
     useEffect(() => {
@@ -269,7 +354,7 @@ export function NavMain({
                                     )}
                                 >
                                     {renderSubMenuIcon(child, branchActive)}
-                                    {renderTitle(child.title)}
+                                    {renderTitle(child.title, child)}
                                     {state !== 'collapsed' && (
                                         <ChevronRight className={chevronClass(branchActive, nestedOpen)} aria-hidden />
                                     )}
@@ -297,7 +382,7 @@ export function NavMain({
                             )}
                         >
                             {renderSubMenuIcon(child, leafActive)}
-                            {renderTitle(child.title)}
+                            {renderTitle(child.title, child)}
                         </SidebarMenuSubButton>
                     </SidebarMenuSubItem>
                 );
@@ -328,7 +413,7 @@ export function NavMain({
                             sectionOpen && 'sidebar-menu-section-open',
                             isOpen && 'sidebar-menu-parent-open'
                         )}
-                        tooltip={{ children: item.title }}
+                        tooltip={{ children: navTooltipContent(item) }}
                         onClick={() => toggleTopLevelExpand(item.title)}
                     >
                         <span
@@ -340,7 +425,9 @@ export function NavMain({
                         >
                             {effectivePosition === 'right' ? (
                                 <>
-                                    {state !== 'collapsed' && renderTitle(item.title)}
+                                    {state !== 'collapsed' && (
+                                        <span className="min-w-0 truncate">{renderTitle(item.title, item)}</span>
+                                    )}
                                     {item.icon && (
                                         <item.icon className={menuIconClass(selfActive || hasActiveChild, sectionOpen)} />
                                     )}
@@ -354,7 +441,7 @@ export function NavMain({
                                         <item.icon className={menuIconClass(selfActive || hasActiveChild, sectionOpen)} />
                                     )}
                                     {state !== 'collapsed' && (
-                                        <span className="min-w-0 flex-1">{renderTitle(item.title)}</span>
+                                        <span className="min-w-0 flex-1">{renderTitle(item.title, item)}</span>
                                     )}
                                     {state !== 'collapsed' && item.badge && (
                                         <span className="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-medium text-white">
@@ -381,7 +468,7 @@ export function NavMain({
 
         return (
             <SidebarMenuItem key={item.title}>
-                <SidebarMenuButton asChild isActive={leafActive} tooltip={{ children: item.title }}>
+                <SidebarMenuButton asChild isActive={leafActive} tooltip={{ children: navTooltipContent(item) }}>
                     {item.target === '_blank' ? (
                         <a
                             href={item.href || '#'}
@@ -394,13 +481,15 @@ export function NavMain({
                         >
                             {effectivePosition === 'right' ? (
                                 <>
-                                    {state !== 'collapsed' && renderTitle(item.title)}
+                                    {state !== 'collapsed' && renderTitle(item.title, item)}
                                     {item.icon && <item.icon className={menuIconClass(leafActive)} />}
                                 </>
                             ) : (
                                 <>
                                     {item.icon && <item.icon className={menuIconClass(leafActive)} />}
-                                    {state !== 'collapsed' && renderTitle(item.title)}
+                                    {state !== 'collapsed' && (
+                                        <span className="min-w-0 truncate">{renderTitle(item.title, item)}</span>
+                                    )}
                                 </>
                             )}
                         </a>
@@ -417,13 +506,15 @@ export function NavMain({
                         >
                             {effectivePosition === 'right' ? (
                                 <>
-                                    {state !== 'collapsed' && renderTitle(item.title)}
+                                    {state !== 'collapsed' && renderTitle(item.title, item)}
                                     {item.icon && <item.icon className={menuIconClass(leafActive)} />}
                                 </>
                             ) : (
                                 <>
                                     {item.icon && <item.icon className={menuIconClass(leafActive)} />}
-                                    {state !== 'collapsed' && renderTitle(item.title)}
+                                    {state !== 'collapsed' && (
+                                        <span className="min-w-0 truncate">{renderTitle(item.title, item)}</span>
+                                    )}
                                 </>
                             )}
                         </a>

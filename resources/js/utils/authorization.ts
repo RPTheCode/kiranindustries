@@ -7,6 +7,10 @@ export const hasPermission = (userPermissions: string[], permission: string) =>
 export const hasAnyPermission = (userPermissions: string[], permissions: string[]) =>
     permissions.some((permission) => userPermissions.includes(permission));
 
+/** True when user has view-* or manage-* for a permission slug (e.g. branches). */
+export const canViewPermission = (userPermissions: string[], slug: string) =>
+    hasPermission(userPermissions, `manage-${slug}`) || hasPermission(userPermissions, `view-${slug}`);
+
 /** True when user can open a master/list screen for the entity slug (e.g. deduction-types). */
 export const canAccessEntity = (userPermissions: string[], entity: string) =>
     hasAnyPermission(userPermissions, [
