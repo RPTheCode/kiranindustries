@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "MonitorHR Mobile Employee API",
-    "description": "Staff & Worker self-service API (Sanctum Bearer token).\n\n**Live sync with OpenAPI (recommended):**\n1. Postman → Import → Link\n2. URL: `https://staging.kiranindustries.monitorhr.in/api/v1/mobile/docs/openapi.yaml`\n3. Edit `docs/mobile-api.openapi.yaml` in code → deploy → Postman → Sync on linked import\n\n**This collection:** pre-built requests; Login auto-saves `{{token}}`.\n\nSwagger UI: https://editor.swagger.io → import same URL above.",
+    "description": "Staff & Worker self-service API (Sanctum Bearer token).\n\n**Swagger UI (browser):**\n- Local: http://127.0.0.1:8000/api/v1/mobile/docs\n- Staging: https://staging.kiranindustries.monitorhr.in/api/v1/mobile/docs\n\nEdit docs/mobile-api.openapi.yaml → refresh Swagger page.\n\n**Postman live sync:**\n1. Import → Link → `.../api/v1/mobile/docs/openapi.yaml`\n2. After deploy, Sync on linked import\n\nLogin auto-saves {{token}}.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [

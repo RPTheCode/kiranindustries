@@ -10,6 +10,12 @@ use App\Http\Controllers\Api\Mobile\ProfileController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1/mobile')->group(function () {
+    Route::get('docs', function () {
+        return view('api.mobile-swagger', [
+            'specUrl' => route('api.mobile.docs.openapi'),
+        ]);
+    })->name('api.mobile.docs');
+
     Route::get('docs/openapi.yaml', function () {
         $path = base_path('docs/mobile-api.openapi.yaml');
         abort_unless(is_readable($path), 404);

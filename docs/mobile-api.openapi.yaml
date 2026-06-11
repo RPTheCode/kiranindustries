@@ -15,13 +15,20 @@ info:
     ## Access control
     Login requires `access-mobile-app` permission. Screens are listed in `menu` (built from role permissions on the server).
 
+    ## Swagger UI (live docs — auto-updates from YAML)
+    Open in browser (no separate install):
+    - **Local:** http://127.0.0.1:8000/api/v1/mobile/docs
+    - **Staging:** https://staging.kiranindustries.monitorhr.in/api/v1/mobile/docs
+
+    Edit `docs/mobile-api.openapi.yaml` → refresh the page → Swagger shows latest API.
+
+    Raw spec URL: `/api/v1/mobile/docs/openapi.yaml`
+
     ## Postman — live sync (recommended)
     1. Postman → **Import** → **Link**
     2. Paste: `https://staging.kiranindustries.monitorhr.in/api/v1/mobile/docs/openapi.yaml`
     3. Import as **Collection** (and optionally **API** for schema view)
     4. When you edit `docs/mobile-api.openapi.yaml` in the repo and deploy, click **Sync** on the linked import in Postman — requests update automatically.
-
-    **Local:** `http://127.0.0.1:8000/api/v1/mobile/docs/openapi.yaml`
 
     Or import the file once: `docs/mobile-api.postman_collection.json` (manual token setup on Login).
   version: 1.0.0
