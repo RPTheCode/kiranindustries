@@ -38,6 +38,7 @@ import { useTranslation } from 'react-i18next';
 import { hasPermission, canAccessEntity, canAccessSalaryPayrollEmployee, canAccessSalaryPayrollIncrement, canAccessSalaryPayrollRuns, canAccessEarningDeductionEntry, canAccessPayrollSettings, canAccessSalaryAdvance, canAccessSalaryLoan } from '@/utils/authorization';
 import { toast } from '@/components/custom-toast';
 import { getImagePath } from '@/utils/helpers';
+import { cn } from '@/lib/utils';
 
 
 
@@ -1161,11 +1162,16 @@ export function AppSidebar() {
             variant={variant}
             className={style !== 'plain' ? 'sidebar-custom-style' : ''}
         >
-            <SidebarHeader className={style !== 'plain' ? 'sidebar-styled' : ''} style={sidebarStyle}>
-                <div className="flex justify-center items-center px-2 py-2">
-                    <Link href={getFirstAvailableHref()} className="flex items-center justify-center w-full">
-                        {/* Logo for expanded sidebar — wide logos need width, not a small square */}
-                        <div className="w-full group-data-[collapsible=icon]:hidden flex items-center justify-center bg-white rounded-lg shadow-sm border border-slate-100 px-3 py-2.5 min-h-[52px]">
+            <SidebarHeader
+                className={cn(style !== 'plain' ? 'sidebar-styled' : '', 'border-b border-sidebar-border/60')}
+                style={sidebarStyle}
+            >
+                <div className="flex flex-col gap-2 px-2.5 py-2.5 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-2">
+                    <Link
+                        href={getFirstAvailableHref()}
+                        className="group-data-[collapsible=icon]:hidden flex w-full items-center justify-center"
+                    >
+                        <div className="flex min-h-[56px] w-full items-center justify-center rounded-md border border-sidebar-border/50 bg-background/60 px-3 py-2.5 shadow-none">
                             {(() => {
                                 const isDark = document.documentElement.classList.contains('dark');
                                 const currentLogo = isDark ? logoLight : logoDark;
@@ -1176,72 +1182,71 @@ export function AppSidebar() {
                                         key={currentLogo}
                                         src={displayUrl}
                                         alt={titleText || 'Logo'}
-                                        className="max-h-11 w-auto max-w-full object-contain"
+                                        className="max-h-11 w-full max-w-full object-contain object-center"
                                         onError={() => updateBrandSettings({ [isDark ? 'logoLight' : 'logoDark']: '' })}
                                     />
                                 ) : (
-                                    <div className="text-inherit font-semibold flex items-center justify-center text-base tracking-tight truncate">
+                                    <div className="truncate text-center text-sm font-semibold tracking-tight">
                                         {titleText || 'K'}
                                     </div>
                                 );
                             })()}
                         </div>
+                    </Link>
 
-                        {/* Icon for collapsed sidebar */}
-                        <div className="h-9 w-9 hidden group-data-[collapsible=icon]:flex items-center justify-center bg-white rounded-md border border-slate-100 overflow-hidden shrink-0">
-                            {(() => {
-                                const displayFavicon = favicon ? getImagePath(favicon) : '';
+                    <div className="group-data-[collapsible=icon]:hidden relative w-full">
+                        <Search className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
+                        <Input
+                            placeholder={t('Search menu...')}
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Escape') {
+                                    setSearchQuery('');
+                                }
+                            }}
+                            aria-label={t('Search menu...')}
+                            className="h-8 w-full border-sidebar-border/50 bg-background/60 pl-7 pr-8 text-sm transition-colors focus:bg-background"
+                        />
+                        {searchQuery && (
+                            <button
+                                type="button"
+                                onClick={() => setSearchQuery('')}
+                                className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                                aria-label={t('Clear search')}
+                            >
+                                <X className="h-3.5 w-3.5" />
+                            </button>
+                        )}
+                    </div>
 
-                                return displayFavicon ? (
-                                    <img
-                                        key={favicon}
-                                        src={displayFavicon}
-                                        alt={titleText || 'Icon'}
-                                        className="h-7 w-7 object-contain"
-                                        onError={() => updateBrandSettings({ favicon: '' })}
-                                    />
-                                ) : (
-                                    <div className="h-9 w-9 bg-primary text-white rounded-md flex items-center justify-center font-bold text-sm shadow-sm">
-                                        {(titleText || 'W').charAt(0).toUpperCase()}
-                                    </div>
-                                );
-                            })()}
-                        </div>
+                    <Link
+                        href={getFirstAvailableHref()}
+                        className="hidden h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-sidebar-border/50 bg-background/60 group-data-[collapsible=icon]:flex"
+                    >
+                        {(() => {
+                            const displayFavicon = favicon ? getImagePath(favicon) : '';
+
+                            return displayFavicon ? (
+                                <img
+                                    key={favicon}
+                                    src={displayFavicon}
+                                    alt={titleText || 'Icon'}
+                                    className="h-7 w-7 object-contain"
+                                    onError={() => updateBrandSettings({ favicon: '' })}
+                                />
+                            ) : (
+                                <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary text-sm font-bold text-white shadow-sm">
+                                    {(titleText || 'W').charAt(0).toUpperCase()}
+                                </div>
+                            );
+                        })()}
                     </Link>
                 </div>
-
-                {/* Business Switcher removed */}
             </SidebarHeader>
 
             <SidebarContent>
                 <div style={sidebarStyle} className={`flex h-full min-h-0 flex-col ${style !== 'plain' ? 'sidebar-styled' : ''}`}>
-                    <div className="shrink-0 border-b border-sidebar-border/60 px-2.5 py-2 group-data-[collapsible=icon]:hidden">
-                        <div className="relative">
-                            <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                            <Input
-                                placeholder={t('Search menu...')}
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Escape') {
-                                        setSearchQuery('');
-                                    }
-                                }}
-                                aria-label={t('Search menu...')}
-                                className="h-8 border-sidebar-border/50 bg-background/60 pl-7 pr-8 text-sm transition-colors focus:bg-background"
-                            />
-                            {searchQuery && (
-                                <button
-                                    type="button"
-                                    onClick={() => setSearchQuery('')}
-                                    className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                                    aria-label={t('Clear search')}
-                                >
-                                    <X className="h-3.5 w-3.5" />
-                                </button>
-                            )}
-                        </div>
-                    </div>
                     <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden sidebar-scroll px-0.5 pb-1.5">
                         <NavMain
                             items={filteredNavItems}

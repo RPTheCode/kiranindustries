@@ -14,9 +14,10 @@ import { useTranslation } from 'react-i18next';
 
 type BranchSwitcherProps = {
     variant?: 'default' | 'header';
+    embedded?: boolean;
 };
 
-export function BranchSwitcher({ variant = 'default' }: BranchSwitcherProps) {
+export function BranchSwitcher({ variant = 'default', embedded = false }: BranchSwitcherProps) {
     const { t } = useTranslation();
     const { auth } = usePage<SharedData & Record<string, unknown>>().props;
 
@@ -84,12 +85,13 @@ export function BranchSwitcher({ variant = 'default' }: BranchSwitcherProps) {
             <DropdownMenuTrigger asChild>
                 <Button
                     type="button"
-                    variant="outline"
+                    variant={embedded ? 'ghost' : 'outline'}
                     className={cn(
-                        'header-control h-9 gap-2 border-slate-200 bg-white px-2.5 text-sm font-normal shadow-none',
-                        'hover:bg-slate-50 data-[state=open]:border-primary/40 data-[state=open]:bg-white',
-                        'dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800',
-                        'w-auto max-w-none shrink-0 sm:px-3'
+                        'header-control h-8 gap-2 text-sm font-normal shadow-none',
+                        embedded
+                            ? 'border-0 bg-transparent px-2 hover:bg-white dark:hover:bg-slate-800'
+                            : 'border-slate-200 bg-white px-2.5 hover:bg-slate-50 data-[state=open]:border-primary/40 data-[state=open]:bg-white dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800',
+                        'w-auto max-w-none shrink-0 sm:px-2.5'
                     )}
                     aria-label={t('Change branch')}
                 >

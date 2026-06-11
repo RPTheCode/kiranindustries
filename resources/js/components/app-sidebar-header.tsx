@@ -1,13 +1,12 @@
-import { Breadcrumbs } from '@/components/breadcrumbs';
+import { HeaderTitleBlock } from '@/components/header-title-block';
+import { ProfileMenu } from '@/components/profile-menu';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { useLayout } from '@/contexts/LayoutContext';
 import { cn } from '@/lib/utils';
 import { type BreadcrumbItem as BreadcrumbItemType } from '@/types';
-import { ProfileMenu } from '@/components/profile-menu';
-import { usePage, router } from '@inertiajs/react';
+import { router, usePage } from '@inertiajs/react';
 import { useTranslation } from 'react-i18next';
 import { BranchSwitcher } from './branch-switcher';
-import { LogOut } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 export function AppSidebarHeader({
@@ -25,29 +24,31 @@ export function AppSidebarHeader({
     return (
         <header
             className={cn(
-                'sticky top-0 z-30 flex min-h-11 shrink-0 items-center gap-2',
-                'border-b border-slate-200 bg-white px-3 py-2',
-                'dark:border-slate-800 dark:bg-slate-950',
-                'sm:min-h-12 sm:gap-3 sm:px-4'
+                'sticky top-0 z-30 flex min-h-14 shrink-0 items-center gap-2',
+                'border-b border-slate-200/80 bg-white/85 px-3 py-2 shadow-sm backdrop-blur-md',
+                'dark:border-slate-800/80 dark:bg-slate-950/90',
+                'sm:gap-3 sm:px-4'
             )}
         >
             <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                 {position === 'left' && (
                     <SidebarTrigger className="h-8 w-8 shrink-0 text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-800" />
                 )}
-                <Breadcrumbs
-                    variant="header"
-                    items={breadcrumbs.map((b) => ({ label: b.title, href: b.href }))}
-                />
+                <HeaderTitleBlock breadcrumbs={breadcrumbs} />
             </div>
 
-            <div className="flex shrink-0 items-center gap-2">
-                <BranchSwitcher variant="header" />
+            <div
+                className={cn(
+                    'flex shrink-0 items-center gap-0.5 rounded-lg border border-slate-200/70 bg-slate-50/70 p-0.5',
+                    'dark:border-slate-700/70 dark:bg-slate-900/60'
+                )}
+            >
+                <BranchSwitcher variant="header" embedded />
 
                 {actions && (
                     <>
-                        <div className="hidden h-5 w-px bg-slate-200 sm:block dark:bg-slate-700" aria-hidden />
-                        <div className="flex max-w-[50vw] items-center gap-1.5 overflow-x-auto sm:max-w-none">
+                        <div className="mx-0.5 hidden h-5 w-px bg-slate-200 sm:block dark:bg-slate-700" aria-hidden />
+                        <div className="flex max-w-[40vw] items-center gap-0.5 overflow-x-auto sm:max-w-none">
                             {actions}
                         </div>
                     </>
@@ -63,9 +64,9 @@ export function AppSidebarHeader({
                     </button>
                 )}
 
-                <div className="hidden h-5 w-px bg-slate-200 sm:block dark:bg-slate-700" aria-hidden />
+                <div className="mx-0.5 hidden h-5 w-px bg-slate-200 sm:block dark:bg-slate-700" aria-hidden />
 
-                <ProfileMenu variant="header" />
+                <ProfileMenu variant="header" embedded />
 
                 {position === 'right' && (
                     <SidebarTrigger className="h-8 w-8 shrink-0 text-slate-500 dark:text-slate-300" />

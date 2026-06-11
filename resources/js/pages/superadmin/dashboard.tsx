@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { PageTemplate } from '@/components/page-template';
-import { RefreshCw, BarChart3, Nfc, Building2, CreditCard, Ticket, DollarSign, TrendingUp, Activity, UserPlus, AlertCircle } from 'lucide-react';
+import { BarChart3, Nfc, Building2, CreditCard, Ticket, DollarSign, TrendingUp, Activity, UserPlus, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/badge';
@@ -40,26 +40,19 @@ interface PageAction {
 
 export default function SuperAdminDashboard({ dashboardData }: { dashboardData: SuperAdminDashboardData }) {
   const { t } = useTranslation();
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-
   const handleRefresh = () => {
-    setIsRefreshing(true);
     router.reload({ only: ['dashboardData'] });
-    setTimeout(() => setIsRefreshing(false), 1000);
   };
-
-
 
 
 
   const pageActions: PageAction[] = [
     {
       label: t('Refresh'),
-      icon: <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />,
+      iconOnly: true,
       variant: 'outline',
-      onClick: handleRefresh
-    }
+      onClick: handleRefresh,
+    },
   ];
 
   const stats = dashboardData?.stats || {

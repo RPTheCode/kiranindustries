@@ -1,8 +1,10 @@
 import { Head, usePage } from '@inertiajs/react';
 import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
+import { HeaderRefreshButton } from '@/components/header-refresh-button';
 import { Button } from '@/components/ui/button';
-import { ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { FloatingChatGpt } from '@/components/FloatingChatGpt';
 import { cn } from '@/lib/utils';
 
@@ -11,6 +13,8 @@ export interface PageAction {
   icon?: ReactNode;
   variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link';
   onClick?: () => void;
+  /** Icon-only control for header toolbar (e.g. refresh). */
+  iconOnly?: boolean;
 }
 
 export interface PageTemplateProps {
@@ -31,25 +35,66 @@ function PageToolbarActions({
   actions?: PageAction[];
   headerExtra?: ReactNode;
 }) {
+  const { t } = useTranslation();
+  const [refreshingIndex, setRefreshingIndex] = useState<number | null>(null);
+
   if (!headerExtra && (!actions || actions.length === 0)) {
     return null;
   }
 
+  const handleActionClick = (action: PageAction, index: number) => {
+    if (!action.onClick) {
+      return;
+    }
+
+    const isRefresh =
+      action.iconOnly ||
+      action.label === t('Refresh') ||
+      action.label === 'Refresh';
+
+    if (isRefresh) {
+      setRefreshingIndex(index);
+      action.onClick();
+      window.setTimeout(() => setRefreshingIndex(null), 1000);
+      return;
+    }
+
+    action.onClick();
+  };
+
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
+    <div className="flex flex-wrap items-center justify-end gap-1">
       {headerExtra}
-      {actions?.map((action, index) => (
-        <Button
-          key={index}
-          variant={action.variant || 'outline'}
-          size="sm"
-          onClick={action.onClick}
-          className="h-9 shrink-0 cursor-pointer"
-        >
-          {action.icon && <span className="mr-1.5">{action.icon}</span>}
-          {action.label}
-        </Button>
-      ))}
+      {actions?.map((action, index) => {
+        const isRefresh =
+          action.iconOnly ||
+          action.label === t('Refresh') ||
+          action.label === 'Refresh';
+
+        if (isRefresh) {
+          return (
+            <HeaderRefreshButton
+              key={index}
+              label={action.label}
+              isLoading={refreshingIndex === index}
+              onClick={() => handleActionClick(action, index)}
+            />
+          );
+        }
+
+        return (
+          <Button
+            key={index}
+            variant={action.variant || 'outline'}
+            size="sm"
+            onClick={() => handleActionClick(action, index)}
+            className="h-8 shrink-0 cursor-pointer"
+          >
+            {action.icon && <span className="mr-1.5">{action.icon}</span>}
+            {action.label}
+          </Button>
+        );
+      })}
     </div>
   );
 }

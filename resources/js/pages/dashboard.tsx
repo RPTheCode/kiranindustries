@@ -1,7 +1,7 @@
 import React from 'react';
 import { PageTemplate } from '@/components/page-template';
 import { DashboardSection, StatCard } from '@/components/dashboard/stat-card';
-import { RefreshCw, Users, Building2, Briefcase, Calendar, TrendingUp, BarChart3, AlertCircle, CheckCircle2, XCircle, Grid2X2, ArrowRight, Fingerprint, FileDown } from 'lucide-react';
+import { Users, Building2, Briefcase, Calendar, TrendingUp, BarChart3, AlertCircle, CheckCircle2, XCircle, Grid2X2, ArrowRight, Fingerprint, FileDown } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useTranslation } from 'react-i18next';
@@ -78,7 +78,7 @@ export default function Dashboard({ dashboardData }: { dashboardData: CompanyDas
   const pageActions: PageAction[] = [
     {
       label: t('Refresh'),
-      icon: <RefreshCw className="h-4 w-4" />,
+      iconOnly: true,
       variant: 'outline',
       onClick: () => router.reload({ only: ['dashboardData'] }),
     },

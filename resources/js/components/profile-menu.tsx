@@ -16,9 +16,19 @@ import { useTranslation } from 'react-i18next';
 
 type ProfileMenuProps = {
     variant?: 'default' | 'header';
+    embedded?: boolean;
 };
 
-export function ProfileMenu({ variant = 'default' }: ProfileMenuProps) {
+function headerDisplayName(fullName?: string): string {
+    if (!fullName?.trim()) {
+        return '';
+    }
+
+    const parts = fullName.trim().split(/\s+/);
+    return parts[0] ?? fullName;
+}
+
+export function ProfileMenu({ variant = 'default', embedded = false }: ProfileMenuProps) {
     const { t } = useTranslation();
     const { auth } = usePage().props as { auth?: { user?: { name?: string; email?: string; avatar?: string } } };
     const user = auth?.user;
@@ -49,11 +59,16 @@ export function ProfileMenu({ variant = 'default' }: ProfileMenuProps) {
             <DropdownMenuTrigger asChild>
                 <Button
                     type="button"
-                    variant={isHeader ? 'outline' : 'ghost'}
+                    variant={isHeader && !embedded ? 'outline' : 'ghost'}
                     className={cn(
                         'gap-2',
                         isHeader
-                            ? 'header-control h-9 w-auto max-w-none shrink-0 border-slate-200 bg-white px-1.5 shadow-none hover:bg-slate-50 data-[state=open]:border-primary/40 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800 sm:pl-2 sm:pr-2.5'
+                            ? cn(
+                                  'header-control h-8 w-auto max-w-none shrink-0 px-1.5 shadow-none sm:pl-1.5 sm:pr-2',
+                                  embedded
+                                      ? 'border-0 bg-transparent hover:bg-white data-[state=open]:bg-white dark:hover:bg-slate-800 dark:data-[state=open]:bg-slate-800'
+                                      : 'border-slate-200 bg-white hover:bg-slate-50 data-[state=open]:border-primary/40 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800'
+                              )
                             : 'h-9 rounded-lg px-1.5 hover:bg-slate-100 dark:hover:bg-slate-800'
                     )}
                 >
@@ -66,10 +81,10 @@ export function ProfileMenu({ variant = 'default' }: ProfileMenuProps) {
                     {isHeader ? (
                         <>
                             <span
-                                className="hidden whitespace-nowrap text-sm font-medium text-slate-800 sm:inline dark:text-slate-100"
+                                className="hidden max-w-[7rem] truncate whitespace-nowrap text-sm font-medium text-slate-800 sm:inline dark:text-slate-100"
                                 title={user?.name}
                             >
-                                {user?.name}
+                                {headerDisplayName(user?.name)}
                             </span>
                             <ChevronDown className="hidden h-4 w-4 shrink-0 text-slate-400 sm:block" />
                         </>
