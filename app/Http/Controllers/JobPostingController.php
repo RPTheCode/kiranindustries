@@ -2,11 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Branch;
+use App\Models\Department;
+use App\Models\JobLocation;
 use App\Models\JobPosting;
 use App\Models\JobRequisition;
 use App\Models\JobType;
-use App\Models\JobLocation;
-use App\Models\Department;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Inertia\Inertia;
@@ -105,7 +106,7 @@ class JobPostingController extends Controller
             ],
             'title' => 'required|string|max:255',
             'job_type_id' => 'required|exists:job_types,id',
-            'location_id' => 'required|exists:job_locations,id',
+            'branch_id' => 'required|exists:branches,id',
             'department_id' => [
                 'nullable',
                 'exists:departments,id',
@@ -134,6 +135,8 @@ class JobPostingController extends Controller
             return redirect()->back()->withErrors($validator)->withInput();
         }
 
+        $locationId = $this->resolveLocationIdFromBranch((int) $request->branch_id);
+
         $jobCode = 'JOB-' . creatorId() . '-' . str_pad(
             JobPosting::whereIn('created_by', getCompanyAndUsersId())->count() + 1,
             4,
@@ -146,7 +149,7 @@ class JobPostingController extends Controller
             'job_code' => $jobCode,
             'title' => $request->title,
             'job_type_id' => $request->job_type_id,
-            'location_id' => $request->location_id,
+            'location_id' => $locationId,
             'department_id' => $request->department_id,
             'min_experience' => $request->min_experience,
             'max_experience' => $request->max_experience,
@@ -185,7 +188,7 @@ class JobPostingController extends Controller
             ],
             'title' => 'required|string|max:255',
             'job_type_id' => 'required|exists:job_types,id',
-            'location_id' => 'required|exists:job_locations,id',
+            'branch_id' => 'required|exists:branches,id',
             'department_id' => [
                 'nullable',
                 'exists:departments,id',
@@ -214,11 +217,12 @@ class JobPostingController extends Controller
             return redirect()->back()->withErrors($validator)->withInput();
         }
 
-        $jobPosting->update($request->only([
+        $locationId = $this->resolveLocationIdFromBranch((int) $request->branch_id);
+
+        $jobPosting->update(array_merge($request->only([
             'requisition_id',
             'title',
             'job_type_id',
-            'location_id',
             'department_id',
             'min_experience',
             'max_experience',
@@ -228,10 +232,29 @@ class JobPostingController extends Controller
             'requirements',
             'benefits',
             'application_deadline',
-            'is_featured'
-        ]));
+            'is_featured',
+        ]), ['location_id' => $locationId]));
 
         return redirect()->back()->with('success', __('Job posting updated successfully'));
+    }
+
+    private function resolveLocationIdFromBranch(int $branchId): int
+    {
+        $branch = Branch::whereIn('created_by', getCompanyAndUsersId())->findOrFail($branchId);
+
+        $location = JobLocation::firstOrCreate(
+            ['name' => $branch->name, 'created_by' => creatorId()],
+            [
+                'address' => $branch->address,
+                'city' => $branch->city,
+                'state' => $branch->state,
+                'country' => $branch->country,
+                'postal_code' => $branch->zip_code,
+                'status' => 'active',
+            ]
+        );
+
+        return $location->id;
     }
 
     public function destroy(JobPosting $jobPosting)

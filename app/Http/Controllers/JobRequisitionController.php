@@ -6,6 +6,7 @@ use App\Models\JobRequisition;
 use App\Models\JobCategory;
 use App\Models\Department;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 use Inertia\Inertia;
 
@@ -208,14 +209,45 @@ class JobRequisitionController extends Controller
             return redirect()->back()->withErrors($validator);
         }
 
-        $updateData = ['status' => $request->status];
+        $newStatus = $request->status;
+        $user = Auth::user();
 
-        if ($request->status === 'Approved') {
-            $updateData['approved_by'] = creatorId();
-            $updateData['approval_date'] = now();
+        if ($newStatus === 'Pending Approval') {
+            if (!$user->can('edit-job-requisitions')) {
+                return redirect()->back()->with('error', __('You do not have permission to submit hiring requests'));
+            }
+            if ($jobRequisition->status !== 'Draft') {
+                return redirect()->back()->with('error', __('Only draft hiring requests can be submitted for approval'));
+            }
+
+            $jobRequisition->update(['status' => 'Pending Approval']);
+
+            return redirect()->back()->with('success', __('Hiring request submitted for approval'));
         }
 
-        $jobRequisition->update($updateData);
+        if ($newStatus === 'Approved') {
+            if (!$user->can('approve-job-requisitions')) {
+                return redirect()->back()->with('error', __('You do not have permission to approve hiring requests'));
+            }
+            if (!in_array($jobRequisition->status, ['Draft', 'Pending Approval'], true)) {
+                return redirect()->back()->with('error', __('This hiring request cannot be approved'));
+            }
+
+            $jobRequisition->update([
+                'status' => 'Approved',
+                'approved_by' => creatorId(),
+                'approval_date' => now(),
+            ]);
+
+            return redirect()->back()->with('success', __('Hiring request approved'));
+        }
+
+        if (!$user->can('approve-job-requisitions')) {
+            return redirect()->back()->with('error', __('You do not have permission to change hiring request status'));
+        }
+
+        $jobRequisition->update(['status' => $newStatus]);
+
         return redirect()->back()->with('success', __('Job requisition status updated successfully'));
     }
 }

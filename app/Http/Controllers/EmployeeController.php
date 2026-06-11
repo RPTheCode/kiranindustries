@@ -43,8 +43,8 @@ class EmployeeController extends Controller
                 'employee.category' => function ($q) {
                     $q->withoutGlobalScopes();
                 }
-            ])
-            ->where('type', 'employee');
+            ]);
+            // ->where('type', 'employee');
 
         // Handle search
         if ($request->has('search') && !empty($request->search)) {

@@ -29,6 +29,7 @@ class Candidate extends BaseModel
         'portfolio_url',
         'linkedin_url',
         'referral_employee_id',
+        'employee_id',
         'status',
         'application_date',
         'created_by'
@@ -68,6 +69,16 @@ class Candidate extends BaseModel
     public function assessments()
     {
         return $this->hasMany(CandidateAssessment::class);
+    }
+
+    public function offers()
+    {
+        return $this->hasMany(Offer::class);
+    }
+
+    public function employee()
+    {
+        return $this->belongsTo(Employee::class);
     }
 
     public function getFullNameAttribute()

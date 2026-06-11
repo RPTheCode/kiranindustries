@@ -1,620 +1,281 @@
-import { useState } from 'react';
+import { PipelineBoard } from '@/components/recruitment/PipelineBoard';
+import { RecruitmentEmptyState } from '@/components/recruitment/RecruitmentEmptyState';
+import { StatusBadge } from '@/components/recruitment/StatusBadge';
 import { PageTemplate } from '@/components/page-template';
-import { usePage, router } from '@inertiajs/react';
-import { hasPermission } from '@/utils/authorization';
-import { CrudTable } from '@/components/CrudTable';
-import { CrudFormModal } from '@/components/CrudFormModal';
-import { CrudDeleteModal } from '@/components/CrudDeleteModal';
 import { toast } from '@/components/custom-toast';
-import { useTranslation } from 'react-i18next';
+import { FormField, FormSection, RecruitmentFormSheet } from '@/components/recruitment/RecruitmentFormSheet';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { RecruitmentSelect } from '@/components/recruitment/RecruitmentSelect';
 import { Pagination } from '@/components/ui/pagination';
-import { SearchAndFilterBar } from '@/components/ui/search-and-filter-bar';
-import { Plus } from 'lucide-react';
-import { format } from 'date-fns';
+import { hasPermission } from '@/utils/authorization';
+import { Link, router, useForm, usePage } from '@inertiajs/react';
+import { LayoutGrid, List, Plus, UserPlus } from 'lucide-react';
+import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
-export default function Candidates() {
-  const { t } = useTranslation();
-  const { auth, candidates, jobPostings, sources, employees, filters: pageFilters = {} } = usePage().props as any;
-  const permissions = auth?.permissions || [];
-  
-  const [searchTerm, setSearchTerm] = useState(pageFilters.search || '');
-  const [statusFilter, setStatusFilter] = useState(pageFilters.status || '_empty_');
-  const [jobFilter, setJobFilter] = useState(pageFilters.job_id || '_empty_');
-  const [sourceFilter, setSourceFilter] = useState(pageFilters.source_id || '_empty_');
-  const [showFilters, setShowFilters] = useState(false);
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [isFormModalOpen, setIsFormModalOpen] = useState(false);
-  const [currentItem, setCurrentItem] = useState<any>(null);
-  const [formMode, setFormMode] = useState<'create' | 'edit' | 'view'>('create');
-  const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
-  const [selectedStatus, setSelectedStatus] = useState('');
-  
-  const hasActiveFilters = () => {
-    return statusFilter !== '_empty_' || jobFilter !== '_empty_' || sourceFilter !== '_empty_' || searchTerm !== '';
-  };
-  
-  const activeFilterCount = () => {
-    return (statusFilter !== '_empty_' ? 1 : 0) + (jobFilter !== '_empty_' ? 1 : 0) + (sourceFilter !== '_empty_' ? 1 : 0) + (searchTerm !== '' ? 1 : 0);
-  };
-  
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    applyFilters();
-  };
-  
-  const applyFilters = () => {
-    router.get(route('hr.recruitment.candidates.index'), { 
-      page: 1,
-      search: searchTerm || undefined,
-      status: statusFilter !== '_empty_' ? statusFilter : undefined,
-      job_id: jobFilter !== '_empty_' ? jobFilter : undefined,
-      source_id: sourceFilter !== '_empty_' ? sourceFilter : undefined,
-      per_page: pageFilters.per_page
-    }, { preserveState: true, preserveScroll: true });
-  };
-  
-  const handleSort = (field: string) => {
-    const direction = pageFilters.sort_field === field && pageFilters.sort_direction === 'asc' ? 'desc' : 'asc';
-    
-    router.get(route('hr.recruitment.candidates.index'), { 
-      sort_field: field, 
-      sort_direction: direction, 
-      page: 1,
-      search: searchTerm || undefined,
-      status: statusFilter !== '_empty_' ? statusFilter : undefined,
-      job_id: jobFilter !== '_empty_' ? jobFilter : undefined,
-      source_id: sourceFilter !== '_empty_' ? sourceFilter : undefined,
-      per_page: pageFilters.per_page
-    }, { preserveState: true, preserveScroll: true });
-  };
-  
-  const handleAction = (action: string, item: any) => {
-    setCurrentItem(item);
-    
-    switch (action) {
-      case 'view':
-        setFormMode('view');
-        setIsFormModalOpen(true);
-        break;
-      case 'edit':
-        setFormMode('edit');
-        setIsFormModalOpen(true);
-        break;
-      case 'delete':
-        setIsDeleteModalOpen(true);
-        break;
-      case 'update-status':
-        setCurrentItem(item);
-        setSelectedStatus(item.status);
-        setIsStatusModalOpen(true);
-        break;
-    }
-  };
-  
-  const handleAddNew = () => {
-    setCurrentItem(null);
-    setFormMode('create');
-    setIsFormModalOpen(true);
-  };
-  
-  const handleFormSubmit = (formData: any) => {
-    if (formMode === 'create') {
-      toast.loading(t('Creating candidate...'));
+export default function RecruitmentCandidates() {
+    const { t } = useTranslation();
+    const { auth, view, pipeline, candidates, jobPostings, sources, employees, filters = {} } = usePage().props as any;
+    const permissions = auth?.permissions ?? [];
+    const [sheetOpen, setSheetOpen] = useState(false);
 
-      router.post(route('hr.recruitment.candidates.store'), formData, {
-        onSuccess: (page) => {
-          setIsFormModalOpen(false);
-          toast.dismiss();
-          if (page.props.flash.success) {
-            toast.success(t(page.props.flash.success));
-          } else if (page.props.flash.error) {
-            toast.error(t(page.props.flash.error));
-          }
-        },
-        onError: (errors) => {
-          toast.dismiss();
-          if (typeof errors === 'string') {
-            toast.error(t(errors));
-          } else {
-            toast.error(t('Failed to create candidate: {{errors}}', { errors: Object.values(errors).join(', ') }));
-          }
-        }
-      });
-    } else if (formMode === 'edit') {
-      toast.loading(t('Updating candidate...'));
-
-      router.put(route('hr.recruitment.candidates.update', currentItem.id), formData, {
-        onSuccess: (page) => {
-          setIsFormModalOpen(false);
-          toast.dismiss();
-          if (page.props.flash.success) {
-            toast.success(t(page.props.flash.success));
-          } else if (page.props.flash.error) {
-            toast.error(t(page.props.flash.error));
-          }
-        },
-        onError: (errors) => {
-          toast.dismiss();
-          if (typeof errors === 'string') {
-            toast.error(t(errors));
-          } else {
-            toast.error(t('Failed to update candidate: {{errors}}', { errors: Object.values(errors).join(', ') }));
-          }
-        }
-      });
-    }
-  };
-  
-  const handleDeleteConfirm = () => {
-    toast.loading(t('Deleting candidate...'));
-
-    router.delete(route('hr.recruitment.candidates.destroy', currentItem.id), {
-      onSuccess: (page) => {
-        setIsDeleteModalOpen(false);
-        toast.dismiss();
-        if (page.props.flash.success) {
-          toast.success(t(page.props.flash.success));
-        } else if (page.props.flash.error) {
-          toast.error(t(page.props.flash.error));
-        }
-      },
-      onError: (errors) => {
-        toast.dismiss();
-        if (typeof errors === 'string') {
-          toast.error(t(errors));
-        } else {
-          toast.error(t('Failed to delete candidate: {{errors}}', { errors: Object.values(errors).join(', ') }));
-        }
-      }
+    const form = useForm({
+        job_id: '',
+        source_id: '',
+        first_name: '',
+        last_name: '',
+        email: '',
+        phone: '',
+        experience_years: 0,
+        expected_salary: '',
+        notice_period: '',
+        application_date: new Date().toISOString().split('T')[0],
     });
-  };
 
-  const handleStatusUpdate = (formData: any) => {
-    if (!formData.status) return;
-    
-    toast.loading(t('Updating status...'));
-    
-    router.put(route('hr.recruitment.candidates.update-status', currentItem.id), { status: formData.status }, {
-      onSuccess: (page) => {
-        setIsStatusModalOpen(false);
-        toast.dismiss();
-        if (page.props.flash.success) {
-          toast.success(t(page.props.flash.success));
-        } else if (page.props.flash.error) {
-          toast.error(t(page.props.flash.error));
-        }
-      },
-      onError: (errors) => {
-        toast.dismiss();
-        if (typeof errors === 'string') {
-          toast.error(t(errors));
-        } else {
-          toast.error(t('Failed to update status: {{errors}}', { errors: Object.values(errors).join(', ') }));
-        }
-      }
-    });
-  };
-  
-  const handleResetFilters = () => {
-    setSearchTerm('');
-    setStatusFilter('_empty_');
-    setJobFilter('_empty_');
-    setSourceFilter('_empty_');
-    setShowFilters(false);
-    
-    router.get(route('hr.recruitment.candidates.index'), {
-      page: 1,
-      per_page: pageFilters.per_page
-    }, { preserveState: true, preserveScroll: true });
-  };
+    const fieldError = (key: string) => {
+        const err = (form.errors as Record<string, string>)[key];
+        return err ? String(err) : undefined;
+    };
 
-  const pageActions = [];
-  
-  if (hasPermission(permissions, 'create-candidates')) {
-    pageActions.push({
-      label: t('Add Candidate'),
-      icon: <Plus className="h-4 w-4 mr-2" />,
-      variant: 'default',
-      onClick: () => handleAddNew()
-    });
-  }
+    const switchView = (v: string) => {
+        router.get(route('hr.recruitment.candidates.index'), { ...filters, view: v }, { preserveState: true });
+    };
 
-  const breadcrumbs = [
-    { title: t('Dashboard'), href: route('dashboard') },
-    { title: t('Recruitment'), href: route('hr.recruitment.candidates.index') },
-    { title: t('Candidates') }
-  ];
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'New': return 'bg-blue-50 text-blue-700 ring-blue-600/20';
-      case 'Screening': return 'bg-yellow-50 text-yellow-800 ring-yellow-600/20';
-      case 'Interview': return 'bg-purple-50 text-purple-700 ring-purple-600/20';
-      case 'Offer': return 'bg-orange-50 text-orange-700 ring-orange-600/20';
-      case 'Hired': return 'bg-green-50 text-green-700 ring-green-600/20';
-      case 'Rejected': return 'bg-red-50 text-red-700 ring-red-600/10';
-      default: return 'bg-gray-50 text-gray-600 ring-gray-500/10';
-    }
-  };
-
-  const columns = [
-    { 
-      key: 'full_name', 
-      label: t('Name'), 
-      sortable: true,
-      render: (_, row) => (
-        <div>
-          <div className="font-medium">{row.first_name} {row.last_name}</div>
-          <div className="text-xs text-gray-500">{row.email}</div>
-        </div>
-      )
-    },
-    { 
-      key: 'job.title', 
-      label: t('Job'),
-      render: (_, row) => (
-        <div>
-          <div className="font-medium">{row.job?.title || '-'}</div>
-          <div className="text-xs text-gray-500">{row.job?.job_code || ''}</div>
-        </div>
-      )
-    },
-    { 
-      key: 'source.name', 
-      label: t('Source'),
-      render: (_, row) => row.source?.name || '-'
-    },
-    { 
-      key: 'experience_years', 
-      label: t('Experience'),
-      render: (value) => `${value} ${t('years')}`
-    },
-    { 
-      key: 'expected_salary', 
-      label: t('Expected Salary'),
-      render: (value) => value ? window.appSettings?.formatCurrency(value) : '-'
-    },
-    { 
-      key: 'status', 
-      label: t('Status'),
-      render: (value) => (
-        <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${getStatusColor(value)}`}>
-          {t(value)}
-        </span>
-      )
-    },
-    { 
-      key: 'application_date', 
-      label: t('Applied'),
-      sortable: true,
-      render: (value) => window.appSettings?.formatDateTime(value, false) || new Date(value).toLocaleDateString()
-    }
-  ];
-
-  const actions = [
-    { 
-      label: t('View'), 
-      icon: 'Eye', 
-      action: 'view', 
-      className: 'text-blue-500',
-      requiredPermission: 'view-candidates'
-    },
-    { 
-      label: t('Edit'), 
-      icon: 'Edit', 
-      action: 'edit', 
-      className: 'text-amber-500',
-      requiredPermission: 'edit-candidates'
-    },
-    { 
-      label: t('Update Status'), 
-      icon: 'RefreshCw', 
-      action: 'update-status', 
-      className: 'text-green-500',
-      requiredPermission: 'edit-candidates'
-    },
-    { 
-      label: t('Delete'), 
-      icon: 'Trash2', 
-      action: 'delete', 
-      className: 'text-red-500',
-      requiredPermission: 'delete-candidates'
-    }
-  ];
-
-  const statusOptions = [
-    { value: '_empty_', label: t('All Statuses') },
-    { value: 'New', label: t('New') },
-    { value: 'Screening', label: t('Screening') },
-    { value: 'Interview', label: t('Interview') },
-    { value: 'Offer', label: t('Offer') },
-    { value: 'Hired', label: t('Hired') },
-    { value: 'Rejected', label: t('Rejected') }
-  ];
-
-  const jobOptions = [
-    { value: '_empty_', label: t('All Jobs') },
-    ...(jobPostings || []).map((job: any) => ({
-      value: job.id.toString(),
-      label: `${job.job_code} - ${job.title}`
-    }))
-  ];
-
-  const sourceOptions = [
-    { value: '_empty_', label: t('All Sources') },
-    ...(sources || []).map((source: any) => ({
-      value: source.id.toString(),
-      label: source.name
-    }))
-  ];
-
-  const jobPostingOptions = [
-    { value: '_empty_', label: t('Select Job') },
-    ...(jobPostings || []).map((job: any) => ({
-      value: job.id.toString(),
-      label: `${job.job_code} - ${job.title}`
-    }))
-  ];
-
-  const candidateSourceOptions = [
-    { value: '_empty_', label: t('Select Source') },
-    ...(sources || []).map((source: any) => ({
-      value: source.id.toString(),
-      label: source.name
-    }))
-  ];
-
-  const employeeOptions = [
-    { value: 'none', label: t('Select Employee') },
-    ...(employees || []).map((emp: any) => ({
-      value: emp.id.toString(),
-      label: emp.name
-    }))
-  ];
-
-  return (
-    <PageTemplate 
-      title={t("Candidates")} 
-      url="/recruitment/candidates"
-      actions={pageActions}
-      breadcrumbs={breadcrumbs}
-      noPadding
-    >
-      <div className="bg-white dark:bg-gray-900 rounded-lg shadow mb-4 p-4">
-        <SearchAndFilterBar
-          searchTerm={searchTerm}
-          onSearchChange={setSearchTerm}
-          onSearch={handleSearch}
-          filters={[
+    const handleMoveStatus = (id: number, status: string) => {
+        router.put(
+            route('hr.recruitment.candidates.update-status', id),
+            { status },
             {
-              name: 'status',
-              label: t('Status'),
-              type: 'select',
-              value: statusFilter,
-              onChange: setStatusFilter,
-              options: statusOptions
-            },
-            {
-              name: 'job_id',
-              label: t('Job'),
-              type: 'select',
-              value: jobFilter,
-              onChange: setJobFilter,
-              options: jobOptions
-            },
-            {
-              name: 'source_id',
-              label: t('Source'),
-              type: 'select',
-              value: sourceFilter,
-              onChange: setSourceFilter,
-              options: sourceOptions
+                preserveScroll: true,
+                onSuccess: () => toast.success(t('Status updated')),
             }
-          ]}
-          showFilters={showFilters}
-          setShowFilters={setShowFilters}
-          hasActiveFilters={hasActiveFilters}
-          activeFilterCount={activeFilterCount}
-          onResetFilters={handleResetFilters}
-          onApplyFilters={applyFilters}
-          currentPerPage={pageFilters.per_page?.toString() || "10"}
-          onPerPageChange={(value) => {
-            router.get(route('hr.recruitment.candidates.index'), { 
-              page: 1, 
-              per_page: parseInt(value),
-              search: searchTerm || undefined,
-              status: statusFilter !== '_empty_' ? statusFilter : undefined,
-              job_id: jobFilter !== '_empty_' ? jobFilter : undefined,
-              source_id: sourceFilter !== '_empty_' ? sourceFilter : undefined
-            }, { preserveState: true, preserveScroll: true });
-          }}
-        />
-      </div>
+        );
+    };
 
-      <div className="bg-white dark:bg-gray-900 rounded-lg shadow overflow-hidden">
-        <CrudTable
-          columns={columns}
-          actions={actions}
-          data={candidates?.data || []}
-          from={candidates?.from || 1}
-          onAction={handleAction}
-          sortField={pageFilters.sort_field}
-          sortDirection={pageFilters.sort_direction}
-          onSort={handleSort}
-          permissions={permissions}
-          entityPermissions={{
-            view: 'view-candidates',
-            create: 'create-candidates',
-            edit: 'edit-candidates',
-            delete: 'delete-candidates'
-          }}
-        />
+    const submitCandidate = (e: React.FormEvent) => {
+        e.preventDefault();
+        form.post(route('hr.recruitment.candidates.store'), {
+            onSuccess: () => {
+                setSheetOpen(false);
+                form.reset();
+                toast.success(t('Candidate added'));
+            },
+        });
+    };
 
-        <Pagination
-          from={candidates?.from || 0}
-          to={candidates?.to || 0}
-          total={candidates?.total || 0}
-          links={candidates?.links}
-          entityName={t("candidates")}
-          onPageChange={(url) => router.get(url)}
-        />
-      </div>
+    const actions = [];
+    if (hasPermission(permissions, 'create-candidates')) {
+        actions.push({
+            label: t('Add Candidate'),
+            icon: <Plus className="mr-2 h-4 w-4" />,
+            onClick: () => setSheetOpen(true),
+        });
+    }
 
-      <CrudFormModal
-        isOpen={isFormModalOpen}
-        onClose={() => setIsFormModalOpen(false)}
-        onSubmit={handleFormSubmit}
-        formConfig={{
-          fields: [
-            { 
-              name: 'job_id', 
-              label: t('Job'), 
-              type: 'select', 
-              required: true,
-              options: jobPostingOptions.filter(opt => opt.value !== '_empty_')
-            },
-            { 
-              name: 'source_id', 
-              label: t('Source'), 
-              type: 'select', 
-              required: true,
-              options: candidateSourceOptions.filter(opt => opt.value !== '_empty_')
-            },
-            { 
-              name: 'first_name', 
-              label: t('First Name'), 
-              type: 'text', 
-              required: true 
-            },
-            { 
-              name: 'last_name', 
-              label: t('Last Name'), 
-              type: 'text', 
-              required: true 
-            },
-            { 
-              name: 'email', 
-              label: t('Email'), 
-              type: 'email', 
-              required: true 
-            },
-            { 
-              name: 'phone', 
-              label: t('Phone'), 
-              type: 'text',
-              validation: { pattern: '^[0-9]*$' }
-            },
-            { 
-              name: 'current_company', 
-              label: t('Current Company'), 
-              type: 'text' 
-            },
-            { 
-              name: 'current_position', 
-              label: t('Current Position'), 
-              type: 'text' 
-            },
-            { 
-              name: 'experience_years', 
-              label: t('Experience (Years)'), 
-              type: 'number', 
-              required: true,
-              min: 0
-            },
-            { 
-              name: 'current_salary', 
-              label: t('Current Salary'), 
-              type: 'number',
-              min: 0,
-              step: 0.01
-            },
-            { 
-              name: 'expected_salary', 
-              label: t('Expected Salary'), 
-              type: 'number',
-              min: 0,
-              step: 0.01
-            },
-            { 
-              name: 'notice_period', 
-              label: t('Notice Period'), 
-              type: 'text' 
-            },
-            { 
-              name: 'application_date', 
-              label: t('Application Date'), 
-              type: 'date', 
-              required: true 
-            },
-            { 
-              name: 'referral_employee_id', 
-              label: t('Referred By'), 
-              type: 'select',
-              options: employeeOptions
-            },
-            { 
-              name: 'skills', 
-              label: t('Skills'), 
-              type: 'textarea' 
-            },
-            { 
-              name: 'education', 
-              label: t('Education'), 
-              type: 'textarea' 
-            },
-            { 
-              name: 'portfolio_url', 
-              label: t('Portfolio URL'), 
-              type: 'text' 
-            },
-            { 
-              name: 'linkedin_url', 
-              label: t('LinkedIn URL'), 
-              type: 'text' 
-            }
-          ],
-          modalSize: 'xl'
-        }}
-        initialData={currentItem}
-        title={
-          formMode === 'create'
-            ? t('Add New Candidate')
-            : formMode === 'edit'
-              ? t('Edit Candidate')
-              : t('View Candidate')
-        }
-        mode={formMode}
-      />
+    return (
+        <PageTemplate
+            title={t('Candidates')}
+            description={t('Track applicants through the selection process board')}
+            url="/recruitment/candidates"
+            actions={actions}
+            breadcrumbs={[
+                { title: t('Dashboard'), href: route('dashboard') },
+                { title: t('Recruitment'), href: route('hr.recruitment.hub') },
+                { title: t('Candidates') },
+            ]}
+        >
+            <div className="space-y-4 p-4 md:p-6">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex rounded-lg border p-0.5">
+                        <Button
+                            variant={view === 'pipeline' ? 'default' : 'ghost'}
+                            size="sm"
+                            className="h-8"
+                            onClick={() => switchView('pipeline')}
+                        >
+                            <LayoutGrid className="mr-1 h-4 w-4" /> {t('Selection Process Board')}
+                        </Button>
+                        <Button
+                            variant={view === 'list' ? 'default' : 'ghost'}
+                            size="sm"
+                            className="h-8"
+                            onClick={() => switchView('list')}
+                        >
+                            <List className="mr-1 h-4 w-4" /> {t('List')}
+                        </Button>
+                    </div>
+                </div>
 
-      <CrudDeleteModal
-        isOpen={isDeleteModalOpen}
-        onClose={() => setIsDeleteModalOpen(false)}
-        onConfirm={handleDeleteConfirm}
-        itemName={currentItem ? `${currentItem.first_name} ${currentItem.last_name}` : ''}
-        entityName="candidate"
-      />
+                {view === 'pipeline' ? (
+                    pipeline && Object.values(pipeline).some((col: any) => col.length > 0) ? (
+                        <PipelineBoard
+                            pipeline={pipeline}
+                            onMoveStatus={handleMoveStatus}
+                            canEdit={hasPermission(permissions, 'edit-candidates')}
+                        />
+                    ) : (
+                        <RecruitmentEmptyState
+                            icon={UserPlus}
+                            title={t('No candidates yet')}
+                                description={t('Add your first candidate to start the selection board')}
+                            actionLabel={hasPermission(permissions, 'create-candidates') ? t('Add Candidate') : undefined}
+                            onAction={() => setSheetOpen(true)}
+                        />
+                    )
+                ) : (
+                    <>
+                        <div className="overflow-hidden rounded-xl border">
+                            <table className="w-full text-sm">
+                                <thead className="bg-slate-50 text-left text-xs text-slate-500">
+                                    <tr>
+                                        <th className="px-4 py-2">{t('Name')}</th>
+                                        <th className="px-4 py-2">{t('Job')}</th>
+                                        <th className="px-4 py-2">{t('Status')}</th>
+                                        <th className="px-4 py-2">{t('Applied')}</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y">
+                                    {candidates?.data?.map((c: any) => (
+                                        <tr key={c.id} className="hover:bg-slate-50">
+                                            <td className="px-4 py-2">
+                                                <Link href={route('hr.recruitment.candidates.show', c.id)} className="font-medium text-primary hover:underline">
+                                                    {c.first_name} {c.last_name}
+                                                </Link>
+                                            </td>
+                                            <td className="px-4 py-2 text-slate-600">{c.job?.title}</td>
+                                            <td className="px-4 py-2"><StatusBadge status={c.status} /></td>
+                                            <td className="px-4 py-2 text-slate-500">{c.application_date}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        {candidates?.last_page > 1 ? (
+                            <Pagination
+                                currentPage={candidates.current_page}
+                                totalPages={candidates.last_page}
+                                onPageChange={(page) => router.get(route('hr.recruitment.candidates.index'), { ...filters, view: 'list', page })}
+                            />
+                        ) : null}
+                    </>
+                )}
+            </div>
 
-      {/* Status Update Modal */}
-      <CrudFormModal
-        isOpen={isStatusModalOpen}
-        onClose={() => setIsStatusModalOpen(false)}
-        onSubmit={handleStatusUpdate}
-        formConfig={{
-          fields: [
-            {
-              name: 'status',
-              label: t('Status'),
-              type: 'select',
-              required: true,
-              options: statusOptions.filter(opt => opt.value !== '_empty_')
-            }
-          ]
-        }}
-        initialData={{ status: selectedStatus }}
-        title={t('Update Candidate Status')}
-        mode="edit"
-        submitLabel={t('Update Status')}
-      />
-    </PageTemplate>
-  );
+            <RecruitmentFormSheet
+                open={sheetOpen}
+                onOpenChange={setSheetOpen}
+                title={t('Add Candidate')}
+                description={t('Add a new applicant to the selection process. Fields marked * are required.')}
+                onSubmit={submitCandidate}
+                processing={form.processing}
+                submitLabel={t('Add Candidate')}
+                size="lg"
+            >
+                <FormSection title={t('Personal details')}>
+                    <div className="grid grid-cols-2 gap-4">
+                        <FormField label={t('First Name')} required error={fieldError('first_name')}>
+                            <Input
+                                className="h-10 bg-white dark:bg-slate-950"
+                                placeholder={t('e.g. Ramesh')}
+                                value={form.data.first_name}
+                                onChange={(e) => form.setData('first_name', e.target.value)}
+                            />
+                        </FormField>
+                        <FormField label={t('Last Name')} required error={fieldError('last_name')}>
+                            <Input
+                                className="h-10 bg-white dark:bg-slate-950"
+                                placeholder={t('e.g. Patel')}
+                                value={form.data.last_name}
+                                onChange={(e) => form.setData('last_name', e.target.value)}
+                            />
+                        </FormField>
+                    </div>
+                    <FormField label={t('Email')} required error={fieldError('email')}>
+                        <Input
+                            type="email"
+                            className="h-10 bg-white dark:bg-slate-950"
+                            placeholder="name@email.com"
+                            value={form.data.email}
+                            onChange={(e) => form.setData('email', e.target.value)}
+                        />
+                    </FormField>
+                    <FormField label={t('Phone')} error={fieldError('phone')} hint={t('10-digit mobile number')}>
+                        <Input
+                            className="h-10 bg-white dark:bg-slate-950"
+                            placeholder="9876543210"
+                            maxLength={10}
+                            value={form.data.phone}
+                            onChange={(e) => form.setData('phone', e.target.value.replace(/\D/g, ''))}
+                        />
+                    </FormField>
+                </FormSection>
+
+                <FormSection title={t('Job application')}>
+                    <FormField label={t('Job')} required error={fieldError('job_id')}>
+                        <RecruitmentSelect
+                            options={jobPostings.map((j: { id: number; title: string; job_code?: string }) => ({
+                                value: String(j.id),
+                                label: `${j.title}${j.job_code ? ` (${j.job_code})` : ''}`,
+                            }))}
+                            value={form.data.job_id}
+                            onValueChange={(v) => form.setData('job_id', v)}
+                            placeholder={t('Select job')}
+                        />
+                    </FormField>
+                    <FormField label={t('Source')} required error={fieldError('source_id')}>
+                        <RecruitmentSelect
+                            options={sources.map((s: { id: number; name: string }) => ({
+                                value: String(s.id),
+                                label: s.name,
+                            }))}
+                            value={form.data.source_id}
+                            onValueChange={(v) => form.setData('source_id', v)}
+                            placeholder={t('Select source')}
+                        />
+                    </FormField>
+                    <FormField label={t('Application date')} required error={fieldError('application_date')}>
+                        <Input
+                            type="date"
+                            className="h-10 bg-white dark:bg-slate-950"
+                            value={form.data.application_date}
+                            onChange={(e) => form.setData('application_date', e.target.value)}
+                        />
+                    </FormField>
+                </FormSection>
+
+                <FormSection title={t('Experience & salary')}>
+                    <div className="grid grid-cols-2 gap-4">
+                        <FormField label={t('Experience (years)')} error={fieldError('experience_years')}>
+                            <Input
+                                type="number"
+                                min={0}
+                                className="h-10 bg-white dark:bg-slate-950"
+                                value={form.data.experience_years}
+                                onChange={(e) => form.setData('experience_years', Number(e.target.value))}
+                            />
+                        </FormField>
+                        <FormField label={t('Expected salary (₹/month)')} error={fieldError('expected_salary')}>
+                            <Input
+                                type="number"
+                                min={0}
+                                className="h-10 bg-white dark:bg-slate-950"
+                                placeholder="22000"
+                                value={form.data.expected_salary}
+                                onChange={(e) => form.setData('expected_salary', e.target.value)}
+                            />
+                        </FormField>
+                    </div>
+                    <FormField label={t('Notice period')} error={fieldError('notice_period')}>
+                        <Input
+                            className="h-10 bg-white dark:bg-slate-950"
+                            placeholder={t('e.g. 15 days, Immediate')}
+                            value={form.data.notice_period}
+                            onChange={(e) => form.setData('notice_period', e.target.value)}
+                        />
+                    </FormField>
+                </FormSection>
+            </RecruitmentFormSheet>
+        </PageTemplate>
+    );
 }

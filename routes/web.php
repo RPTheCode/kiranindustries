@@ -911,11 +911,32 @@ Route::middleware(['auth', 'verified', 'setting'])->group(function () {
             Route::put('performance/employee-reviews/{employeeReview}/status', [EmployeeReviewController::class, 'updateStatus'])->middleware('permission:edit-employee-reviews')->name('hr.performance.employee-reviews.update-status');
         });
 
-        // Recruitment Module Routes
+        // Recruitment Module Routes — new workflow UI
+        Route::get('recruitment', [\App\Http\Controllers\Recruitment\RecruitmentHubController::class, 'index'])
+            ->middleware('role_or_permission:view-candidates|view-job-postings|view-job-requisitions')
+            ->name('hr.recruitment.hub');
+
+        Route::get('recruitment/jobs', [\App\Http\Controllers\Recruitment\RecruitmentJobsController::class, 'index'])
+            ->middleware('role_or_permission:view-job-postings|view-job-requisitions')
+            ->name('hr.recruitment.jobs.index');
+
+        Route::get('recruitment/settings', [\App\Http\Controllers\Recruitment\RecruitmentSettingsController::class, 'index'])
+            ->middleware('role_or_permission:view-job-categories|view-job-types|view-job-locations|view-candidate-sources|view-interview-types|view-onboarding-checklists')
+            ->name('hr.recruitment.settings.index');
+
+        // Legacy recruitment URLs → new workflow pages
+        Route::redirect('recruitment/job-requisitions', '/recruitment/jobs?tab=requisitions');
+        Route::redirect('recruitment/job-postings', '/recruitment/jobs?tab=postings');
+        Route::redirect('recruitment/job-categories', '/recruitment/settings?tab=categories');
+        Route::redirect('recruitment/job-types', '/recruitment/settings?tab=types');
+        Route::redirect('recruitment/job-locations', '/recruitment/settings?tab=branches');
+        Route::redirect('recruitment/candidate-sources', '/recruitment/candidates');
+        Route::redirect('recruitment/interview-types', '/recruitment/settings?tab=interview-types');
+        Route::redirect('recruitment/offer-templates', '/recruitment/offers?tab=templates');
 
         // Job Categories Routes
         Route::middleware('permission:manage-job-categories')->group(function () {
-            Route::get('recruitment/job-categories', [\App\Http\Controllers\JobCategoryController::class, 'index'])->name('hr.recruitment.job-categories.index');
+            Route::get('recruitment/job-categories', fn () => redirect()->route('hr.recruitment.settings.index', ['tab' => 'categories']))->name('hr.recruitment.job-categories.index');
             Route::post('recruitment/job-categories', [\App\Http\Controllers\JobCategoryController::class, 'store'])->middleware('permission:create-job-categories')->name('hr.recruitment.job-categories.store');
             Route::put('recruitment/job-categories/{jobCategory}', [\App\Http\Controllers\JobCategoryController::class, 'update'])->middleware('permission:edit-job-categories')->name('hr.recruitment.job-categories.update');
             Route::delete('recruitment/job-categories/{jobCategory}', [\App\Http\Controllers\JobCategoryController::class, 'destroy'])->middleware('permission:delete-job-categories')->name('hr.recruitment.job-categories.destroy');
@@ -928,7 +949,7 @@ Route::middleware(['auth', 'verified', 'setting'])->group(function () {
             Route::post('recruitment/job-requisitions', [\App\Http\Controllers\JobRequisitionController::class, 'store'])->middleware('permission:create-job-requisitions')->name('hr.recruitment.job-requisitions.store');
             Route::put('recruitment/job-requisitions/{jobRequisition}', [\App\Http\Controllers\JobRequisitionController::class, 'update'])->middleware('permission:edit-job-requisitions')->name('hr.recruitment.job-requisitions.update');
             Route::delete('recruitment/job-requisitions/{jobRequisition}', [\App\Http\Controllers\JobRequisitionController::class, 'destroy'])->middleware('permission:delete-job-requisitions')->name('hr.recruitment.job-requisitions.destroy');
-            Route::put('recruitment/job-requisitions/{jobRequisition}/status', [\App\Http\Controllers\JobRequisitionController::class, 'updateStatus'])->middleware('permission:approve-job-requisitions')->name('hr.recruitment.job-requisitions.update-status');
+            Route::put('recruitment/job-requisitions/{jobRequisition}/status', [\App\Http\Controllers\JobRequisitionController::class, 'updateStatus'])->middleware('role_or_permission:edit-job-requisitions|approve-job-requisitions')->name('hr.recruitment.job-requisitions.update-status');
         });
 
         // Job Types Routes
@@ -970,7 +991,10 @@ Route::middleware(['auth', 'verified', 'setting'])->group(function () {
 
         // Candidates Routes
         Route::middleware('permission:manage-candidates')->group(function () {
-            Route::get('recruitment/candidates', [\App\Http\Controllers\CandidateController::class, 'index'])->name('hr.recruitment.candidates.index');
+            Route::get('recruitment/candidates', [\App\Http\Controllers\Recruitment\RecruitmentCandidatesController::class, 'index'])->name('hr.recruitment.candidates.index');
+            Route::get('recruitment/candidates/{candidate}', [\App\Http\Controllers\Recruitment\RecruitmentCandidatesController::class, 'show'])->name('hr.recruitment.candidates.show');
+            Route::post('recruitment/candidates/{candidate}/documents', [\App\Http\Controllers\Recruitment\RecruitmentCandidatesController::class, 'uploadResume'])->middleware('permission:edit-candidates')->name('hr.recruitment.candidates.upload-documents');
+            Route::post('recruitment/candidates/{candidate}/convert-employee', [\App\Http\Controllers\Recruitment\RecruitmentCandidatesController::class, 'convertToEmployee'])->middleware('permission:create-employees')->name('hr.recruitment.candidates.convert-employee');
             Route::post('recruitment/candidates', [\App\Http\Controllers\CandidateController::class, 'store'])->middleware('permission:create-candidates')->name('hr.recruitment.candidates.store');
             Route::put('recruitment/candidates/{candidate}', [\App\Http\Controllers\CandidateController::class, 'update'])->middleware('permission:edit-candidates')->name('hr.recruitment.candidates.update');
             Route::delete('recruitment/candidates/{candidate}', [\App\Http\Controllers\CandidateController::class, 'destroy'])->middleware('permission:delete-candidates')->name('hr.recruitment.candidates.destroy');
@@ -997,7 +1021,7 @@ Route::middleware(['auth', 'verified', 'setting'])->group(function () {
 
         // Interviews Routes
         Route::middleware('permission:manage-interviews')->group(function () {
-            Route::get('recruitment/interviews', [\App\Http\Controllers\InterviewController::class, 'index'])->name('hr.recruitment.interviews.index');
+            Route::get('recruitment/interviews', [\App\Http\Controllers\Recruitment\RecruitmentInterviewsController::class, 'index'])->name('hr.recruitment.interviews.index');
             Route::post('recruitment/interviews', [\App\Http\Controllers\InterviewController::class, 'store'])->middleware('permission:create-interviews')->name('hr.recruitment.interviews.store');
             Route::put('recruitment/interviews/{interview}', [\App\Http\Controllers\InterviewController::class, 'update'])->middleware('permission:edit-interviews')->name('hr.recruitment.interviews.update');
             Route::delete('recruitment/interviews/{interview}', [\App\Http\Controllers\InterviewController::class, 'destroy'])->middleware('permission:delete-interviews')->name('hr.recruitment.interviews.destroy');
@@ -1035,7 +1059,7 @@ Route::middleware(['auth', 'verified', 'setting'])->group(function () {
 
         // Offers Routes
         Route::middleware('permission:manage-offers')->group(function () {
-            Route::get('recruitment/offers', [\App\Http\Controllers\OfferController::class, 'index'])->name('hr.recruitment.offers.index');
+            Route::get('recruitment/offers', [\App\Http\Controllers\Recruitment\RecruitmentOffersController::class, 'index'])->name('hr.recruitment.offers.index');
             Route::post('recruitment/offers', [\App\Http\Controllers\OfferController::class, 'store'])->middleware('permission:create-offers')->name('hr.recruitment.offers.store');
             Route::put('recruitment/offers/{offer}', [\App\Http\Controllers\OfferController::class, 'update'])->middleware('permission:edit-offers')->name('hr.recruitment.offers.update');
             Route::delete('recruitment/offers/{offer}', [\App\Http\Controllers\OfferController::class, 'destroy'])->middleware('permission:delete-offers')->name('hr.recruitment.offers.destroy');

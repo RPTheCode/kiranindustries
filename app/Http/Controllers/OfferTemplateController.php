@@ -3,13 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Models\OfferTemplate;
+use App\Services\Recruitment\OfferLetterPdfService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Inertia\Inertia;
-use Barryvdh\DomPDF\Facade\Pdf;
 
 class OfferTemplateController extends Controller
 {
+    public function __construct(
+        private OfferLetterPdfService $offerLetterPdf
+    ) {}
+
     public function index(Request $request)
     {
         $query = OfferTemplate::withPermissionCheck();
@@ -111,14 +115,15 @@ class OfferTemplateController extends Controller
     public function preview(Request $request, OfferTemplate $offerTemplate)
     {
         if (!in_array($offerTemplate->created_by, getCompanyAndUsersId())) {
-            return redirect()->back()->with('error', __('You do not have permission to preview this template'));
+            return response()->json(['message' => __('You do not have permission to preview this template')], 403);
         }
 
-        $variables = $request->get('variables', []);
+        $variables = $request->input('variables', []);
         $generatedContent = $this->generateOfferContent($offerTemplate, $variables);
 
         return response()->json([
             'content' => $generatedContent,
+            'html' => $this->offerLetterPdf->renderHtml($generatedContent, $offerTemplate->name, true),
             'variables' => $offerTemplate->variables,
         ]);
     }
@@ -141,8 +146,7 @@ class OfferTemplateController extends Controller
         $generatedContent = $this->generateOfferContent($offerTemplate, $request->variables);
         $filename = $request->filename ?? ($offerTemplate->name . '_' . date('Y-m-d'));
 
-        $pdf = Pdf::loadHTML('<div style="font-family: Arial, sans-serif; line-height: 1.6; padding: 20px;">' . nl2br(htmlspecialchars($generatedContent)) . '</div>');
-        return $pdf->download($filename . '.pdf');
+        return $this->offerLetterPdf->downloadPdf($generatedContent, $filename, $offerTemplate->name);
     }
 
     private function generateOfferContent(OfferTemplate $offerTemplate, array $variables = [])

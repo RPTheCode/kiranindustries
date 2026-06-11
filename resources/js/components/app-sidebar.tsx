@@ -9,6 +9,7 @@ import { type NavItem } from '@/types';
 import { Link, usePage, router } from '@inertiajs/react';
 import {
     Banknote,
+    Briefcase,
     Building2,
     CalendarOff,
     CreditCard,
@@ -712,137 +713,68 @@ export function AppSidebar() {
             });
         }
 
-        // Recruitment Management as separate menu
+        // Recruitment — workflow navigation (new UI)
         const recruitmentChildren = [];
 
-        if ((hasPermission(permissions, 'manage-job-categories') || hasPermission(permissions, 'view-job-categories'))) {
+        if (
+            hasPermission(permissions, 'view-candidates') ||
+            hasPermission(permissions, 'view-job-postings') ||
+            hasPermission(permissions, 'view-job-requisitions')
+        ) {
             recruitmentChildren.push({
-                title: t('Job Categories'),
-                href: route('hr.recruitment.job-categories.index')
+                title: t('Overview'),
+                href: route('hr.recruitment.hub'),
             });
         }
 
-        if ((hasPermission(permissions, 'manage-job-requisitions') || hasPermission(permissions, 'view-job-requisitions'))) {
+        if (hasPermission(permissions, 'view-job-postings') || hasPermission(permissions, 'view-job-requisitions')) {
             recruitmentChildren.push({
-                title: t('Job Requisitions'),
-                href: route('hr.recruitment.job-requisitions.index')
+                title: t('Jobs'),
+                href: route('hr.recruitment.jobs.index'),
             });
         }
 
-        if ((hasPermission(permissions, 'manage-job-types') || hasPermission(permissions, 'view-job-types'))) {
-            recruitmentChildren.push({
-                title: t('Job Types'),
-                href: route('hr.recruitment.job-types.index')
-            });
-        }
-
-        if ((hasPermission(permissions, 'manage-job-locations') || hasPermission(permissions, 'view-job-locations'))) {
-            recruitmentChildren.push({
-                title: t('Job Locations'),
-                href: route('hr.recruitment.job-locations.index')
-            });
-        }
-
-        if ((hasPermission(permissions, 'manage-job-postings') || hasPermission(permissions, 'view-job-postings'))) {
-            recruitmentChildren.push({
-                title: t('Job Postings'),
-                href: route('hr.recruitment.job-postings.index')
-            });
-        }
-
-        if ((hasPermission(permissions, 'manage-candidate-sources') || hasPermission(permissions, 'view-candidate-sources'))) {
-            recruitmentChildren.push({
-                title: t('Candidate Sources'),
-                href: route('hr.recruitment.candidate-sources.index')
-            });
-        }
-
-        if ((hasPermission(permissions, 'manage-candidates') || hasPermission(permissions, 'view-candidates'))) {
+        if (hasPermission(permissions, 'manage-candidates') || hasPermission(permissions, 'view-candidates')) {
             recruitmentChildren.push({
                 title: t('Candidates'),
-                href: route('hr.recruitment.candidates.index')
+                href: route('hr.recruitment.candidates.index'),
             });
         }
 
-        if ((hasPermission(permissions, 'manage-interview-types') || hasPermission(permissions, 'view-interview-types'))) {
-            recruitmentChildren.push({
-                title: t('Interview Types'),
-                href: route('hr.recruitment.interview-types.index')
-            });
-        }
-
-        if ((hasPermission(permissions, 'manage-interview-rounds') || hasPermission(permissions, 'view-interview-rounds'))) {
-            recruitmentChildren.push({
-                title: t('Interview Rounds'),
-                href: route('hr.recruitment.interview-rounds.index')
-            });
-        }
-
-        if ((hasPermission(permissions, 'manage-interviews') || hasPermission(permissions, 'view-interviews'))) {
+        if (hasPermission(permissions, 'manage-interviews') || hasPermission(permissions, 'view-interviews')) {
             recruitmentChildren.push({
                 title: t('Interviews'),
-                href: route('hr.recruitment.interviews.index')
+                href: route('hr.recruitment.interviews.index'),
             });
         }
 
-        if ((hasPermission(permissions, 'manage-interview-feedback') || hasPermission(permissions, 'view-interview-feedback'))) {
+        if (hasPermission(permissions, 'manage-offers') || hasPermission(permissions, 'view-offers')) {
             recruitmentChildren.push({
-                title: t('Interview Feedback'),
-                href: route('hr.recruitment.interview-feedback.index')
+                title: t('Offers & Selection'),
+                href: route('hr.recruitment.offers.index'),
             });
         }
 
-        if ((hasPermission(permissions, 'manage-candidate-assessments') || hasPermission(permissions, 'view-candidate-assessments'))) {
+        if (
+            hasPermission(permissions, 'view-job-categories') ||
+            hasPermission(permissions, 'view-job-types') ||
+            hasPermission(permissions, 'view-job-locations') ||
+            hasPermission(permissions, 'view-candidate-sources') ||
+            hasPermission(permissions, 'view-interview-types')
+        ) {
             recruitmentChildren.push({
-                title: t('Candidate Assessments'),
-                href: route('hr.recruitment.candidate-assessments.index')
+                title: t('Settings'),
+                href: route('hr.recruitment.settings.index'),
             });
         }
 
-        if ((hasPermission(permissions, 'manage-offer-templates') || hasPermission(permissions, 'view-offer-templates'))) {
-            recruitmentChildren.push({
-                title: t('Offer Templates'),
-                href: route('hr.recruitment.offer-templates.index')
-            });
-        }
-
-        if ((hasPermission(permissions, 'manage-offers') || hasPermission(permissions, 'view-offers'))) {
-            recruitmentChildren.push({
-                title: t('Offers'),
-                href: route('hr.recruitment.offers.index')
-            });
-        }
-
-        if ((hasPermission(permissions, 'manage-onboarding-checklists') || hasPermission(permissions, 'view-onboarding-checklists'))) {
-            recruitmentChildren.push({
-                title: t('Onboarding Checklists'),
-                href: route('hr.recruitment.onboarding-checklists.index')
-            });
-        }
-
-        if ((hasPermission(permissions, 'manage-checklist-items') || hasPermission(permissions, 'view-checklist-items'))) {
-            recruitmentChildren.push({
-                title: t('Checklist Items'),
-                href: route('hr.recruitment.checklist-items.index')
-            });
-        }
-
-        if ((hasPermission(permissions, 'manage-candidate-onboarding') || hasPermission(permissions, 'view-candidate-onboarding'))) {
-            recruitmentChildren.push({
-                title: t('Candidate Onboarding'),
-                href: route('hr.recruitment.candidate-onboarding.index')
-            });
-        }
-
-        /*
         if (recruitmentChildren.length > 0) {
             items.push({
                 title: t('Recruitment'),
-                icon: Users,
-                children: recruitmentChildren
+                icon: Briefcase,
+                children: recruitmentChildren,
             });
         }
-        */
 
         // Contract Management as separate menu
         const contractChildren = [];
