@@ -98,6 +98,29 @@ export const canFinalizeSalaryPayrollRuns = (userPermissions: string[]) =>
         'manage-any-salary-payroll-runs',
     ]) || hasAnyPermission(userPermissions, ['manage-employee-salaries', 'manage-any-employee-salaries']);
 
+export const canAccessPayslips = (userPermissions: string[]) =>
+    hasAnyPermission(userPermissions, [
+        'view-payslips',
+        'manage-payslips',
+        'manage-any-payslips',
+        'download-payslips',
+        'view-salary-payroll-runs',
+        'manage-salary-payroll-runs',
+        'manage-any-salary-payroll-runs',
+        'finalize-salary-payroll-runs',
+    ]) || canAccessSalaryPayrollRuns(userPermissions);
+
+export const canDownloadPayslips = (userPermissions: string[]) =>
+    hasAnyPermission(userPermissions, [
+        'download-payslips',
+        'manage-payslips',
+        'manage-any-payslips',
+        'view-payslips',
+        'finalize-salary-payroll-runs',
+        'manage-salary-payroll-runs',
+        'manage-any-salary-payroll-runs',
+    ]) || canAccessSalaryPayrollRuns(userPermissions);
+
 export const canApplySalaryPayrollAttendanceExtra = (userPermissions: string[]) =>
     hasAnyPermission(userPermissions, [
         'apply-salary-payroll-attendance-extra',

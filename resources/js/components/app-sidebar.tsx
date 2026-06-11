@@ -36,7 +36,7 @@ import { Input } from '@/components/ui/input';
 import AppLogo from './app-logo';
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { hasPermission, canAccessEntity, canAccessSalaryPayrollEmployee, canAccessSalaryPayrollIncrement, canAccessSalaryPayrollRuns, canAccessEarningDeductionEntry, canAccessPayrollSettings, canAccessSalaryAdvance, canAccessSalaryLoan } from '@/utils/authorization';
+import { hasPermission, canAccessEntity, canAccessSalaryPayrollEmployee, canAccessSalaryPayrollIncrement, canAccessSalaryPayrollRuns, canAccessPayslips, canAccessEarningDeductionEntry, canAccessPayrollSettings, canAccessSalaryAdvance, canAccessSalaryLoan } from '@/utils/authorization';
 import { toast } from '@/components/custom-toast';
 import { getImagePath } from '@/utils/helpers';
 import { cn } from '@/lib/utils';
@@ -333,6 +333,12 @@ export function AppSidebar() {
             salaryPayrollChildren.push({
                 title: t('Generate Payroll'),
                 href: route('hr.salary-payroll.generate.index'),
+            });
+        }
+        if (canAccessPayslips(permissions)) {
+            salaryPayrollChildren.push({
+                title: t('Payslips'),
+                href: route('hr.salary-payroll.payslips.index'),
             });
         }
         if (canAccessEarningDeductionEntry(permissions)) {

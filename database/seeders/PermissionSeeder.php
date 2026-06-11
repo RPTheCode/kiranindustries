@@ -925,14 +925,14 @@ class PermissionSeeder extends Seeder
             ['name' => 'delete-payroll-runs', 'module' => 'payroll_runs', 'label' => 'Delete Payroll Runs', 'description' => 'Can delete payroll runs'],
             ['name' => 'process-payroll-runs', 'module' => 'payroll_runs', 'label' => 'Process Payroll Runs', 'description' => 'Can process payroll runs'],
 
-            // Payslips management
-            ['name' => 'manage-payslips', 'module' => 'payslips', 'label' => 'Manage Payslips', 'description' => 'Can manage payslips'],
-            ['name' => 'manage-any-payslips', 'module' => 'payslips', 'label' => 'Manage All Payslips', 'description' => 'Manage Any Payslips'],
-            ['name' => 'manage-own-payslips', 'module' => 'payslips', 'label' => 'Manage Own Payslips', 'description' => 'Manage Limited Payslips that is created by own'],
-            ['name' => 'view-payslips', 'module' => 'payslips', 'label' => 'View Payslips', 'description' => 'View Payslips'],
-            ['name' => 'create-payslips', 'module' => 'payslips', 'label' => 'Create Payslips', 'description' => 'Can create payslips'],
-            ['name' => 'download-payslips', 'module' => 'payslips', 'label' => 'Download Payslips', 'description' => 'Can download payslips'],
-            ['name' => 'send-payslips', 'module' => 'payslips', 'label' => 'Send Payslips', 'description' => 'Can send payslips via email'],
+            // Salary Payroll — Payslips
+            ['name' => 'manage-payslips', 'module' => 'Salary Payroll', 'label' => 'Manage Payslips', 'description' => 'Full access to employee payslips'],
+            ['name' => 'manage-any-payslips', 'module' => 'Salary Payroll', 'label' => 'Manage All Payslips', 'description' => 'View and manage all employee payslips'],
+            ['name' => 'manage-own-payslips', 'module' => 'Salary Payroll', 'label' => 'View Own Payslip', 'description' => 'View own payslip only'],
+            ['name' => 'view-payslips', 'module' => 'Salary Payroll', 'label' => 'View Payslips', 'description' => 'View all employee payslips'],
+            ['name' => 'create-payslips', 'module' => 'Salary Payroll', 'label' => 'Generate Payslips', 'description' => 'Generate payslip PDFs'],
+            ['name' => 'download-payslips', 'module' => 'Salary Payroll', 'label' => 'Download Payslips', 'description' => 'Download payslip PDF files'],
+            ['name' => 'send-payslips', 'module' => 'Salary Payroll', 'label' => 'Send Payslips', 'description' => 'Send payslips via email'],
 
             // Mobile App
             ['name' => 'access-mobile-app', 'module' => 'Mobile App', 'label' => 'Access Mobile App', 'description' => 'Can login to the employee mobile application'],
@@ -944,7 +944,7 @@ class PermissionSeeder extends Seeder
         ];
 
         foreach ($permissions as $permission) {
-            Permission::firstOrCreate(
+            Permission::updateOrCreate(
                 ['name' => $permission['name'], 'guard_name' => 'web'],
                 [
                     'module' => $permission['module'],

@@ -180,7 +180,7 @@ class SalaryPayrollPayslipService
         return $filePath;
     }
 
-    public function downloadPath(SalaryPayrollPayslip $payslip): string
+    public function resolveStoredPath(SalaryPayrollPayslip $payslip): string
     {
         if (! $payslip->file_path || ! Storage::disk('public')->exists($payslip->file_path)) {
             $entry = $payslip->entry ?? SalaryPayrollEntry::find($payslip->salary_payroll_entry_id);
@@ -190,9 +190,26 @@ class SalaryPayrollPayslipService
             $payslip = $this->ensurePayslip($entry);
         }
 
-        $payslip->update(['downloaded_at' => now()]);
+        if (! $payslip->file_path || ! Storage::disk('public')->exists($payslip->file_path)) {
+            throw new \InvalidArgumentException(__('Payslip file not found.'));
+        }
 
         return Storage::disk('public')->path($payslip->file_path);
+    }
+
+    public function previewPathForEntry(SalaryPayrollEntry $entry): string
+    {
+        $payslip = $this->ensurePayslip($entry);
+
+        return $this->resolveStoredPath($payslip);
+    }
+
+    public function downloadPath(SalaryPayrollPayslip $payslip): string
+    {
+        $path = $this->resolveStoredPath($payslip);
+        $payslip->update(['downloaded_at' => now()]);
+
+        return $path;
     }
 
     public function downloadFilename(SalaryPayrollPayslip $payslip): string
