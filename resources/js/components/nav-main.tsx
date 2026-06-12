@@ -24,6 +24,7 @@ import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useTranslation } from 'react-i18next';
+import { NavQuickAccessPin } from '@/components/nav-quick-access-pin';
 
 function navTooltipContent(item: NavItem) {
     if (!item.description) {
@@ -368,7 +369,7 @@ export function NavMain({
                 const leafActive = isLeafActive(child);
 
                 return (
-                    <SidebarMenuSubItem key={child.title}>
+                    <SidebarMenuSubItem key={child.title} className="group/nav-item">
                         <SidebarMenuSubButton
                             isActive={leafActive}
                             href={child.href || '#'}
@@ -378,11 +379,12 @@ export function NavMain({
                             onClick={(e) => handleNavClick(child.href, e)}
                             className={cn(
                                 subLinkClass(leafActive),
-                                effectivePosition === 'right' ? 'justify-end text-right' : 'justify-start text-left'
+                                effectivePosition === 'right' ? 'justify-end text-right' : 'justify-start text-left',
                             )}
                         >
                             {renderSubMenuIcon(child, leafActive)}
-                            {renderTitle(child.title, child)}
+                            <span className="min-w-0 flex-1">{renderTitle(child.title, child)}</span>
+                            {!child.target && <NavQuickAccessPin href={child.href} title={child.title} />}
                         </SidebarMenuSubButton>
                     </SidebarMenuSubItem>
                 );
@@ -467,7 +469,7 @@ export function NavMain({
         const leafActive = isLeafActive(item);
 
         return (
-            <SidebarMenuItem key={item.title}>
+            <SidebarMenuItem key={item.title} className="group/nav-item">
                 <SidebarMenuButton asChild isActive={leafActive} tooltip={{ children: navTooltipContent(item) }}>
                     {item.target === '_blank' ? (
                         <a
@@ -476,7 +478,7 @@ export function NavMain({
                             rel="noopener noreferrer"
                             className={cn(
                                 'flex items-center gap-2',
-                                effectivePosition === 'right' ? 'justify-end text-right' : 'justify-start text-left'
+                                effectivePosition === 'right' ? 'justify-end text-right' : 'justify-start text-left',
                             )}
                         >
                             {effectivePosition === 'right' ? (
@@ -488,7 +490,7 @@ export function NavMain({
                                 <>
                                     {item.icon && <item.icon className={menuIconClass(leafActive)} />}
                                     {state !== 'collapsed' && (
-                                        <span className="min-w-0 truncate">{renderTitle(item.title, item)}</span>
+                                        <span className="min-w-0 flex-1 truncate">{renderTitle(item.title, item)}</span>
                                     )}
                                 </>
                             )}
@@ -501,19 +503,27 @@ export function NavMain({
                             onClick={(e) => handleNavClick(item.href, e)}
                             className={cn(
                                 'flex items-center gap-2',
-                                effectivePosition === 'right' ? 'justify-end text-right' : 'justify-start text-left'
+                                effectivePosition === 'right' ? 'justify-end text-right' : 'justify-start text-left',
                             )}
                         >
                             {effectivePosition === 'right' ? (
                                 <>
-                                    {state !== 'collapsed' && renderTitle(item.title, item)}
+                                    {state !== 'collapsed' && (
+                                        <span className="min-w-0 flex-1">{renderTitle(item.title, item)}</span>
+                                    )}
                                     {item.icon && <item.icon className={menuIconClass(leafActive)} />}
+                                    {state !== 'collapsed' && (
+                                        <NavQuickAccessPin href={item.href} title={item.title} />
+                                    )}
                                 </>
                             ) : (
                                 <>
                                     {item.icon && <item.icon className={menuIconClass(leafActive)} />}
                                     {state !== 'collapsed' && (
-                                        <span className="min-w-0 truncate">{renderTitle(item.title, item)}</span>
+                                        <span className="min-w-0 flex-1 truncate">{renderTitle(item.title, item)}</span>
+                                    )}
+                                    {state !== 'collapsed' && (
+                                        <NavQuickAccessPin href={item.href} title={item.title} />
                                     )}
                                 </>
                             )}

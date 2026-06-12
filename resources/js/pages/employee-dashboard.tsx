@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { usePage, router } from '@inertiajs/react';
 import { toast } from '@/components/custom-toast';
 import { format } from 'date-fns';
+import { DashboardShortcuts } from '@/components/dashboard/DashboardShortcuts';
 
 interface EmployeeDashboardData {
   stats: {
@@ -168,6 +169,8 @@ export default function EmployeeDashboard({ dashboardData }: { dashboardData: Em
       actions={pageActions}
     >
       <div className="space-y-6">
+        <DashboardShortcuts />
+
         {/* Welcome Message */}
         <Card>
           <CardContent className="p-6">

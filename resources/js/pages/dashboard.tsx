@@ -9,6 +9,7 @@ import { Link, router } from '@inertiajs/react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { format, subDays } from 'date-fns';
 import { ChartLegend, ChartTooltip, DashboardPieChart, HIRING_BAR_COLOR } from '@/lib/dashboard-charts';
+import { DashboardShortcuts } from '@/components/dashboard/DashboardShortcuts';
 
 interface CompanyDashboardData {
   stats: {
@@ -200,6 +201,8 @@ export default function Dashboard({ dashboardData }: { dashboardData: CompanyDas
       noPadding
     >
       <div className="space-y-2.5 px-4 pb-4 pt-1 sm:px-6">
+        <DashboardShortcuts />
+
         <div className="overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-x sm:divide-y-0 dark:divide-slate-800">
             {stats.mispunchCount > 0 ? (

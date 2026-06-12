@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DashboardShortcutController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\PlanController;
 use App\Http\Controllers\PlanOrderController;
@@ -425,6 +426,8 @@ Route::middleware(['auth', 'verified', 'setting'])->group(function () {
     // All other routes require plan access check
     Route::middleware('plan.access')->group(function () {
         Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
+        Route::put('dashboard/shortcuts', [DashboardShortcutController::class, 'update'])->name('dashboard.shortcuts.update');
+        Route::put('dashboard/shortcuts/visibility', [DashboardShortcutController::class, 'updateVisibility'])->name('dashboard.shortcuts.visibility');
         Route::get('dashboard/redirect', [DashboardController::class, 'redirectToFirstAvailablePage'])->name('dashboard.redirect');
 
         Route::get('media-library', function () {

@@ -131,7 +131,16 @@ class HandleInertiaRequests extends Middleware
                 'error' => $request->session()->get('error'),
             ],
             'globalSettings' => $globalSettings,
-            'is_demo' => env('IS_DEMO', false)
+            'is_demo' => env('IS_DEMO', false),
+            'dashboard_shortcuts' => fn () => $request->user()
+                ? app(\App\Services\Nav\DashboardShortcutService::class)->getForUser($request->user())
+                : [],
+            'dashboard_shortcut_suggestions' => fn () => $request->user()
+                ? app(\App\Services\Nav\DashboardShortcutService::class)->getSuggestedIds($request->user())
+                : [],
+            'dashboard_shortcuts_hidden' => fn () => $request->user()
+                ? app(\App\Services\Nav\DashboardShortcutService::class)->isHiddenForUser($request->user())
+                : false,
         ];
     }
 }

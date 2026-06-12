@@ -6,6 +6,7 @@ import { type BreadcrumbItem } from '@/types';
 import { type PropsWithChildren, type ReactNode } from 'react';
 import { usePage } from '@inertiajs/react';
 import { ForceCreateBranchModal } from '@/components/hr/branches/force-create-branch-modal';
+import { QuickAccessHotkeys } from '@/hooks/use-quick-access-hotkeys';
 
 import { TestingNotification } from '@/components/testing-notification';
 
@@ -20,6 +21,7 @@ export default function AppSidebarLayout({
     return (
         <AppShell variant="sidebar">
             <TestingNotification />
+            {auth?.user && <QuickAccessHotkeys />}
             <AppSidebar />
             <AppContent variant="sidebar" className="min-w-0">
                 <div className="flex min-h-screen w-full min-w-0 flex-col">
