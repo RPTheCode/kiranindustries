@@ -1,722 +1,569 @@
 // pages/hr/employees/show.tsx
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { PageTemplate } from '@/components/page-template';
 import { usePage, router } from '@inertiajs/react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { hasPermission } from '@/utils/authorization';
 import { CrudDeleteModal } from '@/components/CrudDeleteModal';
 import { toast } from '@/components/custom-toast';
 import { useInitials } from '@/hooks/use-initials';
 import { useTranslation } from 'react-i18next';
-import { Edit, Trash2, Download, FileText, Calendar, Phone, Mail, MapPin, Building, Briefcase, CreditCard, User, Users, Lock, Unlock, ArrowLeft, Check, X, Eye, ShieldCheck, Landmark, Plus } from 'lucide-react';
+import {
+  Edit,
+  Trash2,
+  Download,
+  FileText,
+  Phone,
+  Mail,
+  MapPin,
+  Briefcase,
+  User,
+  Users,
+  ArrowLeft,
+  Eye,
+  Landmark,
+  Copy,
+} from 'lucide-react';
 import { getImagePath } from '@/utils/helpers';
+import { cn } from '@/lib/utils';
+
+type InfoRow = { label: string; value: ReactNode };
+
+function isEmpty(value: ReactNode) {
+  return value === null || value === undefined || value === '' || value === '—';
+}
+
+function InfoTable({ rows, hideEmpty = true }: { rows: InfoRow[]; hideEmpty?: boolean }) {
+  const visible = hideEmpty ? rows.filter((r) => !isEmpty(r.value)) : rows;
+
+  if (visible.length === 0) {
+    return <p className="text-xs text-slate-400 py-2">—</p>;
+  }
+
+  return (
+    <div className="divide-y divide-slate-100">
+      {visible.map((row, i) => (
+        <div key={i} className="grid grid-cols-[minmax(110px,32%)_1fr] gap-x-3 py-1.5 text-sm leading-snug">
+          <span className="text-xs text-slate-500">{row.label}</span>
+          <span className="font-medium text-slate-900 break-words">{row.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Panel({
+  title,
+  children,
+  className,
+}: {
+  title: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn('rounded-lg border border-slate-200/80 bg-white dark:bg-gray-900', className)}>
+      <div className="px-3 py-2 border-b border-slate-100 bg-slate-50/60">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">{title}</h3>
+      </div>
+      <div className="px-3 py-2">{children}</div>
+    </div>
+  );
+}
+
+function FlagPill({ label, on, yesLabel, noLabel }: { label: string; on: boolean; yesLabel: string; noLabel: string }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium',
+        on ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'bg-slate-100 text-slate-500',
+      )}
+    >
+      {label}: {on ? yesLabel : noLabel}
+    </span>
+  );
+}
 
 export default function EmployeeShow() {
   const { t } = useTranslation();
-  const { auth, employee, workHistory, relatedEmployments, employeeSalary, salaryComponents = [] } = usePage().props as any;
+  const { auth, employee, employeeSalary, salaryComponents = [] } = usePage().props as any;
   const permissions = auth?.permissions || [];
   const getInitials = useInitials();
+  const emp = employee?.employee;
+  /** Route key for show/edit/update/toggle — employees table id (not user id). */
+  const employeeRecordId = emp?.id as number | undefined;
+  const userId = employee?.id as number;
 
-  // State
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('identity');
+  const [activeTab, setActiveTab] = useState('overview');
+  const [showEmptyFields, setShowEmptyFields] = useState(false);
+
+  const formatDate = (date?: string | null) => {
+    if (!date) return null;
+    return window.appSettings?.formatDateTime(date, false) || new Date(date).toLocaleDateString();
+  };
+
+  const copyText = (text: string, label: string) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => toast.success(t(':label copied', { label })));
+  };
+
+  const weekOffLabel = () => {
+    if (!emp?.week_off) return null;
+    if (emp.week_off_type === 'monthly' || (emp.week_off || '').startsWith('{')) {
+      try {
+        const parsed = JSON.parse(emp.week_off);
+        const allDays = Object.values(parsed).flat() as string[];
+        const uniqueDays = [...new Set(allDays.map((d) => d.substring(0, 3)))].join(', ');
+        return `${t('Monthly')} (${uniqueDays})`;
+      } catch {
+        return emp.week_off;
+      }
+    }
+    return emp.week_off;
+  };
+
+  const shiftLabel = emp?.shift?.short_code || emp?.shift?.name || null;
+
+  const earnings = salaryComponents.filter((c: any) => c.type === 'earning');
+  const deductions = salaryComponents.filter((c: any) => c.type === 'deduction');
+
+  const netPayable = (
+    parseFloat(emp?.gross_salary || '0') -
+    Object.keys(employeeSalary?.components || {}).reduce((acc, id) => {
+      const comp = salaryComponents.find((c: any) => c.id.toString() === id.toString());
+      return comp?.type === 'deduction' ? acc + parseFloat(employeeSalary.components[id] || '0') : acc;
+    }, 0)
+  ).toFixed(2);
+
+  const canToggleStatus =
+    hasPermission(permissions, 'toggle-status-employees') || hasPermission(permissions, 'edit-employees');
 
   const handleEdit = () => {
-    router.get(route('hr.employees.edit', employee.id));
+    if (!employeeRecordId) {
+      toast.error(t('Employee record not found'));
+      return;
+    }
+    router.get(route('hr.employees.edit', employeeRecordId));
   };
 
   const handleDeleteConfirm = () => {
     toast.loading(t('Deleting employee...'));
-
-    router.delete(route('hr.employees.destroy', employee.id), {
+    router.delete(route('hr.employees.destroy', userId), {
       onSuccess: (page: any) => {
         toast.dismiss();
-        if (page.props.flash.success) {
-          toast.success(t(page.props.flash.success));
-        } else if (page.props.flash.error) {
-          toast.error(t(page.props.flash.error));
-        }
+        if (page.props.flash.success) toast.success(t(page.props.flash.success));
+        else if (page.props.flash.error) toast.error(t(page.props.flash.error));
         router.get(route('hr.employees.index'));
       },
       onError: (errors) => {
         toast.dismiss();
-        if (typeof errors === 'string') {
-          toast.error(t(errors));
-        } else {
-          toast.error(t('Failed to delete employee: {{errors}}', { errors: Object.values(errors).join(', ') }));
-        }
-      }
+        toast.error(typeof errors === 'string' ? t(errors) : t('Failed to delete employee'));
+      },
     });
   };
 
   const handleToggleStatus = () => {
+    if (!employeeRecordId) return;
     const newStatus = employee.status === 'active' ? 'inactive' : 'active';
-    toast.loading(`${newStatus === 'active' ? t('Activating') : t('Deactivating')} employee...`);
-
-    router.put(route('hr.employees.toggle-status', employee.employee?.id || employee.id), {}, {
-      onSuccess: (page) => {
+    toast.loading(newStatus === 'active' ? t('Activating employee...') : t('Deactivating employee...'));
+    router.put(route('hr.employees.toggle-status', employeeRecordId), {}, {
+      onSuccess: (page: any) => {
         toast.dismiss();
-        if (page.props.flash.success) {
-          toast.success(t(page.props.flash.success));
-        } else if (page.props.flash.error) {
-          toast.error(t(page.props.flash.error));
-        }
+        if (page.props.flash.success) toast.success(t(page.props.flash.success));
+        else if (page.props.flash.error) toast.error(t(page.props.flash.error));
       },
-      onError: (errors) => {
+      onError: () => {
         toast.dismiss();
-        if (typeof errors === 'string') {
-          toast.error(t(errors));
-        } else {
-          toast.error(t('Failed to update employee status: {{errors}}', { errors: Object.values(errors).join(', ') }));
-        }
-      }
+        toast.error(t('Failed to update employee status'));
+      },
     });
   };
 
   const handleDeleteDocument = (documentId: number) => {
     toast.loading(t('Deleting document...'));
-
-    router.delete(route('hr.employees.documents.destroy', [employee.id, documentId]), {
-      onSuccess: (page) => {
+    router.delete(route('hr.employees.documents.destroy', [userId, documentId]), {
+      onSuccess: (page: any) => {
         toast.dismiss();
-        if (page.props.flash.success) {
-          toast.success(t(page.props.flash.success));
-        } else if (page.props.flash.error) {
-          toast.error(t(page.props.flash.error));
-        }
+        if (page.props.flash.success) toast.success(t(page.props.flash.success));
+        else if (page.props.flash.error) toast.error(t(page.props.flash.error));
       },
-      onError: (errors) => {
+      onError: () => {
         toast.dismiss();
-        if (typeof errors === 'string') {
-          toast.error(t(errors));
-        } else {
-          toast.error(t('Failed to delete document: {{errors}}', { errors: Object.values(errors).join(', ') }));
-        }
-      }
+        toast.error(t('Failed to delete document'));
+      },
     });
   };
 
-  const handleDocumentVerification = (documentId: number, status: 'verified' | 'rejected') => {
-    const action = status === 'verified' ? 'approve' : 'reject';
-    toast.loading(t(`${status === 'verified' ? 'Approving' : 'Rejecting'} document...`));
-
-    router.put(route(`hr.employees.documents.${action}`, [employee.id, documentId]), {}, {
-      onSuccess: (page) => {
-        toast.dismiss();
-        if (page.props.flash?.success) {
-          toast.success(t(page.props.flash.success));
-        } else {
-          toast.success(t(`Document ${status === 'verified' ? 'approved' : 'rejected'} successfully`));
-        }
-      },
-      onError: (errors) => {
-        toast.dismiss();
-        const errorMessage = errors?.message || Object.values(errors)[0] || `Failed to ${action} document`;
-        toast.error(t(errorMessage));
-      }
-    });
-  };
-
-  // Define page actions
   const pageActions = [
     {
-      label: t('Back to Employees'),
-      icon: <ArrowLeft className="h-4 w-4 mr-2" />,
-      variant: 'outline',
-      onClick: () => router.get(route('hr.employees.index'))
-    }
+      label: t('Back'),
+      icon: <ArrowLeft className="h-3.5 w-3.5" />,
+      variant: 'outline' as const,
+      onClick: () => router.get(route('hr.employees.index')),
+    },
   ];
+
+  if (hasPermission(permissions, 'edit-employees')) {
+    pageActions.push({
+      label: t('Edit'),
+      icon: <Edit className="h-3.5 w-3.5" />,
+      variant: 'default' as const,
+      onClick: handleEdit,
+    });
+  }
+
+  if (hasPermission(permissions, 'view-employees')) {
+    pageActions.push({
+      label: t('PDF'),
+      icon: <FileText className="h-3.5 w-3.5" />,
+      variant: 'outline' as const,
+      onClick: () => window.open(route('hr.employees.export', userId), '_blank'),
+    });
+  }
+
+  if (hasPermission(permissions, 'delete-employees')) {
+    pageActions.push({
+      label: t('Delete'),
+      icon: <Trash2 className="h-3.5 w-3.5" />,
+      variant: 'outline' as const,
+      onClick: () => setIsDeleteModalOpen(true),
+    });
+  }
 
   const breadcrumbs = [
     { title: t('Dashboard'), href: route('dashboard') },
     { title: t('Employees'), href: route('hr.employees.index') },
-    { title: employee?.name || t('Employee Details') }
+    { title: emp?.employee_id ? `${emp.employee_id} · ${employee?.name}` : employee?.name || t('Employee') },
   ];
+
+  const workRows: InfoRow[] = [
+    { label: t('Branch'), value: emp?.branch?.name },
+    { label: t('Department'), value: emp?.department?.name },
+    { label: t('Designation'), value: emp?.designation?.name },
+    { label: t('Category'), value: emp?.category?.name },
+    { label: t('Section'), value: emp?.section?.name },
+    { label: t('Shift'), value: shiftLabel },
+    { label: t('Week Off'), value: weekOffLabel() },
+    { label: t('Working Days'), value: emp?.working_days },
+    { label: t('Joining Date'), value: formatDate(emp?.date_of_joining) },
+    { label: t('Confirm Date'), value: formatDate(emp?.confirm_date) },
+    { label: t('Employment Status'), value: emp?.employment_status },
+    { label: t('P / OP Status'), value: emp?.po_status },
+    { label: t('Daily Worker'), value: emp?.daily_option ? t('Yes') : t('No') },
+    { label: t('HOD'), value: emp?.hod_flag ? t('Yes') : t('No') },
+    { label: t('Education'), value: emp?.education },
+    { label: t('Experience'), value: emp?.experience },
+  ];
+
+  const personalRows: InfoRow[] = [
+    { label: t('Father Name'), value: emp?.father_name },
+    { label: t('Gender'), value: emp?.gender },
+    { label: t('Date of Birth'), value: formatDate(emp?.date_of_birth) },
+    { label: t('Marital Status'), value: emp?.marital_status },
+    { label: t('Wedding Date'), value: formatDate(emp?.wedding_date) },
+    { label: t('Blood Group'), value: emp?.blood_group },
+    { label: t('Height'), value: emp?.height },
+    { label: t('Weight'), value: emp?.weight ? `${emp.weight} kg` : null },
+  ];
+
+  const pageTitle = emp?.employee_id
+    ? `${employee?.name} (${emp.employee_id})`
+    : employee?.name || t('Employee');
 
   return (
     <PageTemplate
-      title={employee?.name || t("Employee Details")}
-      url={`/employees/${employee?.id}`}
+      title={pageTitle}
+      url={`/employees/${employeeRecordId ?? userId}`}
       actions={pageActions}
       breadcrumbs={breadcrumbs}
+      noPadding
     >
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Employee Profile Card */}
-        <Card className="lg:col-span-1 h-fit border-none shadow-lg overflow-hidden bg-white dark:bg-gray-800 rounded-2xl">
-          <div className="h-32 bg-primary relative">
-            <div className="absolute -bottom-12 left-1/2 -translate-x-1/2">
-              <div className="h-28 w-28 rounded-full bg-white dark:bg-gray-800 p-1 shadow-xl overflow-hidden">
-                <div className="h-full w-full rounded-full bg-primary/10 text-primary flex items-center justify-center text-3xl font-bold overflow-hidden">
-                  {employee.avatar ? (
-                    <img src={getImagePath(employee.avatar)} alt={employee.name} className="h-full w-full object-cover" />
-                  ) : (
-                    getInitials(employee.name)
-                  )}
-                </div>
-              </div>
-            </div>
+      {/* Compact profile strip */}
+      <div className="rounded-lg border border-slate-200/80 bg-white dark:bg-gray-900 mb-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
+          <div className="h-11 w-11 shrink-0 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-bold overflow-hidden">
+            {employee.avatar ? (
+              <img src={getImagePath(employee.avatar)} alt={employee.name} className="h-full w-full object-cover" />
+            ) : (
+              getInitials(employee.name)
+            )}
           </div>
-          
-          <CardContent className="pt-16 pb-6 px-6 text-center">
-            <h2 className="text-xl font-extrabold mb-1 text-gray-900 dark:text-white">{employee.name}</h2>
-            <p className="text-sm font-medium text-primary mb-4">{employee.employee?.designation?.name || '-'}</p>
-            
+
+          {emp?.employee_id && (
             <button
-              onClick={() => { const canToggle = hasPermission(permissions, 'toggle-status-employees') || hasPermission(permissions, 'edit-employees'); if(canToggle) handleToggleStatus(); }}
-              title={hasPermission(permissions, 'toggle-status-employees') || hasPermission(permissions, 'edit-employees') ? (employee.status === 'active' ? t('Click to Deactivate') : t('Click to Activate')) : t('No permission to change status')}
-              disabled={!(hasPermission(permissions, 'toggle-status-employees') || hasPermission(permissions, 'edit-employees'))}
-              className={`inline-flex items-center gap-1.5 select-none border-none bg-transparent mb-6 mx-auto transition-transform ${hasPermission(permissions, 'toggle-status-employees') || hasPermission(permissions, 'edit-employees') ? 'cursor-pointer hover:scale-105' : 'cursor-not-allowed opacity-70'}`}
+              type="button"
+              onClick={() => copyText(String(emp.employee_id), t('Emp code'))}
+              className="inline-flex items-center gap-1 rounded border border-primary/25 bg-primary/10 px-2 py-0.5 font-mono text-sm font-bold text-primary hover:bg-primary/15"
+              title={t('Click to copy')}
             >
-              <span className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors duration-200 ease-in-out ${
-                employee.status === 'active' ? 'bg-emerald-500' : 'bg-slate-300'
-              }`}>
-                <span className={`inline-block h-2.5 w-2.5 rounded-full bg-white shadow transition-transform duration-200 ease-in-out ${
-                  employee.status === 'active' ? 'translate-x-3.5' : 'translate-x-0.5'
-                }`} />
-              </span>
-              <span className={`text-[10px] font-bold uppercase tracking-wide ${
-                employee.status === 'active' ? 'text-emerald-600' : 'text-slate-400'
-              }`}>
-                {employee.status === 'active' ? t('Active') : t('Inactive')}
-              </span>
+              {emp.employee_id}
+              <Copy className="h-3 w-3 opacity-60" />
             </button>
+          )}
 
-            <div className="w-full space-y-4 pt-4 border-t border-gray-100 dark:border-gray-700">
-              <div className="flex items-center group">
-                <div className="h-8 w-8 rounded-lg bg-gray-50 dark:bg-gray-900 flex items-center justify-center mr-3 group-hover:bg-primary/10 transition-colors">
-                  <User className="h-4 w-4 text-primary" />
-                </div>
-                <div className="text-left">
-                  <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-tighter">{t('Employee ID')}</p>
-                  <p className="text-sm font-semibold">{employee.employee?.employee_id || '-'}</p>
-                </div>
-              </div>
+          <button
+            type="button"
+            onClick={() => canToggleStatus && handleToggleStatus()}
+            disabled={!canToggleStatus}
+            className={cn(
+              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase',
+              employee.status === 'active'
+                ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+                : 'bg-slate-100 text-slate-500 ring-1 ring-slate-200',
+              canToggleStatus && 'cursor-pointer hover:opacity-80',
+            )}
+          >
+            <span className={cn('h-1.5 w-1.5 rounded-full', employee.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400')} />
+            {employee.status === 'active' ? t('Active') : t('Inactive')}
+          </button>
 
-              <div className="flex items-center group">
-                <div className="h-8 w-8 rounded-lg bg-gray-50 dark:bg-gray-900 flex items-center justify-center mr-3 group-hover:bg-primary/10 transition-colors">
-                  <Mail className="h-4 w-4 text-primary" />
-                </div>
-                <div className="text-left overflow-hidden">
-                  <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-tighter">{t('Email Address')}</p>
-                  <p className="text-sm font-semibold truncate max-w-[180px]">{employee.email}</p>
-                </div>
-              </div>
+          <span className="hidden sm:inline text-slate-300">|</span>
 
-              {employee.employee?.phone && (
-                <div className="flex items-center group">
-                  <div className="h-8 w-8 rounded-lg bg-gray-50 dark:bg-gray-900 flex items-center justify-center mr-3 group-hover:bg-primary/10 transition-colors">
-                    <Phone className="h-4 w-4 text-primary" />
-                  </div>
-                  <div className="text-left">
-                    <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-tighter">{t('Phone Number')}</p>
-                    <p className="text-sm font-semibold">{employee.employee.phone}</p>
-                  </div>
-                </div>
-              )}
+          <div className="flex flex-wrap items-center gap-1.5 min-w-0 text-xs text-slate-600">
+            {emp?.designation?.name && (
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-700">{emp.designation.name}</span>
+            )}
+            {emp?.department?.name && (
+              <span className="rounded bg-slate-100 px-1.5 py-0.5">{emp.department.name}</span>
+            )}
+            {emp?.category?.name && (
+              <span className="rounded bg-slate-100 px-1.5 py-0.5">{emp.category.name}</span>
+            )}
+            {shiftLabel && <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-700">{shiftLabel}</span>}
+          </div>
 
-              <div className="flex items-center group">
-                <div className="h-8 w-8 rounded-lg bg-gray-50 dark:bg-gray-900 flex items-center justify-center mr-3 group-hover:bg-primary/10 transition-colors">
-                  <Briefcase className="h-4 w-4 text-primary" />
-                </div>
-                <div className="text-left">
-                  <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-tighter">{t('Department')}</p>
-                  <p className="text-sm font-semibold">{employee.employee?.department?.name || '-'}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center group">
-                <div className="h-8 w-8 rounded-lg bg-gray-50 dark:bg-gray-900 flex items-center justify-center mr-3 group-hover:bg-primary/10 transition-colors">
-                  <Check className="h-4 w-4 text-primary" />
-                </div>
-                <div className="text-left">
-                  <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-tighter">{t('Joined Date')}</p>
-                  <p className="text-sm font-semibold">
-                    {employee.employee?.date_of_joining ? (window.appSettings?.formatDateTime(employee.employee.date_of_joining, false) || new Date(employee.employee.date_of_joining).toLocaleDateString()) : '-'}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Employee Details Tabs */}
-        <div className="lg:col-span-3">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-2 md:grid-cols-3 lg:grid-cols-5 mb-8 h-auto p-1 bg-gray-100 dark:bg-gray-900/50 rounded-xl">
-              <TabsTrigger value="identity" className="rounded-lg py-2.5 data-[state=active]:bg-white dark:data-[state=active]:bg-gray-800 data-[state=active]:shadow-sm transition-all duration-200">
-                <User className="h-4 w-4 mr-2" />
-                {t('Identity')}
-              </TabsTrigger>
-              <TabsTrigger value="contact" className="rounded-lg py-2.5 data-[state=active]:bg-white dark:data-[state=active]:bg-gray-800 data-[state=active]:shadow-sm transition-all duration-200">
-                <MapPin className="h-4 w-4 mr-2" />
-                {t('Contact')}
-              </TabsTrigger>
-              <TabsTrigger value="career" className="rounded-lg py-2.5 data-[state=active]:bg-white dark:data-[state=active]:bg-gray-800 data-[state=active]:shadow-sm transition-all duration-200">
-                <Briefcase className="h-4 w-4 mr-2" />
-                {t('Career')}
-              </TabsTrigger>
-              <TabsTrigger value="finance" className="rounded-lg py-2.5 data-[state=active]:bg-white dark:data-[state=active]:bg-gray-800 data-[state=active]:shadow-sm transition-all duration-200">
-                <CreditCard className="h-4 w-4 mr-2" />
-                {t('Finance')}
-              </TabsTrigger>
-              <TabsTrigger value="final" className="rounded-lg py-2.5 data-[state=active]:bg-white dark:data-[state=active]:bg-gray-800 data-[state=active]:shadow-sm transition-all duration-200">
-                <ShieldCheck className="h-4 w-4 mr-2" />
-                {t('Final')}
-              </TabsTrigger>
-            </TabsList>
-
-            {/* IDENTITY TAB: Step 1 */}
-            <TabsContent value="identity" className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <Card className="border-none shadow-md">
-                <CardHeader className="bg-slate-50/50 border-b border-slate-100">
-                  <CardTitle className="text-base font-bold flex items-center gap-2">
-                    <User className="h-5 w-5 text-primary" />
-                    {t('Identity & Profile')}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-6">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Full Name')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.name}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Father Name')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.father_name || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Gender')}</h4>
-                      <p className="text-sm font-bold text-slate-800 capitalize">{employee.employee?.gender || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Date of Birth')}</h4>
-                      <p className="text-sm font-bold text-slate-800">
-                        {employee.employee?.date_of_birth ? (window.appSettings?.formatDateTime(employee.employee.date_of_birth, false) || new Date(employee.employee.date_of_birth).toLocaleDateString()) : '-'}
-                      </p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Marital Status')}</h4>
-                      <p className="text-sm font-bold text-slate-800 capitalize">{employee.employee?.marital_status || '-'}</p>
-                    </div>
-                    {employee.employee?.wedding_date && (
-                      <div className="space-y-1">
-                        <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Wedding Date')}</h4>
-                        <p className="text-sm font-bold text-slate-800">
-                          {window.appSettings?.formatDateTime(employee.employee.wedding_date, false) || new Date(employee.employee.wedding_date).toLocaleDateString()}
-                        </p>
-                      </div>
-                    )}
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Blood Group')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.blood_group || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Height')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.height ? `${employee.employee.height}` : '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Weight')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.weight ? `${employee.employee.weight} kg` : '-'}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* CONTACT TAB: Step 2 */}
-            <TabsContent value="contact" className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <Card className="border-none shadow-md">
-                <CardHeader className="bg-slate-50/50 border-b border-slate-100">
-                  <CardTitle className="text-base font-bold flex items-center gap-2">
-                    <MapPin className="h-5 w-5 text-primary" />
-                    {t('Contact & Identity')}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <div className="space-y-6">
-                      <h3 className="text-xs font-black uppercase text-primary tracking-widest border-b border-slate-100 pb-2">{t('Addresses')}</h3>
-                      <div className="grid grid-cols-1 gap-4">
-                        <div className="space-y-1">
-                          <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Permanent Address')}</h4>
-                          <p className="text-sm font-medium text-slate-700">{employee.employee?.address_line_1 || employee.employee?.permanent_address || '-'}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Local Address')}</h4>
-                          <p className="text-sm font-medium text-slate-700">{employee.employee?.address_line_2 || '-'}</p>
-                        </div>
-                        <div className="grid grid-cols-3 gap-4">
-                          <div className="space-y-1">
-                            <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('City')}</h4>
-                            <p className="text-sm font-bold text-slate-800">{employee.employee?.city || '-'}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('State')}</h4>
-                            <p className="text-sm font-bold text-slate-800">{employee.employee?.state || '-'}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Pincode')}</h4>
-                            <p className="text-sm font-bold text-slate-800">{employee.employee?.postal_code || '-'}</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-6">
-                      <h3 className="text-xs font-black uppercase text-primary tracking-widest border-b border-slate-100 pb-2">{t('Identity & Reach')}</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                          <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Email')}</h4>
-                          <p className="text-sm font-bold text-slate-800 truncate">{employee.email}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Phone')}</h4>
-                          <p className="text-sm font-bold text-slate-800">{employee.employee?.phone || '-'}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Emergency Contact')}</h4>
-                          <p className="text-sm font-bold text-slate-800">{employee.employee?.phone_2 || '-'}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('PAN Number')}</h4>
-                          <p className="text-sm font-bold text-slate-800 uppercase">{employee.employee?.pan_card_number || '-'}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Aadhaar Number')}</h4>
-                          <p className="text-sm font-bold text-slate-800">{employee.employee?.aadhar_card_number || '-'}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Driving License')}</h4>
-                          <p className="text-sm font-bold text-slate-800">{employee.employee?.driving_license || employee.employee?.driving_licence || '-'}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* CAREER TAB: Step 3 */}
-            <TabsContent value="career" className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <Card className="border-none shadow-md">
-                <CardHeader className="bg-slate-50/50 border-b border-slate-100">
-                  <CardTitle className="text-base font-bold flex items-center gap-2">
-                    <Briefcase className="h-5 w-5 text-primary" />
-                    {t('Career & Employment')}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-6">
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Branch')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.branch?.name || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Department')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.department?.name || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Designation')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.designation?.name || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Category')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.category?.name || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Section')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.section?.name || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Shift')}</h4>
-                      <p className="text-sm font-bold text-slate-800">
-                        {employee.employee?.shift ? `${employee.employee.shift.name}` : '-'}
-                      </p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Individual Week Off')}</h4>
-                      <p className="text-sm font-bold text-slate-800">
-                        {(() => {
-                          if (!employee.employee?.week_off) return '-';
-                          if (employee.employee?.week_off_type === 'monthly' || (employee.employee?.week_off || '').startsWith('{')) {
-                              try {
-                                  const parsed = JSON.parse(employee.employee.week_off);
-                                  const allDays = Object.values(parsed).flat() as string[];
-                                  const uniqueDays = [...new Set(allDays.map(d => d.substring(0, 3)))].join(', ');
-                                  return `${t('Monthly')} (${uniqueDays})`;
-                              } catch(e) { return employee.employee.week_off; }
-                          }
-                          return employee.employee.week_off;
-                        })()}
-                      </p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Joining Date')}</h4>
-                      <p className="text-sm font-bold text-slate-800">
-                        {employee.employee?.date_of_joining ? (window.appSettings?.formatDateTime(employee.employee.date_of_joining, false) || new Date(employee.employee.date_of_joining).toLocaleDateString()) : '-'}
-                      </p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Confirm Date')}</h4>
-                      <p className="text-sm font-bold text-primary">
-                        {employee.employee?.confirm_date ? (window.appSettings?.formatDateTime(employee.employee.confirm_date, false) || new Date(employee.employee.confirm_date).toLocaleDateString()) : '-'}
-                      </p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Employment Status')}</h4>
-                      <p className="text-sm font-bold text-slate-800 capitalize">{employee.employee?.employment_status || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Education')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.education || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Experience')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.experience || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Status (P/OP)')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.po_status || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Daily Option')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.daily_option ? t('Yes') : t('No')}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Working Days')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.working_days || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('HOD')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.hod_flag ? t('Yes') : t('No')}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* FINANCE TAB: Step 4 */}
-            <TabsContent value="finance" className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <Card className="border-none shadow-md">
-                <CardHeader className="bg-slate-50/50 border-b border-slate-100">
-                  <CardTitle className="text-base font-bold flex items-center gap-2">
-                    <Landmark className="h-5 w-5 text-primary" />
-                    {t('Finance & Salary')}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-6">
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Bank Name')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.bank_name || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Account Number')}</h4>
-                      <p className="text-sm font-bold text-slate-800 font-mono">{employee.employee?.account_number || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('IFSC Code')}</h4>
-                      <p className="text-sm font-bold text-slate-800 uppercase">{employee.employee?.ifsc_code || employee.employee?.bank_identifier_code || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Account Type')}</h4>
-                      <p className="text-sm font-bold text-slate-800 capitalize">{employee.employee?.account_type || '-'}</p>
-                    </div>
-                  </div>
-
-                  <div className="h-px bg-slate-100 mb-8" />
-
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-2 text-green-600 mb-2">
-                        <Plus className="h-4 w-4" />
-                        <h3 className="text-xs font-black uppercase tracking-widest">{t('Increment (Earnings)')}</h3>
-                      </div>
-                      <div className="space-y-2">
-                        {salaryComponents.filter((c: any) => c.type === 'earning').map((comp: any) => (
-                          <div key={comp.id} className="flex justify-between items-center p-3 bg-green-50/50 rounded-xl border border-green-100/50">
-                            <span className="text-xs font-bold text-slate-600">{comp.name}</span>
-                            <span className="text-sm font-black text-green-700">₹{employeeSalary?.components?.[comp.id] || '0'}</span>
-                          </div>
-                        ))}
-                        <div className="flex justify-between items-center p-4 bg-green-600 rounded-2xl text-white shadow-lg shadow-green-200 mt-4">
-                          <span className="text-xs font-black uppercase">{t('Gross Salary')}</span>
-                          <span className="text-xl font-black">₹{employee.employee?.gross_salary || '0'}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-2 text-red-600 mb-2">
-                        <Trash2 className="h-4 w-4" />
-                        <h3 className="text-xs font-black uppercase tracking-widest">{t('Deductions')}</h3>
-                      </div>
-                      <div className="space-y-2">
-                        {salaryComponents.filter((c: any) => c.type === 'deduction').map((comp: any) => (
-                          <div key={comp.id} className="flex justify-between items-center p-3 bg-red-50/50 rounded-xl border border-red-100/50">
-                            <span className="text-xs font-bold text-slate-600">{comp.name}</span>
-                            <span className="text-sm font-black text-red-700">₹{employeeSalary?.components?.[comp.id] || '0'}</span>
-                          </div>
-                        ))}
-                        <div className="flex justify-between items-center p-4 bg-slate-800 rounded-2xl text-white shadow-lg mt-4">
-                          <span className="text-xs font-black uppercase">{t('Net Payable')}</span>
-                          <span className="text-xl font-black">
-                            ₹{(parseFloat(employee.employee?.gross_salary || '0') - Object.keys(employeeSalary?.components || {}).reduce((acc, id) => {
-                              const comp = salaryComponents.find((c: any) => c.id.toString() === id.toString());
-                              return comp?.type === 'deduction' ? acc + parseFloat(employeeSalary.components[id] || '0') : acc;
-                            }, 0)).toFixed(2)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12 pt-8 border-t border-slate-100">
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('PF Number')}</h4>
-                      <p className="text-sm font-bold text-slate-800">{employee.employee?.pf_number || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('UAN Number')}</h4>
-                      <p className="text-sm font-bold text-slate-800 font-mono">{employee.employee?.uan_number || '-'}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('ESIC Number')}</h4>
-                      <p className="text-sm font-bold text-slate-800 font-mono">{employee.employee?.esic_number || '-'}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* FINAL TAB: Step 5 */}
-            <TabsContent value="final" className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Documents & Nominees */}
-                <div className="space-y-6">
-                  <Card className="border-none shadow-md">
-                    <CardHeader className="bg-slate-50/50 border-b border-slate-100">
-                      <CardTitle className="text-base font-bold flex items-center gap-2">
-                        <Users className="h-5 w-5 text-primary" />
-                        {t('Nominee Details')}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-4">
-                      {employee.employee?.nominees && employee.employee.nominees.length > 0 ? (
-                        <div className="space-y-3">
-                          {employee.employee.nominees.map((nominee: any, idx: number) => (
-                            <div key={idx} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                              <div className="grid grid-cols-2 gap-4">
-                                <div className="col-span-2 space-y-1">
-                                  <h4 className="text-[10px] font-bold text-slate-400 uppercase">{t('Name')}</h4>
-                                  <p className="text-sm font-bold text-slate-800">{nominee.name}</p>
-                                </div>
-                                <div className="space-y-1">
-                                  <h4 className="text-[10px] font-bold text-slate-400 uppercase">{t('Relation')}</h4>
-                                  <p className="text-sm font-bold text-slate-800">{nominee.relation || '-'}</p>
-                                </div>
-                                <div className="space-y-1">
-                                  <h4 className="text-[10px] font-bold text-slate-400 uppercase">{t('Share')}</h4>
-                                  <p className="text-sm font-bold text-primary">{nominee.percentage}%</p>
-                                </div>
-                                <div className="col-span-2 space-y-1">
-                                  <h4 className="text-[10px] font-bold text-slate-400 uppercase">{t('Aadhar No')}</h4>
-                                  <p className="text-sm font-bold text-slate-800">{nominee.aadhar_number || '-'}</p>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-center py-8 text-slate-400 italic text-xs">
-                          {t('No nominees added')}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  <Card className="border-none shadow-md">
-                    <CardHeader className="bg-slate-50/50 border-b border-slate-100">
-                      <CardTitle className="text-base font-bold flex items-center gap-2">
-                        <CreditCard className="h-5 w-5 text-primary" />
-                        {t('Loan Details')}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-6">
-                      <div className="grid grid-cols-3 gap-4">
-                        <div className="space-y-1">
-                          <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Total Amount')}</h4>
-                          <p className="text-sm font-bold text-red-600">₹{employee.employee?.loan_total_amount || '0'}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Installment')}</h4>
-                          <p className="text-sm font-bold text-slate-800">₹{employee.employee?.loan_installment_amount || '0'}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">{t('Period')}</h4>
-                          <p className="text-sm font-bold text-slate-800">{employee.employee?.loan_period ? `${employee.employee.loan_period} M` : '-'}</p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* Documents List */}
-                <Card className="border-none shadow-md h-fit">
-                  <CardHeader className="bg-slate-50/50 border-b border-slate-100">
-                    <CardTitle className="text-base font-bold flex items-center gap-2">
-                      <FileText className="h-5 w-5 text-primary" />
-                      {t('Documents')}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-4">
-                    {employee.employee?.documents && employee.employee.documents.length > 0 ? (
-                      <div className="space-y-3">
-                        {employee.employee.documents.map((document: any) => (
-                          <div key={document.id} className="p-4 bg-white rounded-2xl border border-slate-100 hover:shadow-md transition-all group">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-                                  <FileText className="h-5 w-5" />
-                                </div>
-                                <div>
-                                  <h4 className="text-sm font-bold text-slate-800">{document.document_type?.name}</h4>
-                                  <p className="text-[10px] font-bold text-slate-400">{document.id_number || t('No ID')}</p>
-                                </div>
-                              </div>
-                              <div className="flex gap-2">
-                                <Button size="icon" variant="ghost" className="h-8 w-8 rounded-lg text-blue-500 hover:bg-blue-50" onClick={() => window.open(getImagePath(document.file_path), '_blank')}>
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                                <Button size="icon" variant="ghost" className="h-8 w-8 rounded-lg text-primary hover:bg-primary/5" onClick={() => window.open(route('hr.employees.documents.download', [employee.id, document.id]), '_blank')}>
-                                  <Download className="h-4 w-4" />
-                                </Button>
-                                {hasPermission(permissions, 'edit-employees') && (
-                                  <Button size="icon" variant="ghost" className="h-8 w-8 rounded-lg text-red-500 hover:bg-red-50" onClick={() => handleDeleteDocument(document.id)}>
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-center py-12 text-slate-400 italic text-xs">
-                        {t('No documents uploaded')}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-            </TabsContent>
-          </Tabs>
+          <div className="flex flex-wrap items-center gap-3 ml-auto text-xs text-slate-600">
+            {emp?.phone && (
+              <button type="button" onClick={() => copyText(emp.phone, t('Phone'))} className="inline-flex items-center gap-1 hover:text-primary">
+                <Phone className="h-3 w-3" />
+                {emp.phone}
+              </button>
+            )}
+            {employee.email && (
+              <span className="inline-flex items-center gap-1 max-w-[180px] truncate">
+                <Mail className="h-3 w-3 shrink-0" />
+                {employee.email}
+              </span>
+            )}
+            {emp?.date_of_joining && (
+              <span className="inline-flex items-center gap-1">
+                <Briefcase className="h-3 w-3" />
+                {formatDate(emp.date_of_joining)}
+              </span>
+            )}
+            <span className="font-semibold text-slate-800">₹{emp?.gross_salary || '0'}</span>
+          </div>
         </div>
       </div>
 
-      {/* Delete Modal */}
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <TabsList className="h-8 p-0.5 bg-slate-100/80 rounded-md">
+            <TabsTrigger value="overview" className="h-7 text-xs px-2.5 rounded data-[state=active]:bg-white data-[state=active]:shadow-sm">
+              {t('Overview')}
+            </TabsTrigger>
+            <TabsTrigger value="contact" className="h-7 text-xs px-2.5 rounded data-[state=active]:bg-white data-[state=active]:shadow-sm">
+              {t('Contact')}
+            </TabsTrigger>
+            <TabsTrigger value="payroll" className="h-7 text-xs px-2.5 rounded data-[state=active]:bg-white data-[state=active]:shadow-sm">
+              {t('Payroll')}
+            </TabsTrigger>
+            <TabsTrigger value="documents" className="h-7 text-xs px-2.5 rounded data-[state=active]:bg-white data-[state=active]:shadow-sm">
+              {t('Documents')}
+            </TabsTrigger>
+          </TabsList>
+
+          <button
+            type="button"
+            onClick={() => setShowEmptyFields((v) => !v)}
+            className="text-[10px] text-slate-500 hover:text-primary whitespace-nowrap"
+          >
+            {showEmptyFields ? t('Hide empty fields') : t('Show empty fields')}
+          </button>
+        </div>
+
+        <TabsContent value="overview" className="mt-0">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+            <Panel title={t('Work Details')}>
+              <InfoTable rows={workRows} hideEmpty={!showEmptyFields} />
+            </Panel>
+            <Panel title={t('Personal')}>
+              <InfoTable rows={personalRows} hideEmpty={!showEmptyFields} />
+            </Panel>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="contact" className="mt-0">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+            <Panel title={t('Contact & Address')}>
+              <InfoTable
+                hideEmpty={!showEmptyFields}
+                rows={[
+                  { label: t('Phone'), value: emp?.phone },
+                  { label: t('Phone 2'), value: emp?.phone_2 },
+                  { label: t('Email'), value: employee.email },
+                  { label: t('Permanent Address'), value: emp?.permanent_address || emp?.address_line_1 },
+                  { label: t('Local Address'), value: emp?.address_line_2 },
+                  { label: t('City'), value: emp?.city },
+                  { label: t('State'), value: emp?.state },
+                  { label: t('Pincode'), value: emp?.postal_code },
+                  { label: t('Place'), value: emp?.place },
+                ]}
+              />
+            </Panel>
+            <Panel title={t('Government IDs')}>
+              <InfoTable
+                hideEmpty={!showEmptyFields}
+                rows={[
+                  { label: t('PAN'), value: emp?.pan_card_number },
+                  { label: t('Aadhaar'), value: emp?.aadhar_card_number },
+                  { label: t('UAN'), value: emp?.uan_number },
+                  { label: t('Driving License'), value: emp?.driving_license || emp?.driving_licence },
+                  { label: t('Election Card'), value: emp?.election_card },
+                ]}
+              />
+            </Panel>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="payroll" className="mt-0 space-y-2">
+          <Panel title={t('Bank & Salary')}>
+            <InfoTable
+              hideEmpty={!showEmptyFields}
+              rows={[
+                { label: t('Bank Name'), value: emp?.bank_name },
+                { label: t('Account No.'), value: emp?.account_number },
+                { label: t('IFSC'), value: emp?.ifsc_code || emp?.bank_identifier_code },
+                { label: t('Account Type'), value: emp?.account_type || emp?.bank_type },
+                { label: t('PF No.'), value: emp?.pf_number },
+                { label: t('ESIC No.'), value: emp?.esic_number },
+              ]}
+            />
+
+            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+              <div className="rounded border border-slate-100 overflow-hidden">
+                <div className="px-2 py-1 bg-emerald-50/80 text-[10px] font-semibold uppercase text-emerald-700">{t('Earnings')}</div>
+                <div className="divide-y divide-slate-50">
+                  {earnings.map((comp: any) => (
+                    <div key={comp.id} className="flex justify-between px-2 py-1 text-xs">
+                      <span className="text-slate-600">{comp.name}</span>
+                      <span className="font-medium">₹{employeeSalary?.components?.[comp.id] || '0'}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between px-2 py-1.5 text-xs font-semibold bg-emerald-50/50">
+                    <span>{t('Gross')}</span>
+                    <span className="text-emerald-700">₹{emp?.gross_salary || '0'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded border border-slate-100 overflow-hidden">
+                <div className="px-2 py-1 bg-red-50/80 text-[10px] font-semibold uppercase text-red-700">{t('Deductions')}</div>
+                <div className="divide-y divide-slate-50">
+                  {deductions.length > 0 ? (
+                    deductions.map((comp: any) => (
+                      <div key={comp.id} className="flex justify-between px-2 py-1 text-xs">
+                        <span className="text-slate-600">{comp.name}</span>
+                        <span className="font-medium">₹{employeeSalary?.components?.[comp.id] || '0'}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="px-2 py-2 text-xs text-slate-400">{t('No deductions')}</div>
+                  )}
+                  <div className="flex justify-between px-2 py-1.5 text-xs font-semibold border-t border-slate-200">
+                    <span>{t('Net Payable')}</span>
+                    <span className="text-primary">₹{netPayable}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-1 mt-2">
+              <FlagPill label={t('PF')} on={!!emp?.pf_flag} yesLabel={t('Yes')} noLabel={t('No')} />
+              <FlagPill label={t('ESIC')} on={!!emp?.esic_flag} yesLabel={t('Yes')} noLabel={t('No')} />
+              <FlagPill label={t('PTax')} on={!!emp?.ptax_flag} yesLabel={t('Yes')} noLabel={t('No')} />
+              <FlagPill label={t('Bonus')} on={!!emp?.bonus_flag} yesLabel={t('Yes')} noLabel={t('No')} />
+              <FlagPill label={t('OT')} on={!!emp?.ot_flag} yesLabel={t('Yes')} noLabel={t('No')} />
+              {emp?.ot_hours ? (
+                <span className="text-[10px] text-slate-500 px-1">{t('OT Hours')}: {emp.ot_hours}</span>
+              ) : null}
+            </div>
+          </Panel>
+        </TabsContent>
+
+        <TabsContent value="documents" className="mt-0">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+            <Panel title={t('Nominees')}>
+              {emp?.nominees?.length > 0 ? (
+                <div className="divide-y divide-slate-100">
+                  {emp.nominees.map((nominee: any, idx: number) => (
+                    <div key={idx} className="py-1.5 text-sm">
+                      <p className="font-medium text-slate-900">{nominee.name}</p>
+                      <p className="text-xs text-slate-500">
+                        {nominee.relation || '—'} · {nominee.percentage}%
+                        {nominee.aadhar_number ? ` · ${t('Aadhaar')}: ${nominee.aadhar_number}` : ''}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 py-2">{t('No nominees added')}</p>
+              )}
+            </Panel>
+
+            <Panel title={t('Documents')}>
+              {emp?.documents?.length > 0 ? (
+                <div className="divide-y divide-slate-100">
+                  {emp.documents.map((document: any) => (
+                    <div key={document.id} className="flex items-center justify-between gap-2 py-1.5">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-800 truncate">{document.document_type?.name}</p>
+                        <p className="text-[10px] text-slate-500">{document.id_number || t('No ID')}</p>
+                      </div>
+                      <div className="flex shrink-0">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-blue-600"
+                          onClick={() => window.open(getImagePath(document.file_path), '_blank')}
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-primary"
+                          onClick={() =>
+                            window.open(route('hr.employees.documents.download', [userId, document.id]), '_blank')
+                          }
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                        </Button>
+                        {hasPermission(permissions, 'edit-employees') && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-red-600"
+                            onClick={() => handleDeleteDocument(document.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 py-2">{t('No documents uploaded')}</p>
+              )}
+            </Panel>
+          </div>
+        </TabsContent>
+      </Tabs>
+
       <CrudDeleteModal
         isOpen={isDeleteModalOpen}
         onClose={() => setIsDeleteModalOpen(false)}

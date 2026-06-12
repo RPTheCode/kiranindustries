@@ -40,6 +40,7 @@ class EmployeeController extends Controller
                 'employee.branch',
                 'employee.department',
                 'employee.designation',
+                'employee.shift',
                 'employee.category' => function ($q) {
                     $q->withoutGlobalScopes();
                 }
@@ -141,7 +142,24 @@ class EmployeeController extends Controller
             $query->orderBy('created_at', 'desc');
         }
 
-        $employees = $query->paginate($request->per_page ?? 10);
+        $statsQuery = User::whereIn('created_by', getCompanyAndUsersId())
+            ->whereHas('employee', function ($q) use ($branchId, $authUser) {
+                if ($branchId && $branchId !== 'all') {
+                    $q->where('branch_id', $branchId);
+                } elseif (! $authUser->hasRole(['company', 'superadmin', 'admin'])) {
+                    $allowedBranchIds = $authUser->branches()->pluck('branches.id')->toArray();
+                    $q->whereIn('branch_id', $allowedBranchIds);
+                }
+            });
+
+        $employeeStats = [
+            'total' => (clone $statsQuery)->count(),
+            'active' => (clone $statsQuery)->where('status', 'active')->count(),
+            'inactive' => (clone $statsQuery)->where('status', 'inactive')->count(),
+        ];
+
+        $employees = $query->paginate($request->per_page ?? 25);
+        $employeeStats['showing'] = $employees->total();
 
         // Fetch departments - filtered by active branch and active status
         $departmentsQuery = Department::withoutGlobalScopes()
@@ -215,6 +233,7 @@ class EmployeeController extends Controller
 
         return Inertia::render('hr/employees/index', [
             'employees' => $employees,
+            'employeeStats' => $employeeStats,
             'planLimits' => $planLimits,
             'departments' => $departments,
             'designations' => $designations,
@@ -504,12 +523,9 @@ class EmployeeController extends Controller
             $employee->hod_flag = $request->hod_flag ?? false;
             $employee->skill_id = $this->normalizeSkillIds($request->skill_id);
 
-            // Salary & Loan
+            // Salary
             $employee->basic_salary = $request->basic_salary ?? 0;
             $employee->gross_salary = $request->gross_salary ?? 0;
-            $employee->loan_total_amount = $request->loan_total_amount ?? 0;
-            $employee->loan_installment_amount = $request->loan_installment_amount ?? 0;
-            $employee->loan_period = $request->loan_period;
             $employee->extra_salary_component_ids = $this->normalizeExtraSalaryComponentIds(
                 $request,
                 (int) ($employee->branch_id ?? 0) ?: null
@@ -942,9 +958,6 @@ class EmployeeController extends Controller
                 'medical_allowance' => 'nullable|numeric|min:0',
                 'pf_id' => 'nullable|exists:pf_masters,id',
                 'esi_id' => 'nullable|exists:esi_masters,id',
-                'loan_total_amount' => 'nullable|numeric|min:0',
-                'loan_installment_amount' => 'nullable|numeric|min:0',
-                'loan_period' => 'nullable|string|max:255',
                 'nominee_name' => 'nullable|string|max:255',
                 'nominee_account_number' => 'nullable|string|max:50',
                 'nominee_aadhar' => 'nullable|digits:12',
@@ -1108,12 +1121,9 @@ class EmployeeController extends Controller
             $employee->hod_flag = $request->hod_flag ?? false;
             $employee->skill_id = $this->normalizeSkillIds($request->skill_id);
 
-            // Salary & Loan
+            // Salary
             $employee->basic_salary = $request->basic_salary ?? 0;
             $employee->gross_salary = $request->gross_salary ?? 0;
-            $employee->loan_total_amount = $request->loan_total_amount ?? 0;
-            $employee->loan_installment_amount = $request->loan_installment_amount ?? 0;
-            $employee->loan_period = $request->loan_period;
             $employee->extra_salary_component_ids = $this->normalizeExtraSalaryComponentIds(
                 $request,
                 (int) ($employee->branch_id ?? 0) ?: null
@@ -1461,8 +1471,10 @@ class EmployeeController extends Controller
             $failures = $import->failures();
             $savedCount = $import->rowsSaved;
             $failedCount = $failures->count();
+            $skippedRows = $import->skippedRows ?? [];
+            $skippedCount = count($skippedRows);
 
-            if ($savedCount === 0 && $failedCount === 0) {
+            if ($savedCount === 0 && $failedCount === 0 && $skippedCount === 0) {
                 return redirect()->back()->with(
                     'error',
                     $this->employeeImportErrorMessage(
@@ -1471,24 +1483,14 @@ class EmployeeController extends Controller
                 );
             }
 
-            if ($failedCount > 0) {
-                $msg = '<div class="space-y-1 text-sm">';
-                $msg .= '<div class="font-bold text-gray-800 border-b pb-1 mb-2">Import Summary: ' . $savedCount . ' saved, ' . $failedCount . ' failed</div>';
-
-
-
-                $msg .= '<div class="text-red-500 mt-2 font-semibold">✘ Failures:</div>';
-                $msg .= '<ul class="list-disc pl-5 text-red-500 text-xs space-y-0.5">';
-                foreach ($failures as $failure) {
-                    $msg .= '<li>Row ' . $failure->row() . ': ' . implode(', ', $failure->errors()) . '</li>';
-                }
-                $msg .= '</ul>';
-                $msg .= '</div>';
-
-                return redirect()->back()->with('error', $msg);
+            if ($failedCount > 0 || $skippedCount > 0) {
+                return redirect()->back()->with(
+                    'error',
+                    $this->formatEmployeeImportResultMessage($savedCount, $failures, $skippedRows)
+                );
             }
 
-            return redirect()->back()->with('success', __('Employees imported successfully.'));
+            return redirect()->back()->with('success', __(':count employees imported successfully.', ['count' => $savedCount]));
         } catch (\InvalidArgumentException $e) {
             return redirect()->back()->with('error', $this->employeeImportErrorMessage($e->getMessage()));
         } catch (\PhpOffice\PhpSpreadsheet\Reader\Exception $e) {
@@ -1519,6 +1521,64 @@ class EmployeeController extends Controller
     private function employeeImportErrorMessage(string $message): string
     {
         return '<div class="space-y-1 text-sm text-red-600 font-medium">' . e($message) . '</div>';
+    }
+
+    /**
+     * User-friendly import summary when some rows fail or are skipped (missing Organization masters).
+     */
+    private function formatEmployeeImportResultMessage(int $savedCount, $failures, array $skippedRows): string
+    {
+        $skippedCount = count($skippedRows);
+        $failedCount = $failures->count();
+
+        $msg = '<div class="space-y-2 text-sm">';
+        $msg .= '<div class="font-bold text-gray-800 border-b pb-2">';
+        $msg .= e(__('Import summary: :saved imported, :skipped skipped, :failed failed', [
+            'saved' => $savedCount,
+            'skipped' => $skippedCount,
+            'failed' => $failedCount,
+        ]));
+        $msg .= '</div>';
+
+        if ($savedCount > 0) {
+            $msg .= '<p class="text-emerald-700 text-xs font-medium">';
+            $msg .= e(__(':count employee(s) were imported successfully. Fix the rows below and re-import only the failed ones, or update your Excel and import again.', ['count' => $savedCount]));
+            $msg .= '</p>';
+        }
+
+        if ($skippedCount > 0) {
+            $msg .= '<p class="text-red-600 font-semibold text-xs mt-2">';
+            $msg .= e(__('These employees were NOT imported. Add missing items under Organization menu first:'));
+            $msg .= '</p>';
+            $msg .= '<ul class="list-none space-y-1.5 max-h-52 overflow-y-auto pr-1 mt-1">';
+            foreach ($skippedRows as $item) {
+                $msg .= '<li class="rounded border border-red-100 bg-red-50/50 px-2 py-1.5 text-xs">';
+                $msg .= '<span class="font-semibold text-gray-800">' . e(__('Row :row', ['row' => $item['row']])) . '</span>';
+                $msg .= ' · <span class="font-medium">' . e(__('Code')) . ': ' . e((string) $item['emp_code']) . '</span>';
+                if (($item['name'] ?? '') !== '—') {
+                    $msg .= ' · ' . e((string) $item['name']);
+                }
+                $msg .= '<br><span class="text-red-600">' . e((string) $item['reason']) . '</span>';
+                $msg .= '</li>';
+            }
+            $msg .= '</ul>';
+        }
+
+        if ($failedCount > 0) {
+            $msg .= '<p class="text-red-600 font-semibold text-xs mt-2">' . e(__('Validation failures:')) . '</p>';
+            $msg .= '<ul class="list-disc pl-5 text-red-500 text-xs space-y-0.5">';
+            foreach ($failures as $failure) {
+                $msg .= '<li>' . e(__('Row :row: :errors', [
+                    'row' => $failure->row(),
+                    'errors' => implode(', ', $failure->errors()),
+                ])) . '</li>';
+            }
+            $msg .= '</ul>';
+        }
+
+        $msg .= '</div>';
+
+        return $msg;
     }
 
     /**

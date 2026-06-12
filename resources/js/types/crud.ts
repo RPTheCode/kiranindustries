@@ -22,6 +22,7 @@ export interface TableColumn {
   sortable?: boolean;
   type?: 'text' | 'badge' | 'image' | 'date' | 'currency' | 'boolean' | 'link' | 'custom';
   className?: string;
+  sticky?: 'left';
   linkClassName?: string;
   href?: string | ((row: any) => string);
   openInNewTab?: boolean;

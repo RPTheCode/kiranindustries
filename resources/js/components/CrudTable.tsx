@@ -44,6 +44,11 @@ interface CrudTableProps {
   compactActions?: boolean;
   stickyActions?: boolean;
   dense?: boolean;
+  renderTrailingActions?: (row: any) => React.ReactNode;
+  onRowClick?: (row: any) => void;
+  striped?: boolean;
+  stickyHeader?: boolean;
+  getRowClassName?: (row: any) => string | undefined;
 }
 
 export function CrudTable({
@@ -62,6 +67,11 @@ export function CrudTable({
   compactActions = false,
   stickyActions = false,
   dense = false,
+  renderTrailingActions,
+  onRowClick,
+  striped = false,
+  stickyHeader = false,
+  getRowClassName,
 }: CrudTableProps) {
   const { t } = useTranslation();
   const renderSortIcon = (column: TableColumn) => {
@@ -101,12 +111,27 @@ export function CrudTable({
   const actionIconSize = compactActions ? 14 : 16;
   const actionGap = compactActions ? 'gap-0.5' : 'space-x-2';
 
+  const stickyHeadTopClass = stickyHeader
+    ? 'sticky top-0 z-30 bg-slate-50 dark:bg-gray-800 shadow-[inset_0_-1px_0_0_rgb(226_232_240)] dark:shadow-[inset_0_-1px_0_0_rgb(55_65_81)]'
+    : '';
+  const hasStickyLeft = stickyHeader || columns.some((column) => column.sticky === 'left');
   const stickyActionClass = stickyActions
-    ? 'sticky right-0 z-10 bg-gray-50 dark:bg-gray-800 shadow-[-6px_0_10px_-6px_rgba(0,0,0,0.12)]'
+    ? cn('sticky right-0 shadow-[-6px_0_10px_-6px_rgba(0,0,0,0.12)]', stickyHeader ? 'z-40' : 'z-10 bg-gray-50 dark:bg-gray-800')
     : '';
-  const stickyActionCellClass = stickyActions
-    ? 'sticky right-0 z-10 bg-white dark:bg-gray-900 shadow-[-6px_0_10px_-6px_rgba(0,0,0,0.12)]'
+  const stickyActionPositionClass = stickyActions
+    ? 'sticky right-0 z-10 shadow-[-6px_0_10px_-6px_rgba(0,0,0,0.12)]'
     : '';
+
+  const getStickyBodyBg = (row: any, rowIndex: number) => {
+    const custom = getRowClassName?.(row);
+    if (custom?.includes('amber')) {
+      return 'bg-amber-50/70 group-hover:bg-amber-50 dark:bg-amber-950/20';
+    }
+    if (striped && rowIndex % 2 === 1) {
+      return 'bg-slate-50/60 dark:bg-gray-800/40';
+    }
+    return 'bg-white dark:bg-gray-900 group-hover:bg-primary/5';
+  };
 
   const renderActionButtons = (row: any) => {
     return (
@@ -196,6 +221,7 @@ export function CrudTable({
             </TooltipProvider>
           );
         })}
+        {renderTrailingActions?.(row)}
       </div>
     );
   };
@@ -281,11 +307,20 @@ export function CrudTable({
   };
 
   return (
-    <div className="border-collapse dark:bg-gray-900">
-      <Table>
+    <div className={cn('border-collapse dark:bg-gray-900', stickyHeader && 'max-h-[calc(100vh-15rem)] overflow-auto')}>
+      <Table wrapperClassName={stickyHeader ? 'overflow-visible' : undefined}>
         <TableHeader>
-          <TableRow className="bg-gray-50 dark:bg-gray-800 border-b">
-            <TableHead className={cn('w-12 font-semibold', headPy)}>#</TableHead>
+          <TableRow className="border-b">
+            <TableHead
+              className={cn(
+                'w-12 font-semibold',
+                headPy,
+                stickyHeadTopClass,
+                hasStickyLeft && 'sticky left-0 z-40',
+              )}
+            >
+              #
+            </TableHead>
             {columns.map((column) => (
               <TableHead
                 key={column.key}
@@ -293,7 +328,9 @@ export function CrudTable({
                   headPy,
                   'font-semibold',
                   column.sortable && 'cursor-pointer select-none',
-                  column.className
+                  column.className,
+                  stickyHeadTopClass,
+                  column.sticky === 'left' && 'sticky left-12 z-40',
                 )}
                 onClick={() => handleSort(column)}
               >
@@ -303,9 +340,16 @@ export function CrudTable({
                 </div>
               </TableHead>
             ))}
-            {/* <TableHead className="w-24 py-2.5 font-semibold text-right">{t("Actions")}</TableHead> */}
             {showActions && hasAnyActionPermission && (
-              <TableHead className={cn(headPy, 'text-right font-semibold w-[7.25rem] px-1', stickyActionClass)}>
+              <TableHead
+                className={cn(
+                  headPy,
+                  'text-right font-semibold px-1',
+                  renderTrailingActions ? 'w-32' : 'w-[7.25rem]',
+                  stickyHeadTopClass,
+                  stickyActionClass,
+                )}
+              >
                 {t('Actions')}
               </TableHead>
             )}
@@ -314,12 +358,34 @@ export function CrudTable({
         <TableBody>
           {data.length > 0 ? (
             data.map((row, index) => (
-              <TableRow key={row.id || index} className="hover:bg-gray-50 dark:hover:bg-gray-700 dark:bg-gray-900 border-b">
-                <TableCell className={cn('font-medium', cellPy)}>{from + index}</TableCell>
+              <TableRow
+                key={row.id || index}
+                onClick={() => onRowClick?.(row)}
+                className={cn(
+                  'group border-b transition-colors',
+                  onRowClick && 'cursor-pointer',
+                  striped && index % 2 === 1 && !getRowClassName?.(row)?.includes('amber') && 'bg-slate-50/60 dark:bg-gray-800/40',
+                  !getRowClassName?.(row)?.includes('amber') && 'hover:bg-primary/5 dark:hover:bg-gray-700/50',
+                  getRowClassName?.(row),
+                )}
+              >
+                <TableCell
+                  className={cn(
+                    'font-medium',
+                    cellPy,
+                    hasStickyLeft && cn('sticky left-0 z-10', getStickyBodyBg(row, index)),
+                  )}
+                >
+                  {from + index}
+                </TableCell>
                 {columns.map((col) => (
                   <TableCell
                     key={col.key}
-                    className={cn(cellPy, col.className)}
+                    className={cn(
+                      cellPy,
+                      col.className,
+                      col.sticky === 'left' && cn('sticky left-12 z-10', getStickyBodyBg(row, index)),
+                    )}
                   >
                     {renderCellContent(row, col)}
                   </TableCell>
@@ -328,7 +394,14 @@ export function CrudTable({
                   {renderActionButtons(row)}
                 </TableCell> */}
                 {showActions && hasAnyActionPermission && (
-                  <TableCell className={cn(cellPy, 'text-right px-1', stickyActionCellClass)}>
+                  <TableCell
+                    className={cn(
+                      cellPy,
+                      'text-right px-1',
+                      stickyActionPositionClass,
+                      getStickyBodyBg(row, index),
+                    )}
+                  >
                     {renderActionButtons(row)}
                   </TableCell>
                 )}

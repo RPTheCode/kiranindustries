@@ -129,9 +129,6 @@ export default function EditEmployee() {
     ot_flag: !!employee.employee?.ot_flag,
     ot_hours: employee.employee?.ot_hours ? parseFloat(employee.employee.ot_hours).toString() : '',
     ot_type: employee.employee?.ot_type || '',
-    loan_total_amount: employee.employee?.loan_total_amount ?? '',
-    loan_installment_amount: employee.employee?.loan_installment_amount ?? '',
-    loan_period: employee.employee?.loan_period ?? '',
     address_line_1: employee.employee?.address_line_1 || employee.employee?.permanent_address || '',
     address_line_2: employee.employee?.address_line_2 || '',
     city: employee.employee?.city || '',
@@ -1264,26 +1261,6 @@ export default function EditEmployee() {
                         ))}
                       </div>
 
-                      <div className="mt-6 pt-4 border-t border-slate-100">
-                        <div className="flex items-center gap-2 text-slate-800 mb-3">
-                          <CreditCard className="h-4 w-4 text-primary" />
-                          <h3 className="text-sm font-bold">{t('Loan Details')}</h3>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1">
-                            <Label className="text-[10px] font-bold text-slate-500">{t('Total Amount')}</Label>
-                            <Input type="number" className="h-8 text-xs border-slate-200" value={formData.loan_total_amount} onChange={(e) => handleChange('loan_total_amount', e.target.value)} />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-[10px] font-bold text-slate-500">{t('Installment')}</Label>
-                            <Input type="number" className="h-8 text-xs border-slate-200" value={formData.loan_installment_amount} onChange={(e) => handleChange('loan_installment_amount', e.target.value)} />
-                          </div>
-                          <div className="col-span-2 space-y-1">
-                            <Label className="text-[10px] font-bold text-slate-500">{t('Loan Period (Months)')}</Label>
-                            <Input type="number" className="h-8 text-xs border-slate-200" value={formData.loan_period} onChange={(e) => handleChange('loan_period', e.target.value)} />
-                          </div>
-                        </div>
-                      </div>
                     </div>
 
                     <div className="space-y-6">

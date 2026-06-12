@@ -32,9 +32,16 @@ class EmployeesImport implements ToModel, WithHeadingRow, WithValidation, SkipsO
     use SkipsFailures;
 
     public $rowsSaved = 0;
+
     public $savedNumbers = [];
+
+    /** @var array<int, array{row: int, emp_code: string, name: string, reason: string}> */
+    public array $skippedRows = [];
+
     private $currentRow = 1; // Heading is row 1
+
     private $latestIdNumber = null;
+
     private bool $structureValidated = false;
 
 
@@ -63,16 +70,15 @@ class EmployeesImport implements ToModel, WithHeadingRow, WithValidation, SkipsO
         $branchName = trim($row['branch'] ?? ($row['branch_name'] ?? ($row['place'] ?? '')));
         $activeBranchId = null;
 
-        if (!empty($branchName)) {
-            $branch = Branch::where('name', 'like', $branchName)->first();
+        if (! empty($branchName)) {
+            $branch = Branch::withoutGlobalScopes()
+                ->whereRaw('LOWER(TRIM(name)) = ?', [$this->normalizeMasterName($branchName)])
+                ->first();
+
             if ($branch) {
                 $activeBranchId = $branch->id;
-            } else {
-                \Log::warning("Import: Branch '$branchName' not found in database. Falling back to session.");
             }
-        }
-
-        if (!$activeBranchId) {
+        } elseif (! $activeBranchId) {
             $activeBranchId = session('active_branch_id');
         }
 
@@ -244,132 +250,45 @@ class EmployeesImport implements ToModel, WithHeadingRow, WithValidation, SkipsO
 
             // CRITICAL: Skip if no employee code found
             if (empty($empCode)) {
-                \Log::warning("Import: Skipping row {$this->currentRow} because Employee Code is missing or header mismatch.", ['row_data' => $row]);
+                return $this->skipEmployee(
+                    __('Employee code is missing. Each row must have EMP.CODE filled.'),
+                    '',
+                    $empName
+                );
+            }
+
+            if (! empty($branchName) && ! $activeBranchId) {
+                return $this->skipEmployee(
+                    __('Branch ":name" was not found. Add it under Organization first.', ['name' => $branchName]),
+                    $empCode,
+                    $empName
+                );
+            }
+
+            $masters = $this->resolveOrganizationMasters(
+                $empCode,
+                $empName,
+                $activeBranchId,
+                $sectionName,
+                $categoryName,
+                $departmentName,
+                $designationName,
+                $shiftName,
+                $skillData
+            );
+
+            if ($masters === false) {
                 return null;
             }
 
-            // Lookup Masters
-            $section = null;
-            if (!empty($sectionName)) {
-                $section = Section::withoutGlobalScopes()->where('name', $sectionName);
-                if ($activeBranchId) {
-                    $section->where(function ($q) use ($activeBranchId) {
-                        $q->where('branch_id', $activeBranchId)
-                            ->orWhereNull('branch_id');
-                    });
-                }
-                $section = $section->first();
-
-                if (!$section) {
-                    $section = Section::create([
-                        'name' => $sectionName,
-                        'branch_id' => $activeBranchId,
-                        'created_by' => $creatorId,
-                        'status' => 'active'
-                    ]);
-                }
-            }
-
-            $category = null;
-            if (!empty($categoryName)) {
-                $category = Category::withoutGlobalScopes()->where('name', $categoryName);
-                if ($activeBranchId) {
-                    $category->where(function ($q) use ($activeBranchId) {
-                        $q->where('branch_id', $activeBranchId)
-                            ->orWhereNull('branch_id');
-                    });
-                }
-                $category = $category->first();
-
-                if (!$category) {
-                    $category = Category::create([
-                        'name' => $categoryName,
-                        'branch_id' => $activeBranchId,
-                        'created_by' => $creatorId,
-                        'status' => 'active'
-                    ]);
-                }
-            }
-
-            $department = null;
-            if (!empty($departmentName)) {
-                $department = Department::withoutGlobalScopes()->where('name', $departmentName);
-                if ($activeBranchId) {
-                    $department->where(function ($q) use ($activeBranchId) {
-                        $q->where('branch_id', $activeBranchId)
-                            ->orWhereNull('branch_id');
-                    });
-                }
-                $department = $department->first();
-
-                if (!$department) {
-                    $department = Department::create([
-                        'name' => $departmentName,
-                        'branch_id' => $activeBranchId,
-                        'created_by' => $creatorId
-                    ]);
-                }
-            }
-
-            $designation = null;
-            if (!empty($designationName) && $department) {
-                $designation = Designation::withoutGlobalScopes()
-                    ->where('name', $designationName)
-                    ->where('department_id', $department->id);
-                if ($activeBranchId) {
-                    $designation->where(function ($q) use ($activeBranchId) {
-                        $q->where('branch_id', $activeBranchId)
-                            ->orWhereNull('branch_id');
-                    });
-                }
-                $designation = $designation->first();
-
-                if (!$designation) {
-                    $designation = Designation::create([
-                        'name' => $designationName,
-                        'department_id' => $department->id,
-                        'branch_id' => $activeBranchId,
-                        'created_by' => $creatorId,
-                        'status' => 'active'
-                    ]);
-                }
-            }
-
-            // Robust Shift Lookup (bypass session branch filter to find shifts across branches)
-            $shift = null;
-            if (!empty($shiftName)) {
-                // Try case-insensitive matching by name or short_code, bypassing global branch scope
-                $shiftQuery = Shift::withoutGlobalScopes()->where(function ($q) use ($shiftName) {
-                    $q->where('name', 'like', $shiftName)
-                        ->orWhere('short_code', 'like', $shiftName);
-                });
-
-                // If we identified a branch for this row, prioritize shifts from that branch
-                $branchShiftQuery = clone $shiftQuery;
-                if ($activeBranchId) {
-                    $branchShiftQuery->where(function ($q) use ($activeBranchId) {
-                        $q->where('branch_id', $activeBranchId)
-                            ->orWhereNull('branch_id');
-                    });
-                }
-
-                $shift = $branchShiftQuery->first();
-
-                // FALLBACK: If not found in current branch, try any branch (Global Search)
-                if (!$shift) {
-                    $shift = $shiftQuery->first();
-                }
-
-                if (!$shift && is_numeric($shiftName)) {
-                    $shift = Shift::withoutGlobalScopes()->find($shiftName);
-                }
-
-                if (!$shift) {
-                    \Log::warning("Import: Shift '$shiftName' not found for employee $empCode");
-                } else {
-                    \Log::info("Import: Mapped shift '$shiftName' to ID {$shift->id} ({$shift->name})");
-                }
-            }
+            [
+                'section' => $section,
+                'category' => $category,
+                'department' => $department,
+                'designation' => $designation,
+                'shift' => $shift,
+                'skill_ids' => $skillIds,
+            ] = $masters;
 
             // User Management: Find by Employee record first
             $employee = Employee::withoutGlobalScopes()
@@ -424,33 +343,6 @@ class EmployeesImport implements ToModel, WithHeadingRow, WithValidation, SkipsO
                 $employeeRole = resolveEmployeeSpatieRole(getCompanyOwnerId());
                 if ($employeeRole) {
                     $user->assignRole($employeeRole);
-                }
-            }
-
-            // Handle Skills
-            $skillIds = [];
-            if (!empty($skillData)) {
-                foreach (explode(',', $skillData) as $sn) {
-                    $sn = trim($sn);
-                    if (!empty($sn)) {
-                        $sObj = Skill::where('name', $sn);
-                        if ($activeBranchId) {
-                            $sObj->where(function ($q) use ($activeBranchId) {
-                                $q->where('branch_id', $activeBranchId)->orWhereNull('branch_id');
-                            });
-                        }
-                        $sObj = $sObj->first();
-
-                        if (!$sObj) {
-                            $sObj = Skill::create([
-                                'name' => $sn,
-                                'branch_id' => $activeBranchId,
-                                'created_by' => $creatorId,
-                                'status' => 1
-                            ]);
-                        }
-                        $skillIds[] = strval($sObj->id);
-                    }
                 }
             }
 
@@ -626,6 +518,210 @@ class EmployeesImport implements ToModel, WithHeadingRow, WithValidation, SkipsO
             ]);
             throw $e;
         }
+    }
+
+    private function skipEmployee(string $reason, string $empCode = '', string $empName = ''): null
+    {
+        $this->skippedRows[] = [
+            'row' => $this->currentRow,
+            'emp_code' => $empCode !== '' ? $empCode : '—',
+            'name' => $empName !== '' && $empName !== 'Unknown' ? $empName : '—',
+            'reason' => $reason,
+        ];
+
+        return null;
+    }
+
+    private function normalizeMasterName(string $name): string
+    {
+        return strtolower(trim($name));
+    }
+
+    private function branchScopedQuery(string $modelClass, string $name, ?int $branchId)
+    {
+        $normalized = $this->normalizeMasterName($name);
+
+        $query = $modelClass::withoutGlobalScopes()
+            ->whereRaw('LOWER(TRIM(name)) = ?', [$normalized]);
+
+        if ($branchId) {
+            $query->where(function ($q) use ($branchId) {
+                $q->where('branch_id', $branchId)
+                    ->orWhereNull('branch_id');
+            });
+        }
+
+        return $query;
+    }
+
+    /**
+     * Resolve organization masters — never auto-create. Returns false when row is skipped.
+     *
+     * @return array{section: ?Section, category: ?Category, department: ?Department, designation: ?Designation, shift: ?Shift, skill_ids: array<int, string>}|false
+     */
+    private function resolveOrganizationMasters(
+        string $empCode,
+        string $empName,
+        ?int $branchId,
+        string $sectionName,
+        string $categoryName,
+        string $departmentName,
+        string $designationName,
+        string $shiftName,
+        string $skillData,
+    ): array|false {
+        $section = null;
+        if ($sectionName !== '') {
+            $section = $this->branchScopedQuery(Section::class, $sectionName, $branchId)->first();
+            if (! $section) {
+                $this->skipEmployee(
+                    __('Section ":name" not found. Add it under Organization → Sections first.', ['name' => $sectionName]),
+                    $empCode,
+                    $empName
+                );
+
+                return false;
+            }
+        }
+
+        $category = null;
+        if ($categoryName !== '') {
+            $category = $this->branchScopedQuery(Category::class, $categoryName, $branchId)->first();
+            if (! $category) {
+                $this->skipEmployee(
+                    __('Category ":name" not found. Add it under Organization → Categories first.', ['name' => $categoryName]),
+                    $empCode,
+                    $empName
+                );
+
+                return false;
+            }
+        }
+
+        $department = null;
+        if ($departmentName !== '') {
+            $department = $this->branchScopedQuery(Department::class, $departmentName, $branchId)->first();
+            if (! $department) {
+                $this->skipEmployee(
+                    __('Department ":name" not found. Add it under Organization → Departments first.', ['name' => $departmentName]),
+                    $empCode,
+                    $empName
+                );
+
+                return false;
+            }
+        }
+
+        $designation = null;
+        if ($designationName !== '') {
+            if (! $department) {
+                $this->skipEmployee(
+                    __('Designation ":designation" needs Department in the same row. Department is missing or not found in masters.', ['designation' => $designationName]),
+                    $empCode,
+                    $empName
+                );
+
+                return false;
+            }
+
+            $designation = Designation::withoutGlobalScopes()
+                ->whereRaw('LOWER(TRIM(name)) = ?', [$this->normalizeMasterName($designationName)])
+                ->where('department_id', $department->id)
+                ->when($branchId, function ($q) use ($branchId) {
+                    $q->where(function ($inner) use ($branchId) {
+                        $inner->where('branch_id', $branchId)->orWhereNull('branch_id');
+                    });
+                })
+                ->first();
+
+            if (! $designation) {
+                $this->skipEmployee(
+                    __('Designation ":designation" not found under Department ":department". Add it under Organization → Designations first.', [
+                        'designation' => $designationName,
+                        'department' => $departmentName,
+                    ]),
+                    $empCode,
+                    $empName
+                );
+
+                return false;
+            }
+        }
+
+        $shift = null;
+        if ($shiftName !== '') {
+            $normalizedShift = $this->normalizeMasterName($shiftName);
+            $shiftQuery = Shift::withoutGlobalScopes()->where(function ($q) use ($shiftName, $normalizedShift) {
+                $q->whereRaw('LOWER(TRIM(name)) = ?', [$normalizedShift])
+                    ->orWhereRaw('LOWER(TRIM(short_code)) = ?', [$normalizedShift])
+                    ->orWhere('name', 'like', $shiftName)
+                    ->orWhere('short_code', 'like', $shiftName);
+            });
+
+            $branchShiftQuery = clone $shiftQuery;
+            if ($branchId) {
+                $branchShiftQuery->where(function ($q) use ($branchId) {
+                    $q->where('branch_id', $branchId)->orWhereNull('branch_id');
+                });
+            }
+
+            $shift = $branchShiftQuery->first() ?? $shiftQuery->first();
+
+            if (! $shift && is_numeric($shiftName)) {
+                $shift = Shift::withoutGlobalScopes()->find((int) $shiftName);
+            }
+
+            if (! $shift) {
+                $this->skipEmployee(
+                    __('Shift ":name" not found. Add it under Organization → Shifts first (name or short code must match).', ['name' => $shiftName]),
+                    $empCode,
+                    $empName
+                );
+
+                return false;
+            }
+        }
+
+        $skillIds = [];
+        if ($skillData !== '') {
+            $missingSkills = [];
+
+            foreach (explode(',', $skillData) as $skillName) {
+                $skillName = trim($skillName);
+                if ($skillName === '') {
+                    continue;
+                }
+
+                $skill = $this->branchScopedQuery(Skill::class, $skillName, $branchId)->first();
+                if (! $skill) {
+                    $missingSkills[] = $skillName;
+                    continue;
+                }
+
+                $skillIds[] = (string) $skill->id;
+            }
+
+            if ($missingSkills !== []) {
+                $this->skipEmployee(
+                    __('Skill(s) not found in Organization masters: :names. Add them under Organization → Skills first.', [
+                        'names' => implode(', ', $missingSkills),
+                    ]),
+                    $empCode,
+                    $empName
+                );
+
+                return false;
+            }
+        }
+
+        return [
+            'section' => $section,
+            'category' => $category,
+            'department' => $department,
+            'designation' => $designation,
+            'shift' => $shift,
+            'skill_ids' => $skillIds,
+        ];
     }
 
     public function registerEvents(): array

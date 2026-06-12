@@ -122,9 +122,6 @@ export default function CreateEmployee() {
     gross_salary: '',
     education_allowance: '',
     it_amount: '',
-    loan_total_amount: '',
-    loan_installment_amount: '',
-    loan_period: '',
     nominee_name: '',
     nominee_relation: '',
     documents: [],
@@ -1283,26 +1280,6 @@ export default function CreateEmployee() {
                         ))}
                       </div>
 
-                      <div className="mt-6 pt-4 border-t border-slate-100">
-                        <div className="flex items-center gap-2 text-slate-800 mb-3">
-                          <CreditCard className="h-4 w-4 text-primary" />
-                          <h3 className="text-sm font-bold">{t('Loan Details')}</h3>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1">
-                            <Label className="text-[10px] font-bold text-slate-500">{t('Total Amount')}</Label>
-                            <Input type="number" className="h-8 text-xs border-slate-200" value={formData.loan_total_amount} onChange={(e) => handleChange('loan_total_amount', e.target.value)} />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-[10px] font-bold text-slate-500">{t('Installment')}</Label>
-                            <Input type="number" className="h-8 text-xs border-slate-200" value={formData.loan_installment_amount} onChange={(e) => handleChange('loan_installment_amount', e.target.value)} />
-                          </div>
-                          <div className="col-span-2 space-y-1">
-                            <Label className="text-[10px] font-bold text-slate-500">{t('Loan Period (Months)')}</Label>
-                            <Input type="number" className="h-8 text-xs border-slate-200" value={formData.loan_period} onChange={(e) => handleChange('loan_period', e.target.value)} />
-                          </div>
-                        </div>
-                      </div>
                     </div>
 
                     <div className="space-y-6">

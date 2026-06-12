@@ -38,6 +38,7 @@ interface SearchAndFilterBarProps {
   showViewToggle?: boolean;
   activeView?: 'list' | 'grid';
   onViewChange?: (view: 'list' | 'grid') => void;
+  searchPlaceholder?: string;
 }
 
 export function SearchAndFilterBar({
@@ -60,6 +61,7 @@ export function SearchAndFilterBar({
   showViewToggle = false,
   activeView = 'list',
   onViewChange,
+  searchPlaceholder,
 }: SearchAndFilterBarProps) {
   const { t } = useTranslation();
 
@@ -68,10 +70,10 @@ export function SearchAndFilterBar({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <form onSubmit={onSearch} className="flex gap-2">
-            <div className="relative w-64">
+            <div className="relative w-full min-w-[200px] sm:w-80">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder={t("Search...")}
+                placeholder={searchPlaceholder || t("Search...")}
                 value={searchTerm}
                 onChange={(e) => onSearchChange(e.target.value)}
                 className="w-full pl-9 pr-8"

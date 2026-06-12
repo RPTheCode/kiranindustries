@@ -268,12 +268,6 @@
                         <th>IFSC Code</th>
                         <td>{{ $employee->ifsc_code ?? '-' }}</td>
                     </tr>
-                    <tr>
-                        <th>Loan Total</th>
-                        <td style="color: #e53e3e;">Rs.{{ number_format($employee->loan_total_amount ?? 0, 2) }}</td>
-                        <th>Monthly Installment</th>
-                        <td>Rs.{{ number_format($employee->loan_installment_amount ?? 0, 2) }}</td>
-                    </tr>
                 </table>
             </div>
 
