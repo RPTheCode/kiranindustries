@@ -24,7 +24,6 @@ import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useTranslation } from 'react-i18next';
-import { NavQuickAccessPin } from '@/components/nav-quick-access-pin';
 
 function navTooltipContent(item: NavItem) {
     if (!item.description) {
@@ -369,7 +368,7 @@ export function NavMain({
                 const leafActive = isLeafActive(child);
 
                 return (
-                    <SidebarMenuSubItem key={child.title} className="group/nav-item">
+                    <SidebarMenuSubItem key={child.title}>
                         <SidebarMenuSubButton
                             isActive={leafActive}
                             href={child.href || '#'}
@@ -383,8 +382,7 @@ export function NavMain({
                             )}
                         >
                             {renderSubMenuIcon(child, leafActive)}
-                            <span className="min-w-0 flex-1">{renderTitle(child.title, child)}</span>
-                            {!child.target && <NavQuickAccessPin href={child.href} title={child.title} />}
+                            {renderTitle(child.title, child)}
                         </SidebarMenuSubButton>
                     </SidebarMenuSubItem>
                 );
@@ -469,7 +467,7 @@ export function NavMain({
         const leafActive = isLeafActive(item);
 
         return (
-            <SidebarMenuItem key={item.title} className="group/nav-item">
+            <SidebarMenuItem key={item.title}>
                 <SidebarMenuButton asChild isActive={leafActive} tooltip={{ children: navTooltipContent(item) }}>
                     {item.target === '_blank' ? (
                         <a
@@ -490,7 +488,7 @@ export function NavMain({
                                 <>
                                     {item.icon && <item.icon className={menuIconClass(leafActive)} />}
                                     {state !== 'collapsed' && (
-                                        <span className="min-w-0 flex-1 truncate">{renderTitle(item.title, item)}</span>
+                                        <span className="min-w-0 truncate">{renderTitle(item.title, item)}</span>
                                     )}
                                 </>
                             )}
@@ -508,22 +506,14 @@ export function NavMain({
                         >
                             {effectivePosition === 'right' ? (
                                 <>
-                                    {state !== 'collapsed' && (
-                                        <span className="min-w-0 flex-1">{renderTitle(item.title, item)}</span>
-                                    )}
+                                    {state !== 'collapsed' && renderTitle(item.title, item)}
                                     {item.icon && <item.icon className={menuIconClass(leafActive)} />}
-                                    {state !== 'collapsed' && (
-                                        <NavQuickAccessPin href={item.href} title={item.title} />
-                                    )}
                                 </>
                             ) : (
                                 <>
                                     {item.icon && <item.icon className={menuIconClass(leafActive)} />}
                                     {state !== 'collapsed' && (
-                                        <span className="min-w-0 flex-1 truncate">{renderTitle(item.title, item)}</span>
-                                    )}
-                                    {state !== 'collapsed' && (
-                                        <NavQuickAccessPin href={item.href} title={item.title} />
+                                        <span className="min-w-0 truncate">{renderTitle(item.title, item)}</span>
                                     )}
                                 </>
                             )}
