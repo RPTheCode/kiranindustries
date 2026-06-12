@@ -88,6 +88,7 @@ php /app/artisan migrate --force
 
 # Sync permission definitions (firstOrCreate — safe on every deploy, no data wipe)
 php /app/artisan db:seed --class=PermissionSeeder --force
+php /app/artisan db:seed --class=EsslSyncPermissionSeeder --force 2>/dev/null || true
 php /app/artisan permission:cache-reset 2>/dev/null || true
 
 # Setup MS SQL Server ODBC driver configuration dynamically at runtime
@@ -183,6 +184,33 @@ startsecs=0
 stopwaitsecs=3600
 stdout_logfile=/var/log/worker-laravel.log
 stderr_logfile=/var/log/worker-laravel.log
+'''
+
+"worker-scheduler.conf" = '''
+[program:worker-scheduler]
+process_name=%(program_name)s_%(process_num)02d
+command=bash -c 'exec php -d memory_limit=256M /app/artisan schedule:work'
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+numprocs=1
+startsecs=3
+stdout_logfile=/app/storage/logs/scheduler.log
+stderr_logfile=/app/storage/logs/scheduler.log
+'''
+
+"worker-essl-scheduler.conf" = '''
+[program:worker-essl-scheduler]
+process_name=%(program_name)s_%(process_num)02d
+command=bash -c 'exec php -d memory_limit=128M /app/artisan essl:ensure-scheduler'
+autostart=true
+autorestart=true
+startsecs=15
+startretries=10
+numprocs=1
+stdout_logfile=/app/storage/logs/essl-queue-scheduler.log
+stderr_logfile=/app/storage/logs/essl-queue-scheduler.log
 '''
 
 "php-fpm.conf" = '''

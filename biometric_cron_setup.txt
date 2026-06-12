@@ -1,24 +1,72 @@
---- BIOMETRIC SYNC AUTOMATION SETUP ---
+--- ESSL AUTO SYNC — SERVER SETUP (REQUIRED) ---
 
-1. COMMAND TO RUN MANUALLY:
-   php artisan biometric:sync-all
+UI "Automatic Sync ON" only saves settings to database.
+Something on the server MUST call the scheduler every minute.
 
-2. LOG FILE LOCATION:
-   c:\xampp\htdocs\kiran\storage\logs\biometric_sync.log
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OPTION A — LINUX SERVER (Supervisor) — RECOMMENDED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-3. LARAVEL SCHEDULE CODE (Already added to app/Console/Kernel.php):
-   $schedule->command('biometric:sync-all')
-            ->everyThirtyMinutes()
-            ->appendOutputTo(storage_path('logs/biometric_sync.log'));
+1. Copy supervisor config:
+   sudo cp supervisor-kiran.conf /etc/supervisor/conf.d/kiran.conf
 
-4. WINDOWS TASK SCHEDULER SETUP (CRON JOB):
-   To automate this on Windows (XAMPP), create a task in "Task Scheduler":
-   
-   - Action: Start a Program
-   - Program/script: php
-   - Arguments: artisan schedule:run
-   - Start in: c:\xampp\htdocs\kiran
-   - Trigger: Daily -> Repeat every 1 minute (or 30 minutes) indefinitely.
+2. Edit paths if your project is not /var/www/kiranindustries
 
-5. ALTERNATIVE: CRONTAB (Linux/Ubuntu):
-   * * * * * cd c:\xampp\htdocs\kiran && php artisan schedule:run >> /dev/null 2>&1
+3. Reload supervisor:
+   sudo supervisorctl reread
+   sudo supervisorctl update
+   sudo supervisorctl start kiran-queue-worker:*
+   sudo supervisorctl start kiran-scheduler
+   sudo supervisorctl start kiran-essl-queue-scheduler
+
+4. Verify running:
+   sudo supervisorctl status
+
+You need AT LEAST ONE of:
+   - kiran-scheduler  (php artisan schedule:work)
+   - kiran-essl-queue-scheduler + kiran-queue-worker (queue-based tick)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OPTION B — LINUX CRON (alternative)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+crontab -e
+* * * * * cd /var/www/kiranindustries && php artisan schedule:run >> /dev/null 2>&1
+
+Also keep queue worker running for other jobs:
+php artisan queue:work
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OPTION C — WINDOWS XAMPP (local / dev)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Pick ONE:
+
+A) Task Scheduler (every 1 min):
+   PowerShell as Admin:
+   cd c:\xampp\htdocs\kiranindustries
+   .\scripts\install-windows-scheduler.ps1
+
+B) Terminal — schedule:work (keep open):
+   php artisan schedule:work
+
+C) Terminal — queue worker + queue scheduler (keep both open):
+   php artisan queue:work
+   php artisan essl:ensure-scheduler
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LOGS & TEST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+storage/logs/essl_auto_sync.log
+storage/logs/scheduler.log
+storage/logs/queue-worker.log
+storage/logs/laravel.log
+
+Manual test:
+   php artisan essl:auto-sync
+
+Start queue scheduler manually:
+   php artisan essl:ensure-scheduler
+
+UI shows "Scheduler running" when heartbeat received in last 2 minutes.

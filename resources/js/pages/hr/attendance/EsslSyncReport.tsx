@@ -79,6 +79,8 @@ interface Props {
         timezone_label?: string;
         current_time?: string;
         active_range?: string | null;
+        scheduler_running?: boolean;
+        scheduler_last_ping?: string | null;
     };
     filters: any;
 }
@@ -756,9 +758,14 @@ const EsslSyncReport = ({
                     </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
-                    {autoSettings.enabled && (
+                    {autoSettings.enabled && auto_sync_settings?.scheduler_running && (
                         <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
                             {t('Auto sync active')}
+                        </span>
+                    )}
+                    {autoSettings.enabled && !auto_sync_settings?.scheduler_running && (
+                        <span className="text-[10px] text-red-700 bg-red-50 px-2 py-0.5 rounded font-medium">
+                            {t('Scheduler offline — auto sync will not run')}
                         </span>
                     )}
                     {isResyncRange && !syncing && (
@@ -909,6 +916,19 @@ const EsslSyncReport = ({
                     {t('Last auto')}: {lastAutoRunLabel}
                     {auto_sync_settings?.timezone_label ? ` (${auto_sync_settings.timezone_label})` : ''}
                 </p>
+                {autoSettings.enabled && !auto_sync_settings?.scheduler_running && (
+                    <p className="text-[10px] text-red-600 bg-red-50/80 border border-red-100 rounded px-2 py-1.5 mt-1.5">
+                        {t('Server: enable supervisor (schedule:work) or run: php artisan queue:work + php artisan essl:ensure-scheduler')}
+                    </p>
+                )}
+                {auto_sync_settings?.scheduler_running && (
+                    <p className="text-[10px] text-emerald-600 mt-0.5">
+                        {t('Scheduler running')}
+                        {auto_sync_settings.scheduler_last_ping
+                            ? ` · ${t('last ping')} ${auto_sync_settings.scheduler_last_ping}`
+                            : ''}
+                    </p>
+                )}
                 <p className="text-[10px] text-slate-400 mt-0.5">
                     {t('All branches · each range runs on its own interval (India time).')}
                 </p>

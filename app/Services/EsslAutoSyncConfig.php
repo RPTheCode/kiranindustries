@@ -189,11 +189,28 @@ class EsslAutoSyncConfig
         return sprintf('%02d:%02d', intdiv($total, 60) % 24, $total % 60);
     }
 
+    public static function isSchedulerRunning(?int $companyId = null): bool
+    {
+        $ping = getSetting('laravel_scheduler_last_ping', null, $companyId);
+        if (! $ping) {
+            return false;
+        }
+
+        try {
+            $tz = self::companyTimezone($companyId);
+
+            return Carbon::parse($ping, $tz)->diffInMinutes(Carbon::now($tz)) <= 2;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
     public static function settingsPayload(?int $companyId = null): array
     {
         $tz = self::companyTimezone($companyId);
         $now = Carbon::now($tz);
         $active = self::activeRange($now, $companyId);
+        $schedulerRunning = self::isSchedulerRunning($companyId);
 
         return [
             'enabled' => self::isEnabled($companyId),
@@ -204,6 +221,8 @@ class EsslAutoSyncConfig
             'timezone_label' => $tz === 'Asia/Kolkata' ? 'IST (India)' : $tz,
             'current_time' => $now->format('Y-m-d H:i:s'),
             'active_range' => $active['label'] ?? null,
+            'scheduler_last_ping' => getSetting('laravel_scheduler_last_ping', null, $companyId),
+            'scheduler_running' => $schedulerRunning,
         ];
     }
 }
