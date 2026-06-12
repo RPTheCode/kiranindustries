@@ -6,32 +6,53 @@ use App\Models\EsslLog;
 use App\Models\User;
 use App\Models\Branch;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Carbon\Carbon;
 use App\Exports\EsslLogExport;
+use App\Services\EsslAutoSyncConfig;
+use App\Services\EsslSyncOrchestrator;
 use Maatwebsite\Excel\Facades\Excel;
 
 class EsslLogController extends Controller
 {
     use \App\Traits\LogsActivity;
 
+    public function __construct(private EsslSyncOrchestrator $syncOrchestrator) {}
+
     public function index(Request $request)
     {
         $activeBranchId = $request->get('branch_id') ?? session('active_branch_id');
+        $perPage = min(max((int) ($request->per_page ?? 25), 10), 50);
+        $dates = $this->resolveLogDateRange($request);
+        $dateFrom = $dates['date_from'];
+        $dateTo = $dates['date_to'];
+        $activeMonth = $dates['month'];
 
-        $query = EsslLog::select('essl_logs.*')
+        $query = EsslLog::query()
+            ->select([
+                'essl_logs.id',
+                'essl_logs.device_log_id',
+                'essl_logs.user_id',
+                'essl_logs.log_date',
+                'essl_logs.direction',
+                'essl_logs.device_id',
+                'essl_logs.body_temperature',
+                'essl_logs.is_mask_on',
+            ])
             ->join('users', 'essl_logs.user_id', '=', 'users.id')
             ->where('users.status', 'active')
+            ->where('essl_logs.log_date', '>=', $dateFrom . ' 00:00:00')
+            ->where('essl_logs.log_date', '<=', $dateTo . ' 23:59:59')
             ->with([
+                'user:id,name',
                 'user.employee' => function ($q) {
-                    $q->withoutGlobalScopes();
-                }
+                    $q->withoutGlobalScopes()->select('id', 'user_id', 'employee_id', 'emy_code');
+                },
             ]);
 
         $needsEmployeeJoin = ($activeBranchId && $activeBranchId !== 'all') ||
-            ($request->has('category_id') && !empty($request->category_id) && $request->category_id !== 'all');
+            ($request->filled('category_id') && $request->category_id !== 'all');
 
         if ($needsEmployeeJoin) {
             $query->join('employees as emp_filter', 'users.id', '=', 'emp_filter.user_id');
@@ -40,57 +61,42 @@ class EsslLogController extends Controller
                 $query->where('emp_filter.branch_id', $activeBranchId);
             }
 
-            if ($request->has('category_id') && !empty($request->category_id) && $request->category_id !== 'all') {
+            if ($request->filled('category_id') && $request->category_id !== 'all') {
                 $query->where('emp_filter.category_id', $request->category_id);
             }
         }
 
-        // Filter by Date Range
-        if ($request->has('date_from') && !empty($request->date_from)) {
-            $query->where('log_date', '>=', $request->date_from . ' 00:00:00');
-        }
-        if ($request->has('date_to') && !empty($request->date_to)) {
-            $query->where('log_date', '<=', $request->date_to . ' 23:59:59');
-        }
-
-        // Filter by Employee
-        if ($request->has('employee_id') && !empty($request->employee_id) && $request->employee_id !== 'all') {
+        if ($request->filled('employee_id') && $request->employee_id !== 'all') {
             $query->where('essl_logs.user_id', $request->employee_id);
         }
 
-        // Filter by Direction (In/Out)
-        if ($request->has('direction') && $request->direction !== null && $request->direction !== '' && $request->direction !== 'all') {
+        if ($request->filled('direction') && $request->direction !== 'all') {
             $direction = strtolower($request->direction);
             if ($direction === 'in' || $direction === '0') {
-                $query->whereIn('direction', ['in', '0']);
+                $query->whereIn('essl_logs.direction', ['in', '0']);
             } elseif ($direction === 'out' || $direction === '1') {
-                $query->whereIn('direction', ['out', '1']);
+                $query->whereIn('essl_logs.direction', ['out', '1']);
             } else {
-                $query->where('direction', $request->direction);
+                $query->where('essl_logs.direction', $request->direction);
             }
         }
 
-        $logs = $query->orderBy('log_date', 'desc')->paginate($request->per_page ?? 20);
+        $logs = $query->orderByDesc('essl_logs.log_date')->paginate($perPage)->withQueryString();
 
-        $employeesQuery = User::join('employees', 'users.id', '=', 'employees.user_id')
+        $employees = User::query()
+            ->join('employees', 'users.id', '=', 'employees.user_id')
             ->where('users.type', 'employee')
-            ->whereIn('users.created_by', getCompanyAndUsersId());
-
-        if ($activeBranchId && $activeBranchId !== 'all') {
-            $employeesQuery->where('employees.branch_id', $activeBranchId);
-        }
-
-        $employees = $employeesQuery->select('users.id', 'users.name', 'employees.employee_id as emp_code')->get()->map(function ($user) {
-            return [
+            ->where('users.status', 'active')
+            ->whereIn('users.created_by', getCompanyAndUsersId())
+            ->when($activeBranchId && $activeBranchId !== 'all', fn ($q) => $q->where('employees.branch_id', $activeBranchId))
+            ->orderBy('users.name')
+            ->select('users.id', 'users.name', 'employees.employee_id', 'employees.emy_code')
+            ->get()
+            ->map(fn ($user) => [
                 'id' => $user->id,
                 'name' => $user->name,
-                'emp_code' => $user->emp_code ?? ''
-            ];
-        });
-
-        $branches = Branch::whereIn('created_by', getCompanyAndUsersId())
-            ->where('status', 'active')
-            ->get(['id', 'name']);
+                'emp_code' => $user->employee_id ?? $user->emy_code ?? '',
+            ]);
 
         $categoriesQuery = \App\Models\Category::withoutGlobalScopes()
             ->whereIn('created_by', getCompanyAndUsersId())
@@ -100,50 +106,124 @@ class EsslLogController extends Controller
                 $q->where('branch_id', $activeBranchId)->orWhereNull('branch_id');
             });
         }
-        $categories = $categoriesQuery->get(['id', 'name']);
+        $categories = $categoriesQuery->orderBy('name')->get(['id', 'name']);
 
-        // Fetch actual max dates for all branches from DB
-        $maxDates = \Illuminate\Support\Facades\DB::table('essl_logs')
-            ->join('employees', 'essl_logs.user_id', '=', 'employees.user_id')
-            ->select('employees.branch_id', \Illuminate\Support\Facades\DB::raw('MAX(essl_logs.log_date) as max_date'))
-            ->groupBy('employees.branch_id')
-            ->pluck('max_date', 'branch_id')
-            ->toArray();
-
-        $branchSyncDates = [];
-        foreach ($branches as $branch) {
-            if (isset($maxDates[$branch->id])) {
-                $date = Carbon::parse($maxDates[$branch->id])->format('Y-m-d H:i:s');
-            } else {
-                $date = getSetting('last_biometric_sync_date_branch_' . $branch->id);
-                if (!$date) {
-                    $date = getSetting('last_biometric_sync_date');
-                }
-            }
-            $branchSyncDates[$branch->id] = $date;
-        }
-
-        $latestGlobalLog = EsslLog::orderBy('log_date', 'desc')->first();
-        $globalLastSync = $latestGlobalLog ? Carbon::parse($latestGlobalLog->log_date)->format('Y-m-d H:i:s') : getSetting('last_biometric_sync_date');
-        $branchSyncDates['all'] = $globalLastSync;
-
-        if ($activeBranchId && $activeBranchId !== 'all') {
-            $lastSyncDate = $branchSyncDates[$activeBranchId] ?? $globalLastSync;
-        } else {
-            $lastSyncDate = $globalLastSync;
-        }
+        $branchSyncDates = $this->resolveBranchSyncDates();
+        $globalLastSync = $branchSyncDates['all'] ?? getSetting('last_biometric_sync_date');
+        $lastSyncDate = ($activeBranchId && $activeBranchId !== 'all')
+            ? ($branchSyncDates[$activeBranchId] ?? $globalLastSync)
+            : $globalLastSync;
 
         return Inertia::render('hr/attendance/EsslSyncReport', [
             'logs' => $logs,
             'employees' => $employees,
-            'branches' => $branches,
             'categories' => $categories,
             'last_sync_date' => $lastSyncDate,
             'branch_sync_dates' => $branchSyncDates,
-            'filters' => array_merge($request->all(['date_from', 'date_to', 'employee_id', 'direction', 'category_id', 'per_page']), [
-                'branch_id' => $activeBranchId
-            ]),
+            'auto_sync_settings' => $this->getAutoSyncSettings(),
+            'filters' => [
+                'month' => $activeMonth,
+                'date_from' => $dateFrom,
+                'date_to' => $dateTo,
+                'employee_id' => $request->get('employee_id', 'all'),
+                'direction' => $request->get('direction', 'all'),
+                'category_id' => $request->get('category_id', 'all'),
+                'branch_id' => $activeBranchId,
+                'per_page' => $perPage,
+            ],
         ]);
+    }
+
+    /** Month-wise default; explicit day range capped at 31 days for DB load. */
+    protected function resolveLogDateRange(Request $request): array
+    {
+        $today = Carbon::today();
+
+        if ($request->filled('date_from') && $request->filled('date_to')) {
+            $from = Carbon::parse($request->date_from)->startOfDay();
+            $to = Carbon::parse($request->date_to)->startOfDay();
+            if ($to->gt($today)) {
+                $to = $today->copy();
+            }
+            if ($from->gt($to)) {
+                $from = $to->copy();
+            }
+            if ($from->diffInDays($to) > 31) {
+                $to = $from->copy()->addDays(31);
+                if ($to->gt($today)) {
+                    $to = $today->copy();
+                }
+            }
+
+            return [
+                'month' => $from->format('Y-m'),
+                'date_from' => $from->format('Y-m-d'),
+                'date_to' => $to->format('Y-m-d'),
+            ];
+        }
+
+        $monthKey = $request->filled('month') && preg_match('/^\d{4}-\d{2}$/', $request->month)
+            ? $request->month
+            : $today->format('Y-m');
+
+        $monthStart = Carbon::parse($monthKey . '-01')->startOfMonth();
+        $monthEnd = $monthStart->copy()->endOfMonth();
+        if ($monthEnd->gt($today)) {
+            $monthEnd = $today->copy();
+        }
+
+        return [
+            'month' => $monthKey,
+            'date_from' => $monthStart->format('Y-m-d'),
+            'date_to' => $monthEnd->format('Y-m-d'),
+        ];
+    }
+
+    /** Last sync from settings only — no MAX() scan on essl_logs. */
+    protected function resolveBranchSyncDates(): array
+    {
+        $branches = Branch::whereIn('created_by', getCompanyAndUsersId())
+            ->where('status', 'active')
+            ->get(['id']);
+
+        $dates = [];
+        foreach ($branches as $branch) {
+            $dates[$branch->id] = getSetting('last_biometric_sync_date_branch_' . $branch->id)
+                ?: getSetting('last_biometric_sync_date');
+        }
+
+        $dates['all'] = getSetting('last_biometric_sync_date');
+
+        return $dates;
+    }
+
+    public function updateAutoSyncSettings(Request $request)
+    {
+        $request->validate([
+            'enabled' => 'required|boolean',
+            'interval_minutes' => 'nullable|integer|min:5|max:60',
+            'ranges' => 'required|array|min:1|max:' . EsslAutoSyncConfig::MAX_RANGES,
+            'ranges.*.label' => 'required|string|max:50',
+            'ranges.*.from' => 'required|date_format:H:i',
+            'ranges.*.to' => 'required|date_format:H:i',
+        ]);
+
+        $ranges = EsslAutoSyncConfig::normalizeRanges($request->ranges);
+
+        if (count($ranges) === 0) {
+            return redirect()->back()->withErrors(['ranges' => __('Each range must have end time after start time.')]);
+        }
+
+        updateSetting('essl_auto_sync_enabled', $request->boolean('enabled') ? '1' : '0');
+        updateSetting('essl_auto_sync_interval_minutes', (string) ($request->interval_minutes ?: EsslAutoSyncConfig::DEFAULT_INTERVAL_MINUTES));
+        updateSetting('essl_auto_sync_ranges', json_encode($ranges));
+
+        return redirect()->back()->with('success', __('Automatic sync settings saved.'));
+    }
+
+    protected function getAutoSyncSettings(): array
+    {
+        return EsslAutoSyncConfig::settingsPayload();
     }
 
     public function sync(Request $request)
@@ -160,7 +240,7 @@ class EsslLogController extends Controller
         }
 
         try {
-            $this->runSyncForDateRange($from, $to, $request->employee_id, $request->branch_id);
+            $this->syncOrchestrator->runSyncForDateRange($from, $to, $request->employee_id, $request->branch_id);
 
             return redirect()->back()->with(
                 'success',
@@ -185,7 +265,7 @@ class EsslLogController extends Controller
         $started = microtime(true);
 
         try {
-            $result = $this->runSyncForDateRange($date, $date, $request->employee_id, $request->branch_id);
+            $result = $this->syncOrchestrator->runSyncForDateRange($date, $date, $request->employee_id, $request->branch_id);
             $elapsed = round(microtime(true) - $started, 2);
 
             Log::info('ESSL chunk sync OK', array_merge($result, ['elapsed_sec' => $elapsed]));
@@ -209,58 +289,19 @@ class EsslLogController extends Controller
         }
     }
 
-    protected function runSyncForDateRange(string $from, string $to, $employeeId = null, $branchId = null): array
-    {
-        set_time_limit(0);
-
-        $args = [
-            '--from' => $from,
-            '--to' => $to,
-        ];
-        if ($employeeId) {
-            $args['--employee_id'] = $employeeId;
-        }
-        if ($branchId && $branchId !== 'all') {
-            $args['--branch_id'] = $branchId;
-        }
-
-        Artisan::call('essl:sync', $args);
-
-        $esslOutput = Artisan::output();
-        $newEsslLogs = 0;
-        if (preg_match('/New logs added:\s*(\d+)/', $esslOutput, $matches)) {
-            $newEsslLogs = (int) $matches[1];
-        }
-
-        $biometricController = app(\App\Http\Controllers\BiometricAttendanceSyncController::class);
-
-        $requestArgs = [
-            'from_date' => $from,
-            'to_date' => $to,
-        ];
-        if ($employeeId) {
-            $requestArgs['employee_id'] = $employeeId;
-        }
-        if ($branchId) {
-            $requestArgs['branch_id'] = $branchId;
-        }
-
-        $result = $biometricController->runSync(new Request($requestArgs));
-
-        if ($branchId && $branchId !== 'all') {
-            updateSetting('last_biometric_sync_date_branch_' . $branchId, $to);
-        } else {
-            updateSetting('last_biometric_sync_date', $to);
-        }
-
-        return [
-            'processed_count' => $result['processed_count'],
-            'new_essl_logs' => $newEsslLogs,
-        ];
-    }
-
     public function export(Request $request)
     {
+        $request->validate([
+            'date_from' => 'required|date',
+            'date_to' => 'required|date|after_or_equal:date_from',
+        ]);
+
+        $from = Carbon::parse($request->date_from);
+        $to = Carbon::parse($request->date_to);
+        if ($from->diffInDays($to) > 31) {
+            return redirect()->back()->with('error', __('Export is limited to 31 days. Please narrow the date range.'));
+        }
+
         $activeBranchId = $request->get('branch_id') ?? session('active_branch_id');
         $filters = $request->only(['date_from', 'date_to', 'employee_id', 'direction', 'category_id']);
         $filters['branch_id'] = $activeBranchId;

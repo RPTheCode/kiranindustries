@@ -21,10 +21,24 @@ class EsslLogExport implements FromCollection, WithHeadings, WithMapping, Should
 
     public function collection()
     {
-        $query = EsslLog::select('essl_logs.*')
+        $query = EsslLog::query()
+            ->select([
+                'essl_logs.id',
+                'essl_logs.device_log_id',
+                'essl_logs.user_id',
+                'essl_logs.log_date',
+                'essl_logs.direction',
+                'essl_logs.device_id',
+                'essl_logs.body_temperature',
+                'essl_logs.is_mask_on',
+            ])
             ->join('users', 'essl_logs.user_id', '=', 'users.id')
             ->where('users.status', 'active')
-            ->with(['user.employee.branch']);
+            ->with([
+                'user:id,name',
+                'user.employee' => fn ($q) => $q->withoutGlobalScopes()->select('id', 'user_id', 'employee_id', 'emy_code', 'branch_id'),
+                'user.employee.branch:id,name',
+            ]);
 
         $needsEmployeeJoin = (!empty($this->filters['branch_id']) && $this->filters['branch_id'] !== 'all') || 
                              (!empty($this->filters['category_id']) && $this->filters['category_id'] !== 'all');
@@ -57,7 +71,7 @@ class EsslLogExport implements FromCollection, WithHeadings, WithMapping, Should
             $query->where('direction', $this->filters['direction']);
         }
 
-        return $query->orderBy('log_date', 'desc')->get();
+        return $query->orderByDesc('essl_logs.log_date')->limit(50000)->get();
     }
 
     public function headings(): array

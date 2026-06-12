@@ -13,3 +13,8 @@ Artisan::command('inspire', function () {
     ->dailyAt('03:00')
     ->withoutOverlapping()
     ->appendOutputTo(storage_path('logs/activity_logs_cleanup.log'));
+
+\Illuminate\Support\Facades\Schedule::command('essl:auto-sync')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->appendOutputTo(storage_path('logs/essl_auto_sync.log'));

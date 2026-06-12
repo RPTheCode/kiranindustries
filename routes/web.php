@@ -1336,6 +1336,7 @@ Route::middleware(['auth', 'verified', 'setting'])->group(function () {
             Route::get('essl-sync', [\App\Http\Controllers\EsslLogController::class, 'index'])->name('hr.essl-sync.index');
             Route::post('essl-sync/sync', [\App\Http\Controllers\EsslLogController::class, 'sync'])->name('hr.essl-sync.sync');
             Route::post('essl-sync/sync-chunk', [\App\Http\Controllers\EsslLogController::class, 'syncChunk'])->name('hr.essl-sync.sync-chunk');
+            Route::post('essl-sync/auto-settings', [\App\Http\Controllers\EsslLogController::class, 'updateAutoSyncSettings'])->middleware('permission:sync-essl-log')->name('hr.essl-sync.auto-settings');
             Route::get('essl-sync/export', [\App\Http\Controllers\EsslLogController::class, 'export'])->name('hr.essl-sync.export');
             Route::redirect('essl-sync-report', '/essl-sync', 301);
             Route::redirect('essl-sync-report/{path}', '/essl-sync/{path}', 301)->where('path', '.*');
