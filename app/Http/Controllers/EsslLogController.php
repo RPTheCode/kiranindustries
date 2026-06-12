@@ -201,11 +201,11 @@ class EsslLogController extends Controller
     {
         $request->validate([
             'enabled' => 'required|boolean',
-            'interval_minutes' => 'nullable|integer|min:5|max:60',
             'ranges' => 'required|array|min:1|max:' . EsslAutoSyncConfig::MAX_RANGES,
             'ranges.*.label' => 'required|string|max:50',
             'ranges.*.from' => 'required|date_format:H:i',
             'ranges.*.to' => 'required|date_format:H:i',
+            'ranges.*.interval_minutes' => 'required|integer|min:5|max:60',
         ]);
 
         $ranges = EsslAutoSyncConfig::normalizeRanges($request->ranges);
@@ -215,7 +215,6 @@ class EsslLogController extends Controller
         }
 
         updateSetting('essl_auto_sync_enabled', $request->boolean('enabled') ? '1' : '0');
-        updateSetting('essl_auto_sync_interval_minutes', (string) ($request->interval_minutes ?: EsslAutoSyncConfig::DEFAULT_INTERVAL_MINUTES));
         updateSetting('essl_auto_sync_ranges', json_encode($ranges));
 
         return redirect()->back()->with('success', __('Automatic sync settings saved.'));

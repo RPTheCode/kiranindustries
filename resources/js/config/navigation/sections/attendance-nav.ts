@@ -1,7 +1,7 @@
 import { Fingerprint, RefreshCw } from 'lucide-react';
 import type { NavSectionBuilder } from '@/config/navigation/types';
 import type { NavItem } from '@/types';
-import { canViewPermission, hasPermission } from '@/utils/authorization';
+import { canAccessEsslSync, canViewPermission, hasPermission } from '@/utils/authorization';
 
 export const buildAttendanceNav: NavSectionBuilder = ({ permissions, t }) => {
     const items: NavItem[] = [];
@@ -50,7 +50,7 @@ export const buildAttendanceNav: NavSectionBuilder = ({ permissions, t }) => {
         });
     }
 
-    if (hasPermission(permissions, 'sync-essl-log')) {
+    if (canAccessEsslSync(permissions)) {
         items.push({
             title: t('ESSL Device Sync'),
             href: route('hr.essl-sync.index'),

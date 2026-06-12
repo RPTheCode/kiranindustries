@@ -23,24 +23,24 @@ class EsslAutoSyncCommand extends Command
         }
 
         $companyId = $companyUser->id;
+        $tz = EsslAutoSyncConfig::applyCompanyTimezone($companyId);
 
         if (!EsslAutoSyncConfig::isEnabled($companyId)) {
             return self::SUCCESS;
-        }
-
-        $tz = data_get(settings($companyId), 'defaultTimezone', config('app.timezone', 'Asia/Kolkata'));
-        if (!$tz || $tz === 'UTC') {
-            $tz = 'Asia/Kolkata';
         }
 
         $now = Carbon::now($tz);
         $active = EsslAutoSyncConfig::activeRange($now, $companyId);
 
         if (!$active) {
+            $this->line("ESSL auto sync skipped — outside time ranges ({$now->format('H:i')} {$tz})");
+
             return self::SUCCESS;
         }
 
         if (!EsslAutoSyncConfig::shouldRunNow($now, $active['index'], $companyId)) {
+            $this->line("ESSL auto sync skipped — waiting interval for [{$active['label']}] ({$now->format('H:i')} {$tz})");
+
             return self::SUCCESS;
         }
 

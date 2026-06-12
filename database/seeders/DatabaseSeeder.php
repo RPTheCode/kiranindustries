@@ -170,6 +170,7 @@ class DatabaseSeeder extends Seeder
                 EmailTemplateSeeder::class,
                 LandingPageCustomPageSeeder::class,
                 LiveDeploySeeder::class,
+                EsslSyncPermissionSeeder::class,
             ]);
         }
     }

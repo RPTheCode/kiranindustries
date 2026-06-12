@@ -42,7 +42,9 @@ class MobileMenuBuilder
             $menu[] = $this->item('attendance', 'Attendance');
         }
 
-        if (userHasPermissionForMobileMenu($user, 'sync-essl-log')) {
+        if (userHasPermissionForMobileMenu($user, 'view-essl-sync')
+            || userHasPermissionForMobileMenu($user, 'manage-essl-sync')
+            || userHasPermissionForMobileMenu($user, 'sync-essl-log')) {
             $menu[] = $this->item('essl_sync', 'Essl sync');
         }
 

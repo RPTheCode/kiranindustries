@@ -28,6 +28,16 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Console (scheduler/queue): use company IST, not PHP.ini server timezone
+        if ($this->app->runningInConsole() && file_exists(storage_path('installed'))) {
+            try {
+                \App\Services\EsslAutoSyncConfig::applyCompanyTimezone();
+            } catch (\Throwable) {
+                config(['app.timezone' => 'Asia/Kolkata']);
+                date_default_timezone_set('Asia/Kolkata');
+            }
+        }
+
         // Force HTTPS in non-local environments (staging/production behind reverse proxy)
         if (!$this->app->environment('local')) {
             URL::forceScheme('https');

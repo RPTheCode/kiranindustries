@@ -12,11 +12,9 @@ class SettingMiddleware
 
     public function handle(Request $request, Closure $next): Response
     {
-        $settings = settings();
-        if (!empty($settings['defaultTimezone'])) {
-            Config::set('app.timezone', $settings['defaultTimezone']);
-            date_default_timezone_set(Config::get('app.timezone', 'UTC'));
-        }
+        $tz = companyDisplayTimezone();
+        Config::set('app.timezone', $tz);
+        date_default_timezone_set($tz);
         return $next($request);
     }
 }

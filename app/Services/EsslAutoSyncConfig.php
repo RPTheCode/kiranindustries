@@ -13,8 +13,8 @@ class EsslAutoSyncConfig
     public static function defaultRanges(): array
     {
         return [
-            ['label' => 'Morning IN', 'from' => '07:00', 'to' => '10:00'],
-            ['label' => 'Evening OUT', 'from' => '18:00', 'to' => '20:00'],
+            ['label' => 'Morning IN', 'from' => '07:00', 'to' => '10:00', 'interval_minutes' => self::DEFAULT_INTERVAL_MINUTES],
+            ['label' => 'Evening OUT', 'from' => '18:00', 'to' => '20:00', 'interval_minutes' => self::DEFAULT_INTERVAL_MINUTES],
         ];
     }
 
@@ -25,7 +25,7 @@ class EsslAutoSyncConfig
         if ($raw) {
             $decoded = is_string($raw) ? json_decode($raw, true) : $raw;
             if (is_array($decoded) && count($decoded) > 0) {
-                return self::normalizeRanges($decoded);
+                return self::normalizeRanges($decoded, $companyId);
             }
         }
 
@@ -35,9 +35,9 @@ class EsslAutoSyncConfig
 
         if (getSetting('essl_auto_sync_morning_time', null, $companyId) || getSetting('essl_auto_sync_evening_time', null, $companyId)) {
             return self::normalizeRanges([
-                ['label' => 'Morning', 'from' => $morning, 'to' => self::addMinutesToTime($morning, 30)],
-                ['label' => 'Evening', 'from' => $evening, 'to' => self::addMinutesToTime($evening, 30)],
-            ]);
+                ['label' => 'Morning', 'from' => $morning, 'to' => self::addMinutesToTime($morning, 30), 'interval_minutes' => self::getIntervalMinutes($companyId)],
+                ['label' => 'Evening', 'from' => $evening, 'to' => self::addMinutesToTime($evening, 30), 'interval_minutes' => self::getIntervalMinutes($companyId)],
+            ], $companyId);
         }
 
         return self::defaultRanges();
@@ -53,6 +53,27 @@ class EsslAutoSyncConfig
     public static function isEnabled(?int $companyId = null): bool
     {
         return in_array((string) getSetting('essl_auto_sync_enabled', '0', $companyId), ['1', 'true'], true);
+    }
+
+    /** India (IST) when company setting missing or UTC — matches attendance wall-clock. */
+    public static function companyTimezone(?int $companyId = null): string
+    {
+        $tz = data_get(settings($companyId), 'defaultTimezone', config('app.timezone', 'Asia/Kolkata'));
+
+        if (! $tz || $tz === 'UTC') {
+            return 'Asia/Kolkata';
+        }
+
+        return $tz;
+    }
+
+    public static function applyCompanyTimezone(?int $companyId = null): string
+    {
+        $tz = self::companyTimezone($companyId);
+        config(['app.timezone' => $tz]);
+        date_default_timezone_set($tz);
+
+        return $tz;
     }
 
     /**
@@ -76,7 +97,8 @@ class EsslAutoSyncConfig
 
     public static function shouldRunNow(Carbon $now, int $rangeIndex, ?int $companyId = null): bool
     {
-        $interval = self::getIntervalMinutes($companyId);
+        $ranges = self::getRanges($companyId);
+        $interval = $ranges[$rangeIndex]['interval_minutes'] ?? self::getIntervalMinutes($companyId);
         $lastRun = getSetting(self::lastRunKey($rangeIndex), null, $companyId);
 
         if (!$lastRun) {
@@ -84,7 +106,11 @@ class EsslAutoSyncConfig
         }
 
         try {
-            return Carbon::parse($lastRun)->diffInMinutes($now) >= $interval;
+            $tz = self::companyTimezone($companyId);
+            $lastRunAt = Carbon::parse($lastRun, $tz);
+            $nowInTz = $now->copy()->timezone($tz);
+
+            return $lastRunAt->diffInMinutes($nowInTz) >= $interval;
         } catch (\Throwable) {
             return true;
         }
@@ -103,12 +129,13 @@ class EsslAutoSyncConfig
     }
 
     /**
-     * @param  array<int, array{label?: string, from?: string, to?: string}>  $ranges
-     * @return array<int, array{label: string, from: string, to: string}>
+     * @param  array<int, array{label?: string, from?: string, to?: string, interval_minutes?: int|string}>  $ranges
+     * @return array<int, array{label: string, from: string, to: string, interval_minutes: int}>
      */
-    public static function normalizeRanges(array $ranges): array
+    public static function normalizeRanges(array $ranges, ?int $companyId = null): array
     {
         $normalized = [];
+        $fallbackInterval = self::getIntervalMinutes($companyId);
 
         foreach (array_slice($ranges, 0, self::MAX_RANGES) as $i => $range) {
             $from = self::normalizeTime($range['from'] ?? '07:00');
@@ -123,10 +150,18 @@ class EsslAutoSyncConfig
                 'label' => $label,
                 'from' => $from,
                 'to' => $to,
+                'interval_minutes' => self::normalizeIntervalMinutes($range['interval_minutes'] ?? null, $fallbackInterval),
             ];
         }
 
         return $normalized ?: self::defaultRanges();
+    }
+
+    public static function normalizeIntervalMinutes(mixed $value, ?int $fallback = null): int
+    {
+        $interval = (int) ($value ?: $fallback ?: self::DEFAULT_INTERVAL_MINUTES);
+
+        return max(5, min(60, $interval ?: self::DEFAULT_INTERVAL_MINUTES));
     }
 
     public static function normalizeTime(?string $time): string
@@ -156,12 +191,19 @@ class EsslAutoSyncConfig
 
     public static function settingsPayload(?int $companyId = null): array
     {
+        $tz = self::companyTimezone($companyId);
+        $now = Carbon::now($tz);
+        $active = self::activeRange($now, $companyId);
+
         return [
             'enabled' => self::isEnabled($companyId),
             'ranges' => self::getRanges($companyId),
-            'interval_minutes' => self::getIntervalMinutes($companyId),
             'last_run_at' => getSetting('essl_auto_sync_last_run_at', null, $companyId),
             'last_run_slot' => getSetting('essl_auto_sync_last_run_slot', null, $companyId),
+            'timezone' => $tz,
+            'timezone_label' => $tz === 'Asia/Kolkata' ? 'IST (India)' : $tz,
+            'current_time' => $now->format('Y-m-d H:i:s'),
+            'active_range' => $active['label'] ?? null,
         ];
     }
 }

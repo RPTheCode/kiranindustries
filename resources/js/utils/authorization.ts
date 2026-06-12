@@ -193,3 +193,17 @@ export const canManageSalaryLoan = (userPermissions: string[]) =>
         'manage-any-salary-loans',
         'edit-salary-loans',
     ]);
+
+const esslLegacyFull = ['sync-essl-log', 'manage-essl-sync'] as const;
+
+export const canAccessEsslSync = (userPermissions: string[]) =>
+    hasAnyPermission(userPermissions, ['view-essl-sync', ...esslLegacyFull]);
+
+export const canManualEsslSync = (userPermissions: string[]) =>
+    hasAnyPermission(userPermissions, ['sync-essl-manual', ...esslLegacyFull]);
+
+export const canManageEsslAutoSync = (userPermissions: string[]) =>
+    hasAnyPermission(userPermissions, ['manage-essl-auto-sync', ...esslLegacyFull]);
+
+export const canExportEsslSync = (userPermissions: string[]) =>
+    hasAnyPermission(userPermissions, ['export-essl-sync', ...esslLegacyFull]);

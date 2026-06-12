@@ -45,7 +45,12 @@ class LiveDeploySeeder extends Seeder
             ['name' => 'view-attendance-reports', 'label' => 'View Attendance Reports', 'module' => 'Reports'],
             ['name' => 'view-monthly-reports', 'label' => 'View Monthly Reports', 'module' => 'Reports'],
             ['name' => 'view-master-reports', 'label' => 'View Master Reports', 'module' => 'Reports'],
-            ['name' => 'sync-essl-log', 'label' => 'ESSL Sync Log', 'module' => 'ESSL Sync Log'],
+            ['name' => 'view-essl-sync', 'label' => 'View ESSL Device Sync', 'module' => 'ESSL Sync Log'],
+            ['name' => 'sync-essl-manual', 'label' => 'Run Manual ESSL Sync', 'module' => 'ESSL Sync Log'],
+            ['name' => 'manage-essl-auto-sync', 'label' => 'Manage Automatic ESSL Sync', 'module' => 'ESSL Sync Log'],
+            ['name' => 'export-essl-sync', 'label' => 'Export ESSL Sync Logs', 'module' => 'ESSL Sync Log'],
+            ['name' => 'manage-essl-sync', 'label' => 'Manage ESSL Device Sync (Full)', 'module' => 'ESSL Sync Log'],
+            ['name' => 'sync-essl-log', 'label' => 'ESSL Sync Log (Legacy Full Access)', 'module' => 'ESSL Sync Log'],
             // Activity Log permissions
             ['name' => 'view-activity-logs', 'label' => 'View Activity Logs', 'module' => 'Staff & Security'],
             ['name' => 'manage-activity-logs', 'label' => 'Manage Activity Logs', 'module' => 'Staff & Security'],
@@ -161,6 +166,7 @@ class LiveDeploySeeder extends Seeder
             'bulk-attendance-add' => 'Attendance & Bio-Sync',
 
             // ESSL
+            'essl-sync' => 'ESSL Sync Log',
             'sync-essl-log' => 'ESSL Sync Log',
 
             // Reports

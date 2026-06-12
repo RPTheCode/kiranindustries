@@ -33,6 +33,11 @@ import { format, eachDayOfInterval, parseISO, isAfter, startOfDay, subMonths } f
 import { toast } from '@/components/custom-toast';
 import axios from 'axios';
 import { cn } from '@/lib/utils';
+import {
+    canExportEsslSync,
+    canManageEsslAutoSync,
+    canManualEsslSync,
+} from '@/utils/authorization';
 
 interface EsslLog {
     id: number;
@@ -67,21 +72,25 @@ interface Props {
     branch_sync_dates?: Record<string | number, string | null>;
     auto_sync_settings?: {
         enabled: boolean;
-        ranges: { label: string; from: string; to: string }[];
-        interval_minutes: number;
+        ranges: { label: string; from: string; to: string; interval_minutes: number }[];
         last_run_at?: string | null;
         last_run_slot?: string | null;
+        timezone?: string;
+        timezone_label?: string;
+        current_time?: string;
+        active_range?: string | null;
     };
     filters: any;
 }
 
-type AutoSyncRange = { label: string; from: string; to: string };
+type AutoSyncRange = { label: string; from: string; to: string; interval_minutes: number };
 
 const MAX_AUTO_RANGES = 4;
+const DEFAULT_RANGE_INTERVAL = 15;
 
 const defaultAutoRanges = (): AutoSyncRange[] => [
-    { label: 'Morning IN', from: '07:00', to: '10:00' },
-    { label: 'Evening OUT', from: '18:00', to: '20:00' },
+    { label: 'Morning IN', from: '07:00', to: '10:00', interval_minutes: DEFAULT_RANGE_INTERVAL },
+    { label: 'Evening OUT', from: '18:00', to: '20:00', interval_minutes: DEFAULT_RANGE_INTERVAL },
 ];
 
 type SyncProgressState = {
@@ -183,7 +192,14 @@ const EsslSyncReport = ({
     filters,
 }: Props) => {
     const { t } = useTranslation();
-    const { active_branch_id } = usePage().props as any;
+    const { active_branch_id, auth } = usePage().props as {
+        active_branch_id?: number | string;
+        auth?: { permissions?: string[] };
+    };
+    const userPermissions = auth?.permissions ?? [];
+    const canManualSync = canManualEsslSync(userPermissions);
+    const canAutoSync = canManageEsslAutoSync(userPermissions);
+    const canExport = canExportEsslSync(userPermissions);
     const [loading, setLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
     const [syncProgress, setSyncProgress] = useState<SyncProgressState | null>(null);
@@ -192,12 +208,12 @@ const EsslSyncReport = ({
     const [savingAuto, setSavingAuto] = useState(false);
     const [autoSettings, setAutoSettings] = useState({
         enabled: auto_sync_settings?.enabled ?? false,
-        interval_minutes: auto_sync_settings?.interval_minutes ?? 15,
         ranges: (auto_sync_settings?.ranges?.length
             ? auto_sync_settings.ranges.map((r) => ({
                   label: r.label,
                   from: r.from?.slice(0, 5) ?? '07:00',
                   to: r.to?.slice(0, 5) ?? '10:00',
+                  interval_minutes: Math.min(60, Math.max(5, r.interval_minutes ?? DEFAULT_RANGE_INTERVAL)),
               }))
             : defaultAutoRanges()) as AutoSyncRange[],
     });
@@ -205,6 +221,27 @@ const EsslSyncReport = ({
     const [autoOpen, setAutoOpen] = useState(false);
     const [manualOpen, setManualOpen] = useState(true);
     const [openDays, setOpenDays] = useState<Record<string, boolean>>({});
+    const [istClock, setIstClock] = useState('');
+
+    React.useEffect(() => {
+        const tick = () => {
+            setIstClock(
+                new Date().toLocaleString('en-IN', {
+                    timeZone: auto_sync_settings?.timezone || 'Asia/Kolkata',
+                    weekday: 'short',
+                    day: '2-digit',
+                    month: 'short',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: true,
+                }),
+            );
+        };
+        tick();
+        const timer = setInterval(tick, 1000);
+        return () => clearInterval(timer);
+    }, [auto_sync_settings?.timezone]);
 
     const currentMonth = format(new Date(), 'yyyy-MM');
 
@@ -573,15 +610,11 @@ const EsslSyncReport = ({
             );
         }
         const rangeText = autoSettings.ranges
-            .map((r) => `${r.label || t('Range')}: ${r.from}–${r.to}`)
+            .map((r) => `${r.label || t('Range')}: ${r.from}–${r.to} (${r.interval_minutes}m)`)
             .join(' · ');
         return (
             <div className="space-y-0.5">
-                <p className="text-[10px] text-slate-600 leading-relaxed">
-                    <span className="font-medium text-emerald-700">{t('Every')} {autoSettings.interval_minutes}m</span>
-                    <span className="text-slate-300 mx-1">|</span>
-                    {rangeText}
-                </p>
+                <p className="text-[10px] text-slate-600 leading-relaxed">{rangeText}</p>
                 <p className="text-[10px] text-slate-400">
                     {t('Last auto')}: {lastAutoRunLabel}
                 </p>
@@ -615,18 +648,31 @@ const EsslSyncReport = ({
 
     const collapseAllDays = () => setOpenDays({});
 
-    const updateRange = (index: number, field: keyof AutoSyncRange, value: string) => {
+    const updateRange = (index: number, field: keyof AutoSyncRange, value: string | number) => {
         setAutoSettings((prev) => ({
             ...prev,
             ranges: prev.ranges.map((r, i) => (i === index ? { ...r, [field]: value } : r)),
         }));
     };
 
+    const updateRangeInterval = (index: number, raw: string) => {
+        const minutes = Math.min(60, Math.max(5, parseInt(raw, 10) || DEFAULT_RANGE_INTERVAL));
+        updateRange(index, 'interval_minutes', minutes);
+    };
+
     const addRange = () => {
         if (autoSettings.ranges.length >= MAX_AUTO_RANGES) return;
         setAutoSettings((prev) => ({
             ...prev,
-            ranges: [...prev.ranges, { label: `Range ${prev.ranges.length + 1}`, from: '14:00', to: '16:00' }],
+            ranges: [
+                ...prev.ranges,
+                {
+                    label: `Range ${prev.ranges.length + 1}`,
+                    from: '14:00',
+                    to: '16:00',
+                    interval_minutes: DEFAULT_RANGE_INTERVAL,
+                },
+            ],
         }));
     };
 
@@ -644,6 +690,10 @@ const EsslSyncReport = ({
                 toast.error(t('End time must be after start time for each range.'));
                 return;
             }
+            if (range.interval_minutes < 5 || range.interval_minutes > 60) {
+                toast.error(t('Each range interval must be between 5 and 60 minutes.'));
+                return;
+            }
         }
 
         setSavingAuto(true);
@@ -651,7 +701,6 @@ const EsslSyncReport = ({
             route('hr.essl-sync.auto-settings'),
             {
                 enabled: autoSettings.enabled,
-                interval_minutes: autoSettings.interval_minutes,
                 ranges: autoSettings.ranges,
             },
             {
@@ -663,14 +712,16 @@ const EsslSyncReport = ({
         );
     };
 
-    const pageActions = [
-        {
-            label: t('Export Excel'),
-            icon: <Download className="h-3.5 w-3.5" />,
-            variant: 'outline' as const,
-            onClick: handleExport,
-        },
-    ];
+    const pageActions = canExport
+        ? [
+              {
+                  label: t('Export Excel'),
+                  icon: <Download className="h-3.5 w-3.5" />,
+                  variant: 'outline' as const,
+                  onClick: handleExport,
+              },
+          ]
+        : [];
 
     const breadcrumbs = [
         { title: t('Dashboard'), href: route('dashboard') },
@@ -718,7 +769,14 @@ const EsslSyncReport = ({
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-2 mb-2 items-start">
+            {(canAutoSync || canManualSync) && (
+            <div
+                className={cn(
+                    'grid grid-cols-1 gap-2 mb-2 items-start',
+                    canAutoSync && canManualSync && 'xl:grid-cols-2',
+                )}
+            >
+            {canAutoSync && (
             <SyncAccordion
                 title={t('Automatic Sync')}
                 icon={<Settings2 className="h-3.5 w-3.5" />}
@@ -745,24 +803,7 @@ const EsslSyncReport = ({
                     </div>
                 }
             >
-                <div className="flex flex-wrap items-end gap-2 mb-2 pt-1">
-                    <div className="flex flex-col min-w-[80px]">
-                        <Label className="text-[10px] font-medium text-slate-500 mb-1">{t('Every (min)')}</Label>
-                        <Input
-                            type="number"
-                            min={5}
-                            max={60}
-                            className="h-8 text-xs"
-                            value={autoSettings.interval_minutes}
-                            disabled={!autoSettings.enabled}
-                            onChange={(e) =>
-                                setAutoSettings((prev) => ({
-                                    ...prev,
-                                    interval_minutes: Math.min(60, Math.max(5, parseInt(e.target.value, 10) || 15)),
-                                }))
-                            }
-                        />
-                    </div>
+                <div className="flex flex-wrap items-center gap-2 mb-2 pt-1">
                     <Button
                         type="button"
                         size="sm"
@@ -785,11 +826,19 @@ const EsslSyncReport = ({
                     </Button>
                 </div>
 
+                <div className="hidden sm:grid grid-cols-[minmax(72px,1fr)_80px_80px_64px_32px] gap-1 px-1.5 pb-1 text-[10px] font-medium text-slate-400">
+                    <span>{t('Label')}</span>
+                    <span>{t('From')}</span>
+                    <span>{t('To')}</span>
+                    <span>{t('Every (min)')}</span>
+                    <span />
+                </div>
+
                 <div className="space-y-1">
                     {autoSettings.ranges.map((range, index) => (
                         <div
                             key={index}
-                            className="grid grid-cols-[1fr_auto_auto_auto] sm:grid-cols-[minmax(80px,1fr)_88px_88px_32px] gap-1 items-center rounded border border-slate-100 bg-slate-50/50 px-1.5 py-1"
+                            className="grid grid-cols-[1fr_auto_auto_auto_auto] sm:grid-cols-[minmax(72px,1fr)_80px_80px_64px_32px] gap-1 items-center rounded border border-slate-100 bg-slate-50/50 px-1.5 py-1"
                         >
                             <Input
                                 type="text"
@@ -813,6 +862,15 @@ const EsslSyncReport = ({
                                 disabled={!autoSettings.enabled}
                                 onChange={(e) => updateRange(index, 'to', e.target.value)}
                             />
+                            <Input
+                                type="number"
+                                min={5}
+                                max={60}
+                                className="h-7 text-xs"
+                                value={range.interval_minutes}
+                                disabled={!autoSettings.enabled}
+                                onChange={(e) => updateRangeInterval(index, e.target.value)}
+                            />
                             <Button
                                 type="button"
                                 size="icon"
@@ -827,14 +885,37 @@ const EsslSyncReport = ({
                     ))}
                 </div>
 
-                <p className="text-[10px] text-slate-500 mt-1.5">
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px]">
+                    <span className="text-slate-500">
+                        {t('Schedule time')}:{' '}
+                        <strong className="text-slate-700">
+                            {auto_sync_settings?.timezone_label || 'IST (India)'}
+                        </strong>
+                    </span>
+                    <span className="text-slate-300">|</span>
+                    <span className="text-slate-500">
+                        {t('Now')}: <strong className="text-slate-700 tabular-nums">{istClock || '—'}</strong>
+                    </span>
+                    {auto_sync_settings?.active_range && autoSettings.enabled && (
+                        <>
+                            <span className="text-slate-300">|</span>
+                            <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-medium">
+                                {t('Active')}: {auto_sync_settings.active_range}
+                            </span>
+                        </>
+                    )}
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1">
                     {t('Last auto')}: {lastAutoRunLabel}
+                    {auto_sync_settings?.timezone_label ? ` (${auto_sync_settings.timezone_label})` : ''}
                 </p>
                 <p className="text-[10px] text-slate-400 mt-0.5">
-                    {t('All branches · runs in your set time ranges.')}
+                    {t('All branches · each range runs on its own interval (India time).')}
                 </p>
             </SyncAccordion>
+            )}
 
+            {canManualSync && (
             <SyncAccordion
                 title={t('Manual Sync')}
                 icon={<RefreshCw className="h-3.5 w-3.5" />}
@@ -930,7 +1011,9 @@ const EsslSyncReport = ({
                     </div>
                 )}
             </SyncAccordion>
+            )}
             </div>
+            )}
 
             {/* Filters — month wise */}
             <div className="bg-white rounded-lg border border-slate-200/80 mb-2 px-2.5 py-1.5">

@@ -1332,18 +1332,25 @@ Route::middleware(['auth', 'verified', 'setting'])->group(function () {
             Route::put('attendance-records/{attendanceRecord}', [\App\Http\Controllers\AttendanceRecordController::class, 'update'])->middleware('permission:edit-attendance-records')->name('hr.attendance-records.update');
             Route::delete('attendance-records/{attendanceRecord}', [\App\Http\Controllers\AttendanceRecordController::class, 'destroy'])->middleware('permission:delete-attendance-records')->name('hr.attendance-records.destroy');
 
-            // ESSL Sync Report Routes
-            Route::get('essl-sync', [\App\Http\Controllers\EsslLogController::class, 'index'])->name('hr.essl-sync.index');
-            Route::post('essl-sync/sync', [\App\Http\Controllers\EsslLogController::class, 'sync'])->name('hr.essl-sync.sync');
-            Route::post('essl-sync/sync-chunk', [\App\Http\Controllers\EsslLogController::class, 'syncChunk'])->name('hr.essl-sync.sync-chunk');
-            Route::post('essl-sync/auto-settings', [\App\Http\Controllers\EsslLogController::class, 'updateAutoSyncSettings'])->middleware('permission:sync-essl-log')->name('hr.essl-sync.auto-settings');
-            Route::get('essl-sync/export', [\App\Http\Controllers\EsslLogController::class, 'export'])->name('hr.essl-sync.export');
-            Route::redirect('essl-sync-report', '/essl-sync', 301);
-            Route::redirect('essl-sync-report/{path}', '/essl-sync/{path}', 301)->where('path', '.*');
-
             // Biometric Present Report Routes
             Route::get('biometric-present-report', [\App\Http\Controllers\BiometricPresentReportController::class, 'index'])->name('hr.biometric-present-report.index');
             Route::get('biometric-present-report/pdf', [\App\Http\Controllers\BiometricPresentReportController::class, 'generatePdf'])->name('hr.biometric-present-report.pdf');
+        });
+
+        // ESSL Device Sync — granular permissions (view / manual / auto / export)
+        $esslView = 'view-essl-sync|manage-essl-sync|sync-essl-log';
+        $esslManual = 'sync-essl-manual|manage-essl-sync|sync-essl-log';
+        $esslAuto = 'manage-essl-auto-sync|manage-essl-sync|sync-essl-log';
+        $esslExport = 'export-essl-sync|manage-essl-sync|sync-essl-log';
+
+        Route::middleware("permission:{$esslView}")->group(function () use ($esslManual, $esslAuto, $esslExport) {
+            Route::get('essl-sync', [\App\Http\Controllers\EsslLogController::class, 'index'])->name('hr.essl-sync.index');
+            Route::get('essl-sync/export', [\App\Http\Controllers\EsslLogController::class, 'export'])->middleware("permission:{$esslExport}")->name('hr.essl-sync.export');
+            Route::post('essl-sync/sync', [\App\Http\Controllers\EsslLogController::class, 'sync'])->middleware("permission:{$esslManual}")->name('hr.essl-sync.sync');
+            Route::post('essl-sync/sync-chunk', [\App\Http\Controllers\EsslLogController::class, 'syncChunk'])->middleware("permission:{$esslManual}")->name('hr.essl-sync.sync-chunk');
+            Route::post('essl-sync/auto-settings', [\App\Http\Controllers\EsslLogController::class, 'updateAutoSyncSettings'])->middleware("permission:{$esslAuto}")->name('hr.essl-sync.auto-settings');
+            Route::redirect('essl-sync-report', '/essl-sync', 301);
+            Route::redirect('essl-sync-report/{path}', '/essl-sync/{path}', 301)->where('path', '.*');
         });
 
         // Clock In/Out routes
