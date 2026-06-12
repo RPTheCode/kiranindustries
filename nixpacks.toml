@@ -15,6 +15,14 @@ cmds = [
 # Cleaned up compilation tools (autoconf, make, php-dev removed)
 aptPkgs = ["unixodbc", "unixodbc-dev", "unixodbc-common", "libodbcinst2", "curl", "gnupg2", "wget", "libgssapi-krb5-2", "libkrb5-3", "libssl-dev", "libcurl4"]
 
+[phases.install]
+dependsOn = ["setup"]
+cmds = [
+    "mkdir -p /var/log/nginx && mkdir -p /var/cache/nginx",
+    "composer install --no-dev --optimize-autoloader --ignore-platform-reqs",
+    "npm ci"
+]
+
 [phases.mssql]
 dependsOn = ["setup"]
 cmds = [
