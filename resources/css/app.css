@@ -667,3 +667,27 @@ html[dir='ltr'] [data-sonner-toaster] {
 [data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-close-button]:hover {
   opacity: 1;
 }
+
+@keyframes authBgDotPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+.auth-bg-dot-pulse {
+  animation: authBgDotPulse 5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-bg-dot-pulse {
+    animation: none;
+    opacity: 0.6;
+  }
+}

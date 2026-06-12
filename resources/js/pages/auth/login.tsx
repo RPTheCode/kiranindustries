@@ -89,7 +89,8 @@ export default function Login({ status, canResetPassword, demoBusinesses = [] }:
 
     const inputErrorClass = (hasError: boolean) =>
         cn(
-            'pl-10 w-full border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg transition-all duration-200',
+            'h-11 w-full rounded-lg border-slate-200 bg-slate-50 pl-10 transition-all duration-200 dark:border-slate-600 dark:bg-slate-700/60',
+            'focus-visible:border-transparent focus-visible:ring-2',
             hasError && 'border-red-500 focus-visible:ring-red-500/30 dark:border-red-500'
         );
 
@@ -146,8 +147,7 @@ export default function Login({ status, canResetPassword, demoBusinesses = [] }:
 
     return (
         <AuthLayout
-            title={t('Log in to your account')}
-            description={t('Enter your credentials to access your account')}
+            title={t('Welcome back')}
             status={status}
         >
             <form className="space-y-5" onSubmit={submit} noValidate>
@@ -183,7 +183,7 @@ export default function Login({ status, canResetPassword, demoBusinesses = [] }:
                                 }}
                                 placeholder="email@example.com"
                                 className={inputErrorClass(Boolean(emailFieldError || hasCredentialError))}
-                                style={{ '--tw-ring-color': primaryColor } as React.CSSProperties}
+                                style={{ '--tw-ring-color': `${primaryColor}4D` } as React.CSSProperties}
                                 aria-invalid={Boolean(emailFieldError || hasCredentialError)}
                             />
                         </div>
@@ -198,7 +198,7 @@ export default function Login({ status, canResetPassword, demoBusinesses = [] }:
                             {canResetPassword && (
                                 <TextLink
                                     href={route('password.request')}
-                                    className="text-xs font-medium transition-colors duration-200"
+                                    className="text-xs font-semibold transition-colors duration-200 hover:underline"
                                     style={{ color: primaryColor }}
                                     tabIndex={5}
                                 >
@@ -222,7 +222,7 @@ export default function Login({ status, canResetPassword, demoBusinesses = [] }:
                                 }}
                                 placeholder="••••••••"
                                 className={cn(inputErrorClass(Boolean(passwordFieldError || hasCredentialError)), 'pr-10')}
-                                style={{ '--tw-ring-color': primaryColor } as React.CSSProperties}
+                                style={{ '--tw-ring-color': `${primaryColor}4D` } as React.CSSProperties}
                                 aria-invalid={Boolean(passwordFieldError || hasCredentialError)}
                             />
                             <button
@@ -248,8 +248,8 @@ export default function Login({ status, canResetPassword, demoBusinesses = [] }:
                             className="border-gray-300 rounded"
                             style={{ '--tw-ring-color': primaryColor, color: primaryColor } as React.CSSProperties}
                         />
-                        <Label htmlFor="remember" className="ml-2 text-gray-600 dark:text-gray-400 cursor-pointer">
-                            {t('Remember me')}
+                        <Label htmlFor="remember" className="ml-2 cursor-pointer text-sm text-gray-600 dark:text-gray-400">
+                            {t('Keep me signed in on this device')}
                         </Label>
                     </div>
                 </div>
@@ -270,7 +270,7 @@ export default function Login({ status, canResetPassword, demoBusinesses = [] }:
                 <InputError message={errors.recaptcha_token} className="mt-1" />
 
                 <AuthButton tabIndex={4} processing={processing}>
-                    {t('Log in')}
+                    {t('Sign in')}
                 </AuthButton>
 
                 {isDemo && (

@@ -29,41 +29,36 @@ export default function AppSidebarLayout({
                     <div className="flex-1 p-3 sm:p-4">
                         {children}
                     </div>
-                    <footer className="z-10 mt-auto flex flex-col gap-2 border-t bg-white/80 px-3 py-2.5 text-[10px] text-gray-400 backdrop-blur-md dark:bg-gray-950/80 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-                        <div className="shrink-0 font-medium">{footerText}</div>
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 sm:gap-6">
-                            <div className="flex items-center gap-1.5">
-                                <span className="text-gray-400">Develop by</span>
-                                <img src="/sridix.png" alt="Sridix" className="h-4 w-4 object-contain" />
-                                <a 
-                                    href="https://www.sridix.com/" 
-                                    target="_blank" 
-                                    rel="noopener noreferrer" 
-                                    className="font-black text-[#1a365d] dark:text-blue-400 uppercase tracking-tight hover:text-blue-600 transition-colors cursor-pointer"
-                                >
-                                    Sridix Technology LLP
-                                </a>
-                            </div>
-                            <div className="h-3 w-px bg-gray-200 dark:bg-gray-800" />
-                            <div className="flex items-center gap-2">
-                                <span className="font-bold text-gray-400 uppercase text-[9px] tracking-wider">For Support:</span> 
-                                <a 
-                                    href="tel:8511474902" 
-                                    className="text-[#1a365d] dark:text-blue-400 font-black text-[11px] hover:text-blue-600 transition-colors cursor-pointer"
-                                >
-                                    85114 74902
-                                </a>
-                            </div>
-                            <div className="h-3 w-px bg-gray-200 dark:bg-gray-800" />
-                            <div className="flex items-center gap-2">
-                                <span className="font-bold text-gray-400 uppercase text-[9px] tracking-wider">For Sales:</span> 
-                                <a 
-                                    href="tel:9054906119" 
-                                    className="text-[#1a365d] dark:text-blue-400 font-black text-[11px] hover:text-blue-600 transition-colors cursor-pointer"
-                                >
-                                    90549 06119
-                                </a>
-                            </div>
+                    <footer className="z-10 mt-auto border-t bg-white/80 px-4 py-2.5 text-[11px] text-slate-500 backdrop-blur-md dark:bg-gray-950/80 dark:text-slate-400 sm:flex sm:items-center sm:justify-between sm:px-6">
+                        <p className="truncate text-center font-medium text-slate-700 dark:text-slate-300 sm:text-left">
+                            {footerText}
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 sm:mt-0 sm:justify-end">
+                            <a
+                                href="https://www.sridix.com/"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 font-medium text-slate-600 transition-colors hover:text-blue-600 dark:text-slate-300"
+                            >
+                                <img src="/sridix.png" alt="" className="h-3 w-3 object-contain" aria-hidden />
+                                Sridix
+                            </a>
+                            <span className="text-slate-300 dark:text-slate-600" aria-hidden>·</span>
+                            <a
+                                href="tel:8511474902"
+                                className="font-medium text-slate-600 transition-colors hover:text-blue-600 dark:text-slate-300"
+                                title="Support: 85114 74902"
+                            >
+                                Support
+                            </a>
+                            <span className="text-slate-300 dark:text-slate-600" aria-hidden>·</span>
+                            <a
+                                href="tel:9054906119"
+                                className="font-medium text-slate-600 transition-colors hover:text-blue-600 dark:text-slate-300"
+                                title="Sales: 90549 06119"
+                            >
+                                Sales
+                            </a>
                         </div>
                     </footer>
                 </div>

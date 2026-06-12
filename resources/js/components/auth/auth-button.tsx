@@ -1,5 +1,7 @@
 import { LoaderCircle } from 'lucide-react';
 import { ButtonHTMLAttributes } from 'react';
+import { useTranslation } from 'react-i18next';
+
 import { useBrand } from '@/contexts/BrandContext';
 import { THEME_COLORS } from '@/hooks/use-appearance';
 
@@ -9,27 +11,30 @@ interface AuthButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
     children: React.ReactNode;
 }
 
-export default function AuthButton({ 
-    processing = false, 
-    tabIndex, 
-    children, 
-    className = '', 
-    disabled, 
-    ...props 
+export default function AuthButton({
+    processing = false,
+    tabIndex,
+    children,
+    className = '',
+    disabled,
+    ...props
 }: AuthButtonProps) {
+    const { t } = useTranslation();
     const { themeColor, customColor } = useBrand();
     const primaryColor = themeColor === 'custom' ? customColor : THEME_COLORS[themeColor as keyof typeof THEME_COLORS];
+
     return (
-        <button 
+        <button
             {...props}
-            type={props.type || 'submit'} 
-            className={`w-full text-white font-medium py-2.5 rounded-lg shadow-md hover:shadow-lg transition-all duration-200 transform hover:-translate-y-0.5 ${className}`}
-            tabIndex={tabIndex} 
+            type={props.type || 'submit'}
+            className={`inline-flex h-11 w-full items-center justify-center rounded-lg text-sm font-semibold text-white shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70 ${className}`}
+            tabIndex={tabIndex}
             disabled={processing || disabled}
+            aria-busy={processing}
             style={{ backgroundColor: primaryColor }}
         >
-            {processing && <LoaderCircle className="h-4 w-4 animate-spin mr-2 inline" />}
-            {children}
+            {processing && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" aria-hidden />}
+            {processing ? t('Signing in...') : children}
         </button>
     );
 }
